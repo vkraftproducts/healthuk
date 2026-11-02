@@ -1,0 +1,310 @@
+// Single source of truth for system permissions and roles (SECURITY_COMPLIANCE §2).
+// Synced into the database by `syncSystemRoles()` after migrations (idempotent).
+// Permission keys are `module.resource.action` (lowercase, underscores).
+
+export const PERMISSIONS = {
+  // dashboard / reports
+  'dashboard.view': 'View the dashboard',
+  'reports.view': 'View reports',
+  'reports.export': 'Export reports (audited)',
+  // staff
+  'staff.profile.view_basic': 'View basic staff profile and clearance result',
+  'staff.profile.view_clearance': 'View staff clearance (approved roles and restrictions only)',
+  'staff.profile.manage': 'Create and edit staff records',
+  'staff.sensitive.view': 'View DBS, OH and next-of-kin data (audited)',
+  'staff.approve_role': 'Approve a staff member for a role',
+  'staff.restrict': 'Apply or lift staff restrictions',
+  'staff.lifecycle.transition': 'Move staff through the lifecycle (incl. leaver)',
+  'staff.self.view': 'View own staff profile',
+  'staff.self.update': 'Request corrections and upload own certificates',
+  // fleet
+  'fleet.vehicle.view': 'View vehicles and assets',
+  'fleet.vehicle.manage': 'Create and edit vehicles, equipment and maintenance',
+  'fleet.return_to_service': 'Release a vehicle or asset after a defect',
+  'fleet.defect.create': 'Report a defect',
+  'fleet.defect.manage': 'Classify and manage defects',
+  'fleet.vdi.submit': 'Submit a vehicle daily inspection and cleaning record',
+  'fleet.vdi.view': 'View vehicle inspections',
+  'fleet.expense.submit': 'Submit fuel and expenses',
+  'fleet.expense.approve': 'Approve fuel and expenses',
+  // compliance & governance
+  'compliance.requirement.view': 'View requirements and their status',
+  'compliance.requirement.manage':
+    'Create requirement instances, set owners, acknowledge and snooze alerts',
+  'compliance.evidence.upload': 'Upload evidence',
+  'compliance.evidence.verify': 'Verify or reject evidence',
+  'compliance.audit.view': 'View audits, findings and actions',
+  'compliance.audit.run': 'Build and run audits, record samples',
+  'compliance.action.manage': 'Create and update audit actions',
+  'compliance.action.verify': 'Verify action closure',
+  'compliance.policy.manage': 'Manage policies and SOPs',
+  'compliance.policy.acknowledge': 'Acknowledge policies',
+  'compliance.risk.manage': 'Manage the risk register',
+  'compliance.registration.manage': 'Manage the registration record and correspondence',
+  'compliance.applicability.decide': 'Decide requirement applicability (N/A)',
+  'compliance.due_date.change': 'Change a requirement due date (with reason)',
+  'export.evidence_pack': 'Generate inspection evidence packs',
+  // events
+  'events.event.view': 'View incidents, complaints and events',
+  'events.event.manage': 'Create and manage events and reporting obligations',
+  'events.candour.decide': 'Record duty of candour decisions',
+  'events.safeguarding.view': 'View safeguarding cases',
+  // premises
+  'premises.item.view': 'View premises safety items',
+  'premises.item.manage': 'Manage premises safety items',
+  // jobs & dispatch
+  'jobs.booking.manage': 'Create and edit bookings',
+  'jobs.job.view': 'View jobs and the planner',
+  'jobs.patient.view': 'View patient details on jobs (audited)',
+  'jobs.allocate': 'Validate, allocate and offer jobs',
+  'allocation.exception.approve': 'Approve policy allocation exceptions',
+  'crew.today.view': 'View own shift, gates and assigned jobs',
+  'crew.job.progress': 'Update progress of assigned jobs',
+  // administration
+  'admin.org.manage': 'Manage organisation, locations and services',
+  'admin.users.manage': 'Invite, change and revoke users',
+  'admin.roles.manage': 'Manage custom roles',
+  'admin.settings.manage': 'Manage settings, thresholds and notification rules',
+  'admin.requirements.publish': 'Publish requirement library versions',
+  'admin.audit.view': 'View the audit log',
+  'admin.audit.verify': 'Verify the audit hash chain',
+  'admin.support.approve': 'Approve time-limited support access',
+  'admin.support.view': 'View support access grants',
+  'admin.import.manage': 'Import data (CSV and compliance workbook)',
+  'admin.export.full': 'Export all organisation data',
+  'privacy.manage':
+    'Manage retention rules, legal holds, subject requests, disclosures and breaches',
+  'support.access.read': 'Break-glass read access for platform support',
+} as const;
+
+export type PermissionKey = keyof typeof PERMISSIONS;
+export const ALL_PERMISSION_KEYS = Object.keys(PERMISSIONS) as PermissionKey[];
+
+const all = ALL_PERMISSION_KEYS;
+const without = (keys: readonly PermissionKey[], drop: readonly PermissionKey[]) =>
+  keys.filter((k) => !drop.includes(k));
+
+/** Permissions that must never be granted to roles derived from DISPATCHER or CREW (matrix note). */
+/** Own-record / self-service permissions: granting them cannot widen anyone's access to other people's data, so the no-escalation rule does not apply. */
+export const SELF_SERVICE_PERMISSIONS: readonly string[] = [
+  'crew.today.view',
+  'crew.job.progress',
+  'staff.self.view',
+  'staff.self.update',
+  'fleet.vdi.submit',
+  'fleet.defect.create',
+  'fleet.expense.submit',
+  'compliance.policy.acknowledge',
+  'compliance.evidence.upload',
+];
+
+export const RESTRICTED_FOR_DISPATCH_AND_CREW: readonly PermissionKey[] = [
+  'staff.sensitive.view',
+  'staff.approve_role',
+  'staff.profile.manage',
+  'staff.lifecycle.transition',
+  'events.safeguarding.view',
+  'admin.users.manage',
+  'admin.roles.manage',
+  'admin.export.full',
+  'privacy.manage',
+  'allocation.exception.approve',
+  'admin.audit.view',
+  'admin.audit.verify',
+];
+
+export interface SystemRole {
+  key: string;
+  name: string;
+  permissions: readonly PermissionKey[];
+}
+
+export const SYSTEM_ROLES: readonly SystemRole[] = [
+  {
+    key: 'REGISTERED_MANAGER',
+    name: 'Registered manager',
+    permissions: without(all, [
+      'support.access.read',
+      'staff.self.view',
+      'staff.self.update',
+      'crew.today.view',
+      'crew.job.progress',
+    ]),
+  },
+  {
+    key: 'DIRECTOR',
+    name: 'Director',
+    permissions: without(all, [
+      'support.access.read',
+      'staff.self.view',
+      'staff.self.update',
+      'crew.today.view',
+      'crew.job.progress',
+    ]),
+  },
+  {
+    key: 'ORG_ADMIN',
+    name: 'Organisation administrator',
+    permissions: [
+      'dashboard.view',
+      'admin.org.manage',
+      'admin.users.manage',
+      'admin.roles.manage',
+      'admin.settings.manage',
+      'admin.audit.view',
+      'admin.support.approve',
+      'admin.support.view',
+      'admin.import.manage',
+      'reports.view',
+    ],
+  },
+  {
+    key: 'HR_LEAD',
+    name: 'HR and training lead',
+    permissions: [
+      'dashboard.view',
+      'reports.view',
+      'reports.export',
+      'staff.profile.view_basic',
+      'staff.profile.manage',
+      'staff.sensitive.view',
+      'staff.approve_role',
+      'staff.restrict',
+      'staff.lifecycle.transition',
+      'compliance.requirement.view',
+      'compliance.requirement.manage',
+      'compliance.evidence.upload',
+      'compliance.evidence.verify',
+      'compliance.policy.acknowledge',
+      'staff.self.view',
+      'staff.self.update',
+      'events.event.view',
+    ],
+  },
+  {
+    key: 'DISPATCHER',
+    name: 'Dispatcher / control',
+    permissions: [
+      'dashboard.view',
+      'staff.profile.view_clearance',
+      'fleet.vehicle.view',
+      'jobs.booking.manage',
+      'jobs.job.view',
+      'jobs.patient.view',
+      'jobs.allocate',
+      'compliance.requirement.view',
+      'compliance.policy.acknowledge',
+      'staff.self.view',
+      'reports.view',
+    ],
+  },
+  {
+    key: 'FLEET_LEAD',
+    name: 'Fleet lead',
+    permissions: [
+      'dashboard.view',
+      'reports.view',
+      'fleet.vehicle.view',
+      'fleet.vehicle.manage',
+      'fleet.return_to_service',
+      'fleet.defect.create',
+      'fleet.defect.manage',
+      'fleet.vdi.view',
+      'fleet.expense.approve',
+      'compliance.requirement.view',
+      'compliance.requirement.manage',
+      'compliance.evidence.upload',
+      'compliance.evidence.verify',
+      'compliance.policy.acknowledge',
+      'staff.self.view',
+      'jobs.job.view',
+    ],
+  },
+  {
+    key: 'PREMISES_LEAD',
+    name: 'Premises lead',
+    permissions: [
+      'dashboard.view',
+      'reports.view',
+      'premises.item.view',
+      'premises.item.manage',
+      'compliance.requirement.view',
+      'compliance.requirement.manage',
+      'compliance.evidence.upload',
+      'compliance.policy.acknowledge',
+      'staff.self.view',
+    ],
+  },
+  {
+    key: 'GOVERNANCE_LEAD',
+    name: 'IPC / clinical / governance lead',
+    permissions: [
+      'dashboard.view',
+      'reports.view',
+      'reports.export',
+      'staff.profile.view_basic',
+      'compliance.requirement.view',
+      'compliance.requirement.manage',
+      'compliance.evidence.upload',
+      'compliance.evidence.verify',
+      'compliance.audit.view',
+      'compliance.audit.run',
+      'compliance.action.manage',
+      'compliance.action.verify',
+      'compliance.policy.manage',
+      'compliance.policy.acknowledge',
+      'compliance.risk.manage',
+      'compliance.registration.manage',
+      'compliance.applicability.decide',
+      'export.evidence_pack',
+      'events.event.view',
+      'events.event.manage',
+      'events.candour.decide',
+      'events.safeguarding.view',
+      'admin.requirements.publish',
+      'premises.item.view',
+      'fleet.vehicle.view',
+      'fleet.vdi.view',
+      'staff.self.view',
+      'admin.audit.view',
+      'privacy.manage',
+    ],
+  },
+  {
+    key: 'CREW',
+    name: 'Crew member',
+    permissions: [
+      'crew.today.view',
+      'crew.job.progress',
+      'staff.self.view',
+      'staff.self.update',
+      'fleet.vdi.submit',
+      'fleet.defect.create',
+      'fleet.expense.submit',
+      'compliance.policy.acknowledge',
+      'compliance.evidence.upload',
+    ],
+  },
+  {
+    key: 'AUDITOR',
+    name: 'Auditor / external reviewer',
+    permissions: [
+      'dashboard.view',
+      'compliance.requirement.view',
+      'compliance.audit.view',
+      'events.event.view',
+      'fleet.vehicle.view',
+      'fleet.vdi.view',
+      'premises.item.view',
+      'staff.profile.view_basic',
+      'reports.view',
+    ],
+  },
+  {
+    key: 'PLATFORM_SUPPORT',
+    name: 'Platform support (break-glass)',
+    permissions: ['support.access.read', 'admin.audit.view'],
+  },
+];
+
+export const SYSTEM_ROLE_KEYS = SYSTEM_ROLES.map((r) => r.key);

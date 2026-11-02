@@ -1,0 +1,21 @@
+name: Deploy staging
+on:
+  workflow_dispatch:
+permissions:
+  id-token: write   # OIDC federation to Azure: no stored secrets
+  contents: read
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: What-if then deploy (UK South)
+        run: |
+          az deployment group what-if -g ${{ vars.AZURE_RG }} -f infra/main.bicep -p infra/params/staging.bicepparam
+          az deployment group create  -g ${{ vars.AZURE_RG }} -f infra/main.bicep -p infra/params/staging.bicepparam

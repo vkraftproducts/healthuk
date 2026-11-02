@@ -1,0 +1,24 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+onlyBuiltDependencies:
+  - esbuild
+  - '@prisma/engines'
+  - prisma
+# The web app (React 18) and the crew app (React 19) use different React type versions. TanStack
+# Router's type files import "react" without declaring @types/react, so they would pick up
+# whichever version pnpm happened to hoist (React 19 on some machines → "'Link' cannot be used
+# as a JSX component"). Declaring the peer makes pnpm link the importer's own @types/react.
+packageExtensions:
+  '@tanstack/react-router':
+    peerDependencies:
+      '@types/react': '*'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+  '@tanstack/react-store':
+    peerDependencies:
+      '@types/react': '*'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true

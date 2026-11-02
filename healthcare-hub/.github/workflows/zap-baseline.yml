@@ -1,0 +1,25 @@
+name: ZAP baseline (staging)
+# Passive OWASP ZAP baseline scan of the deployed staging web app and API (SECURITY_COMPLIANCE §7).
+# Weekly and on demand; findings go to the pen-test remediation log (docs/compliance).
+on:
+  schedule: [{ cron: '17 4 * * 1' }]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  zap:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [web, api]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Baseline scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ matrix.target == 'web' && vars.STAGING_WEB_URL || format('{0}/api/v1/openapi.json', vars.STAGING_API_URL) }}
+          rules_file_name: .zap/rules.tsv
+          cmd_options: '-a -j'
+          issue_title: 'ZAP baseline findings (${{ matrix.target }})'
+          fail_action: true

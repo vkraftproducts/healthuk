@@ -1,0 +1,29 @@
+appId: uk.example.healthcarehub.crew
+name: Shift gate blocks start until VDI and cleaning are done [JOB-03]
+---
+- runFlow: _sign-in.yaml
+- assertVisible: 'Driving clearance'
+- assertVisible: '✕ Shift start blocked until complete.'
+- assertVisible:
+    text: 'Start shift'
+    enabled: false
+- tapOn: 'Start vehicle check'
+- runFlow: _vdi-pass-all.yaml
+- scrollUntilVisible:
+    element: 'Odometer (miles)'
+- tapOn: 'Odometer (miles)'
+- inputText: '45210'
+- hideKeyboard
+- scrollUntilVisible:
+    element: 'Submit vehicle check'
+- tapOn: 'Submit vehicle check'
+- tapOn: 'Back to my shift'
+- tapOn: 'Complete cleaning confirmation'
+- tapOn: 'Method: Detergent wipe'
+- tapOn: 'I confirm the vehicle has been cleaned to the required standard'
+- tapOn: 'Confirm cleaning'
+- tapOn: 'Back to my shift'
+- scrollUntilVisible:
+    element: 'Start shift'
+- tapOn: 'Start shift'
+- assertVisible: '✓ Shift started.'

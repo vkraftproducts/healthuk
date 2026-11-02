@@ -1,0 +1,41 @@
+{
+  "name": "healthcare-hub",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "docker compose up -d && turbo run dev dev:oidc --parallel --env-mode=loose --filter=!@hub/mobile",
+    "dev:mobile": "pnpm --filter @hub/mobile dev",
+    "db:migrate": "pnpm --filter @hub/db migrate",
+    "db:seed": "pnpm --filter @hub/db seed",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:e2e": "echo 'Web Playwright E2E is part of M8; crew app E2E: maestro test apps/mobile/.maestro'",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write .",
+    "prepare": "husky || true",
+    "dev:oidc": "pnpm --filter @hub/api dev:oidc",
+    "db:bootstrap": "pnpm --filter @hub/db bootstrap",
+    "demo:crew": "pnpm --filter @hub/api demo:crew"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
+    "@eslint/js": "10.0.1",
+    "axe-core": "4.14.0",
+    "eslint": "10.13.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.6.0",
+    "prettier": "3.9.10",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mjs,cjs,json,md,yml,yaml}": "prettier --check"
+  }
+}

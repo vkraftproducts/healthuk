@@ -1,0 +1,19 @@
+appId: uk.example.healthcarehub.crew
+name: Critical defect during a journey - contact control now, never abandon the patient [APP-02]
+---
+- runFlow: _sign-in.yaml
+- tapOn: 'Jobs'
+- tapOn: 'Open job'
+- assertVisible: 'Read the current approved plan before moving the patient.'
+- tapOn: 'Acknowledge job'
+- tapOn: 'Set off – en route'
+- tapOn: 'Report vehicle defect'
+- tapOn: 'Severity: Critical'
+- assertVisible: '.*Contact control now. Stay with your patient.*'
+- assertNotVisible: '.*(leave|abandon).*'
+- assertVisible: 'Call control now'
+- tapOn: 'What is wrong'
+- inputText: 'Brake warning light on'
+- hideKeyboard
+- tapOn: 'Send defect report'
+- assertVisible: '.*Defect recorded.*'

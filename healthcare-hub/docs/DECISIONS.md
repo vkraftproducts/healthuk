@@ -1,0 +1,158 @@
+# Decisions, assumptions and open questions
+
+## ADR index (`docs/adr/`)
+
+| ADR  | Decision                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------ |
+| 0001 | Modular monolith on Azure Container Apps (cost, simplicity)                                |
+| 0002 | Postgres RLS + app-level scoping for tenant isolation                                      |
+| 0003 | Entra External ID for identity; authorisation in-app                                       |
+| 0004 | pg-boss instead of Service Bus/Functions for background jobs                               |
+| 0005 | Expo React Native for the crew app (not PWA) — offline + device storage + push reliability |
+
+## Baseline assumptions (from brief; confirm in discovery)
+
+- A1 England only (CQC). Other UK nations need separate regulator packs later.
+- A2 Pilot: 100 staff, 50 vehicles, 10 locations, 500 jobs/day.
+- A3 Crew use company-managed devices (affects MDM and distribution). _Confirm._
+- A4 No integration with NHS systems or clinical decision support in initial scope.
+- A5 FleetX/payroll/telematics: CSV import/export first; APIs only after licences confirmed.
+- A6 Default warning windows 90/60/30/14/7 days are product defaults.
+- A7 Retention periods are placeholders until the organisation approves its schedule.
+- A8 Requirement library content (ambulance pack) ships **inactive** until governance approval.
+- A9 Single region (UK South) with UK West backups meets NFR-01 for pilot; zone-redundant HA later.
+
+## Open questions for the product owner
+
+1. Pilot organisations, locations and registered activities?
+2. Company devices or BYOD? MDM in place (Intune)?
+3. Who are deputies for escalation per role?
+4. Approved retention schedule per record category?
+5. Integration priority order (FleetX, payroll, training provider, telematics, calendar)?
+6. Are dental / care-home packs in year 1?
+7. SMS notifications needed (cost) or email + push enough?
+8. Custom domain and branding?
+
+## Agent assumptions (append as you go: date, context, decision, reason)
+
+### 2026-10-30 · M0 · Build environment and library choices
+
+- **Prisma 7 (not 5) with the `pg` driver adapter.** Prisma 5 needs engine binaries from
+  `binaries.prisma.sh`, which was blocked in the build sandbox. Prisma 7 is engine-free for the
+  client. `prisma migrate` is also not used: schema changes are **forward-only SQL files** in
+  `packages/db/sql/migrations` (RLS, triggers and exclusion constraints need raw SQL anyway),
+  applied by a checksummed runner. `prisma/schema.prisma` is the typed-client mirror and must be
+  updated by hand when a migration changes a table. Supersedes "Prisma 5" in ARCHITECTURE.md.
+- **Newer majors than the architecture doc names** (resolved at install, then pinned): NestJS 12,
+  Zod 4, Vitest 5, Vite, Tailwind 3.4 (kept on 3), TypeScript 5.9 (TypeScript 7 deliberately not used
+  until the ecosystem catches up). OpenAPI is generated from Zod 4's native JSON Schema output instead
+  of `nestjs-zod`.
+- **No `emitDecoratorMetadata`.** Nest providers use explicit `@Inject(...)` so the same code works
+  under tsc, tsx and Vitest.
+- **Tests use a Postgres 16 service/instance, not Testcontainers**, because Docker was unavailable in
+  the build sandbox. CI provides a `postgres:16` service; local runs use `docker compose up postgres`
+  or `TEST_SUPERUSER_URL`. Testcontainers can be added later without changing the tests.
+- **`app_user` is not a tenant table** (a person can belong to several organisations). It uses ENABLE
+  but not FORCE RLS so the SECURITY DEFINER `auth_resolve_user()` can map a verified IdP subject to a
+  user before any organisation context exists. Everything else with `organisation_id` is FORCE RLS
+  (asserted by a test).
+- **Audit chain is computed in the database** (BEFORE INSERT trigger, per-organisation advisory lock),
+  so the application cannot forge or skip `seq`/`hash`. `audit_verify_chain()` recomputes it. A superuser
+  who disables triggers can still alter rows, but the change is detected (tested); the daily WORM anchor
+  (M2 worker) closes the remaining gap.
+- **MFA** is read from the token `amr` claim containing `mfa`. Confirm Entra External ID emits this when
+  the tenant is created, and record the tenant data location (SECURITY_COMPLIANCE §8).
+- **Web tokens are held in memory only.** The BFF/httpOnly-cookie flow described in
+  SECURITY_COMPLIANCE §1 is wired with Entra; until then development uses the mock OIDC server.
+- **Permissions beyond three** (`dashboard.view`, `admin.audit.view`, `admin.audit.verify`) and the
+  role matrix are seeded in M1.
+
+- **M1 – self-service permissions exempt from no-escalation.** Inviting someone as `CREW` must work for managers who do not hold crew-only permissions (`crew.today.view`, `staff.self.*`, `fleet.vdi.submit`, …). These grant access only to the holder's own records, so `SELF_SERVICE_PERMISSIONS` (contracts/rbac.ts) is excluded from the "you can only grant what you hold" check.
+- **M1 – invitation claim requires `email_verified=true`** from the IdP; a different subject cannot take over an already-bound invitation.
+
+- **M2 – T10 ordering.** When a renewal is awaiting review and the previous evidence has lapsed (or never existed), the result is GREY `UNVERIFIED` with the blocking effect kept, checked _before_ RED/MISSING. Upload never turns anything green and never unblocks a subject.
+- **M2 – expiry dates are evidence-derived and immutable.** `due-date-change` accepts `DUE` and `REVIEW` only, with a named approver holding `compliance.requirement.manage`. A request to move an `EXPIRY` returns 422 `OVERRIDE_NOT_PERMITTED` (non-negotiable 4); the fix is new verified evidence.
+- **M2 – four-eyes on template publish.** The author of a draft version cannot publish it. Publishing supersedes the previous effective version and moves existing instances to the new version immediately.
+- **M2 – library templates** (`organisation_id IS NULL`) are read-only; `adopt` copies one into the organisation as a DRAFT (once per organisation) which then goes through four-eyes publish.
+- **M2 – sensitive evidence** (`CRIMINAL_OFFENCE`, `HEALTH`, `SAFEGUARDING`) is invisible (listed as absent, 404 on download) to users without `staff.sensitive.view`.
+- **M2 – evidence files**: signed HMAC tokens (15 min) in the URL path, a 50 MB limit only on the upload route, bytes go to quarantine and are deleted if the scan fails; downloads only when CLEAN, every download audited.
+- **M2 – worker organisation enumeration.** `organisation` is FORCE RLS, so `worker_list_organisations()` (SECURITY DEFINER, ids only) is paired with an `owner_enumerate` SELECT policy that matches only when `current_user` is the table owner, a condition `hub_app` can never meet directly (tested).
+- **M2 – pg-boss uses the migrator connection** (`QUEUE_DATABASE_URL`) because it creates and owns its `pgboss` schema; all job bodies use the RLS-bound app role through `withTenant` with the system user. The 15-minute reconcile is a full recompute (cheap at expected volumes), so a separate 02:00 "full" run is unnecessary; the nightly slot runs the snapshot and chain verification.
+
+- **M3 – one immutable `staff_record` table instead of a table per record type.** DATA_MODEL §4 lists `dbs_record`, `right_to_work_check`, `reference`, `driving_licence`, … separately. They share one shape (staff, dates, attribution, correction chain), so they are stored as `staff_record(kind, data jsonb)` with the payload validated per kind by zod (`RecordPayloads` in contracts; the web forms are generated from the same schemas). Corrections insert a new row with `supersedes_id`; rows are never updated or deleted. `sensitive` is a generated column (`DBS`, `OH_DETAIL`, `PERSONAL`) and a RESTRICTIVE RLS policy hides those rows unless the transaction carries `staff.sensitive.view`.
+- **M3 – DBS certificate numbers are encrypted in the application** (AES-256-GCM, `FIELD_ENCRYPTION_KEY`; production refuses the development key). The DBS validity window has a start (issue date) and **no end**: the policy review date is data, not an expiry (HR-02).
+- **M3 – what counts for a person.** A requirement instance counts when the person's current roles require its template (`role_requirement`) or when it was added by hand (template not mapped to any role). Items left over from a revoked role stay on record but are labelled "Not required for current roles" and do not block.
+- **M3 – readiness groups.** Requirement checks are grouped (CLEARANCE / LICENCE / COMPETENCE) from the template code until templates carry an explicit group (M5 library work).
+- **M3 – `NO_DRIVING` restriction** is a hard, non-overridable block for the DRIVER role; other restrictions mark the person RESTRICTED (policy level).
+- **M3 – nobody approves, restricts, transitions or decides corrections on their own staff record** (422 `SELF_APPROVAL`).
+- **M3 – leavers**: moving a person to LEAVER ends all their memberships at once, so their next request returns 401 `USER_INACTIVE`.
+- **M3 – crew evidence scope**: a user without `staff.profile.manage` / `compliance.requirement.manage` can attach evidence only to STAFF items for their own staff record (404 otherwise).
+- **M3 – lifecycle log enforced by the database**: a trigger refuses a `lifecycle_state` change unless a `staff_lifecycle_event` row for that move was written in the same transaction.
+- **Build – `@hub/db` lint/typecheck/test wait for its own build** (package `turbo.json`), because parallel `prisma generate` runs raced on the generated client.
+
+- **M4 – return to service is by a different person from the one who signed off the repair** (422 `SELF_APPROVAL`). FLT-06 asks for a separate authorised step; separating the two people is the safer reading.
+- **M4 – VDI failures create defects automatically**: a failed _critical_ item is a CRITICAL stop-use defect (vehicle BLOCKED, control alert); a failed non-critical item is a MINOR defect that needs classifying with a repair deadline. Amending an item back to PASS never releases a defect.
+- **M4 – offline submissions** (VDI, cleaning) are accepted up to 7 days after capture and never with a capture time in the future (5-minute clock slack). A reused clientSubmissionId by a different person or for a different vehicle is a 409.
+- **M4 – odometer plausibility**: a reading lower than the last good one, or a jump above 2,000 + 1,000 miles per elapsed day, is recorded with a flag and ignored for maintenance.
+- **M4 – maintenance is judged at the end of the job window** so a vehicle that will pass its service mileage or date during a job is not offered for it.
+- **M4 – fuel/expense approvals** must be by someone other than the submitter; duplicates (same vehicle, date, category and amount) are flagged, not refused.
+- **M4 – VDI checklists are versioned**: publishing a new version retires the previous one; a submission against a retired version is refused so crews reload the current list.
+
+- **M5 – evidence pack PDF/ZIP use pdf-lib and fflate** (pure JavaScript, long-established releases) instead of a Playwright-rendered PDF, so the worker container needs no browser. Supersedes ARCHITECTURE "Playwright HTML→PDF; archiver".
+- **M5 – exports are built with the requester's permissions captured on the job** (sensitive staff evidence and safeguarding material excluded unless they held the permission), are visible only to the requester, and are fetched through a 5-minute signed link whose token kind (`EXPORT`) cannot be replayed against evidence downloads.
+- **M5 – dashboard tiles are computed from the drill-down rows** (one function), so a tile can never disagree with its list (UAT-08). Jobs figures are `null` ("not connected yet") until M6, never zero.
+- **M5 – audit outcome** is driven by outstanding actions, not percentages: failing findings with no actions = RED "Action required"; open HIGH/CRITICAL actions = RED "Action outstanding"; other open actions = AMBER; all verified = GREEN. A re-audit action is closed only by completing (closing) the re-audit run.
+- **M5 – action verification** must be by someone other than the action owner and the person who submitted the evidence.
+- **M5 – event workflow** moves one step at a time (or one back to reopen); leaving ASSESS needs a decision on every reporting obligation and, when the system flags possible duty of candour (moderate harm or worse on an incident/accident/safeguarding event), a recorded candour decision. Learning cannot be marked verified while event actions are open.
+- **M5 – complaint targets** default to 3 days to acknowledge and 28 days to respond (calendar days), configurable in organisation settings (`complaintAcknowledgeDays`, `complaintRespondDays`); the 28-day figure comes from the source notes and needs management confirmation.
+- **M5 – library content** (Ambulance pack v1) ships as global read-only rows inserted by migration 0008, which lifts FORCE RLS only for its own inserts. Intervals marked "proposed" need confirmation when an organisation adopts the item.
+- **M5 – risk matrix bands** (5x5): 1–4 low, 5–9 medium, 10–19 high, 20–25 extreme (organisation default).
+
+- **M6 – time ranges are generated columns.** Prisma cannot write `tstzrange`, so `crew_assignment`, `resource_booking` and `job_allocation` store `starts_at`/`ends_at` and a generated `period` column carries the GiST exclusion constraints (`btree_gist`). Double booking is refused by the database even when two dispatchers race; the API maps the violation to 409.
+- **M6 – what can be allocated.** Jobs in BOOKED, ASSESSED, REASSIGNED or REFUSED can be allocated. Allocation and offer both re-run every check; nothing is saved when a check fails (the attempt is audited).
+- **M6 – travel buffer** of 15 minutes (organisation setting `travelBufferMinutes`) is added before and after each job when testing for clashes on a shift.
+- **M6 – exceptions** are possible only for the COMPETENCE check (a policy-level requirement), need `allocation.exception.approve`, a reason of at least 10 characters and an expiry no more than 7 days ahead; the approver is the signed-in person. Statutory and safety checks (clearance, licence, roadworthiness, suitability, equipment, conflicts, shift gate) have no exception path (JOB-03).
+- **M6 – a stop-use defect releases not-started jobs** (ALLOCATED, OFFERED, ACKNOWLEDGED) on that vehicle: they move to REASSIGNED with a critical control alert. Jobs already under way are not moved; control is alerted to handle them.
+- **M6 – one live alert per job.** The existing `alert_open_source_idx` (one unresolved alert per source) is kept: a job's alert escalates in place (unacknowledged → late → needs reassignment) and is never downgraded. Re-allocating, cancelling or completing the job resolves it; timing alerts also resolve once the job moves on.
+- **M6 – recurring series edits.** "This" detaches one instance from the series; "this and following" applies the change (or a time shift in minutes) to every later instance in the series that has not started and is not detached. Cancelling one instance never touches the others.
+- **M6 – dashboard job rows.** Today's jobs (London day, cancelled excluded) are counted from rows built by `jobDashboardRow` in `packages/rules`. "Action required" (tile `all`) lists only rows needing attention; on-track (green) jobs appear only under "Jobs today". Rows show the job code and time, never patient details.
+- **M6 – crew view of jobs.** Crew see a job only while they are assigned to the shift it is allocated to (404 otherwise). Patient contact details need `jobs.patient.view`, which the default crew role does not hold; every view is audited.
+- **Worker – `generate-exports` queue was never created** at start-up (pg-boss needs `createQueue` before scheduling); it is now in the queue list with the new `job-timing` queue.
+
+- **M7 – crew see the patient contact only while crewing the job's shift**, from one hour before the shift starts until it ends (`app_crew_on_job` in the RLS policy). Supersedes the M6 note above for the crew app; the default crew role still has no `jobs.patient.view`, and every view is audited.
+- **M7 – one sync endpoint replays through the normal endpoints.** `POST /crew/sync` takes up to 50 queued items and sends each through the same route, permission checks, validation, idempotency and audit as a live call. Each item gets its own result (ACCEPTED, DUPLICATE, CONFLICT, REJECTED, RETRY); one failure never blocks the rest. A job reassigned while offline returns CONFLICT with the server state for the reconciliation screen.
+- **M7 – offline shift start is a queued `SHIFT_START`.** The app allows it only when every gate card is satisfied (including VDI/cleaning done on the device and not yet sent) and eligibility was confirmed by the server within 30 minutes. On sync the server re-runs the shift gate; a refusal comes back as a conflict, so the gate is never bypassed. Accepting a new job (ACKNOWLEDGED) is not possible offline: "Follow downtime procedure – call control".
+- **M7 – encrypted local database is expo-sqlite built with SQLCipher** (config plugin `useSQLCipher`), keyed with 32 random bytes in the secure store, instead of op-sqlite. Same encryption, one fewer native dependency, maintained with the Expo SDK.
+- **M7 – wipe rules.** Sign-out, a revoked device (`DEVICE_REVOKED` on any call; the app sends `x-device-id`), a leaver (`USER_INACTIVE`) and five failed unlocks delete the database, pending photos, notifications and every secure-store key, and a new device id is issued. An expired session without a refresh token signs out but keeps the encrypted outbox so unsent work can still go after signing in again.
+- **M7 – unlock again after 5 minutes in the background** (so handing off to the maps app does not demand an unlock each time), and always on a cold start.
+- **M7 – sign-in requires a device screen lock**; biometric unlock falls back to the device passcode. Rooted/jailbroken detection is warn-only for the pilot (not implemented as a block).
+- **M7 – no certificate pinning for the pilot.** TLS with platform trust stores; pinning adds a release-coupled failure mode (certificate rotation on Azure Front Door). Revisit before general availability.
+- **M7 – outbox retry**: 15 s doubling to a 15-minute cap; after 12 failed attempts an item stops and asks the person to review it (never silently dropped). Photos are uploaded first through the evidence upload flow, resumably (the version id is stored), and their evidence ids are put into the payload.
+- **M7 – navigation hand-off** passes the pickup or destination address to the device maps app (`geo:`/`maps:` intent on the device), as MOBILE_APP specifies; nothing goes to a server URL.
+- **M7 – Maestro flows and EAS profiles are in the repo** (`apps/mobile/.maestro`, `eas.json`). They need a device or emulator and the customer's EAS, Apple and Google accounts, so they have not been run in this environment; the same behaviours are covered by Jest component tests (Testing Library) and API tests.
+- **M7 – dev crew demo** (`pnpm --filter @hub/api demo:crew`) books today's shift on AMB-01 for the seeded crew with one offered job through the normal API, recording a synthetic licence check for ST-0042 first (the seed has none, so allocation was correctly blocked on LICENCE).
+
+- **M8 – report definitions live in `packages/rules` (`REPORTS`)** and are returned with every report, CSV and the management pack, so a figure is never shown without its numerator, denominator, period and inclusion rule. Reports run inside the viewer's tenant transaction: row-level security limits them to what that person may see (restricted events need the restricted permission).
+- **M8 – report period** defaults to this month to date (London) and may cover at most 366 days. Snapshot measures (readiness, availability, open actions) are as at the time the report is run; period measures use London dates, inclusive.
+- **M8 – journey punctuality** compares the crew-captured arrival time (device time, as stored) with the end of the pickup window. Late audits are those submitted after their due date, or past it and not submitted; action ageing is not split by location.
+- **M8 – the monthly management pack** is a PDF (pdf-lib, like the evidence pack) of every report for one calendar month, built by the worker with the requester's permissions, downloadable only by the requester through the 5-minute signed link. Every page carries "Internal measure – not a CQC rating".
+- **M8 – CSV import** takes the file as text in a JSON request (up to about 900 KB and 5,000 rows; split larger files), for staff and vehicles. The preview stores every row with its errors and duplicates (against existing records and earlier rows) and creates nothing. Commit replays each valid row through the normal create endpoint, so permissions, validation, duplicate guards, requirement auto-apply and audit are identical to manual entry; each row records its own result.
+- **M8 – import rollback withdraws, it never deletes** (history is immutable): within 7 days, imported staff still at candidate stage (no user link, records or role approvals) become leavers, and untouched vehicles (no edits, checks, defects, shifts or mileage) are taken off the road, both with "Import IMP-n rolled back". Anything used since the import is kept and listed with the reason.
+- **M8 – compliance workbook staging takes each sheet as CSV** (Excel "Save as CSV") with the code, text, status and KLOE columns named at upload, rather than adding a spreadsheet-parsing dependency; the original workbook was not available to design against. Rows keep sheet, row number and prompt code; rows without a code are headers (structure); placeholders (`ENTER`, `[ENTER …]`, `Default Image`) are listed as unresolved; source statuses are kept as text only and never set a requirement status; legacy KLOE codes are kept as references.
+- **M8 – workbook mappings**: anyone with `admin.import.manage` classifies a row (shared, ambulance, dental, care home, GP, out of scope) and proposes code, title and subject; a different person with `admin.requirements.publish` approves or rejects. Only approved mappings publish, and only as a DRAFT organisation template (framework references `WORKBOOK` sheet!row:code and `CQC_KLOE_LEGACY`) that goes live through the normal version approval and publishing flow. Titles with unresolved placeholders cannot be published.
+- **M8 – full export** (`admin.export.full`) is a ZIP built by the worker with the requester's permissions: one JSON file per table (70 tables) with stable UUIDs, clean evidence files under their version id with a manifest, and a README. Push tokens, storage keys and identity-provider subjects are left out; fields encrypted at rest are exported as stored (encrypted).
+- **M8 – new permission `privacy.manage`** (registered manager, director, governance lead; never for dispatch- or crew-derived roles) for retention, legal holds, subject requests, disclosures and breaches. Those tables are restricted to it by row-level security as well as the API.
+- **M8 – retention defaults are placeholders** ("requires approval", basis text starting "Placeholder") shown on first visit; a rule cannot be approved until the organisation records the basis from its approved schedule, and any change needs approval again. Only patient contact details can be acted on automatically (anonymised: name replaced, phone removed, by a narrowly scoped database function); every other category raises a review alert with the count past its cutoff. Journeys, staff files, events and the audit log are never deleted by the system. Every run is written to an immutable retention log.
+- **M8 – legal holds** (organisation, staff, job, event or vehicle) block retention for their scope; an organisation-wide hold stops all retention. Releasing a hold needs a reason; holds are never deleted.
+- **M8 – subject requests** are due one calendar month after receipt (Art 12(3)), extendable to at most three months; identity must be verified before an access export is built; closing needs a recorded outcome. The access export (ZIP) holds the person's staff file, history, requirements, evidence, shifts, acknowledgements and audit entries (or, for a patient reference, the journeys and contact details) and must be reviewed for third-party data before release. Audit entries record codes and types only, never the request text.
+- **M8 – breach records** run a 72-hour clock from discovery (computed in `@hub/rules`, not stored); the worker alerts 24 hours before the deadline and again (critical) when it passes. A high-risk breach cannot be recorded as not reportable; a report after 72 hours needs the reasons for the delay; a breach closes only with a reportability decision and, if reportable, the ICO report.
+- **M8 – infrastructure as code is complete but not compiled here.** The build environment has no Azure CLI or Bicep compiler (GitHub release downloads are blocked), so `infra/` must be built and what-if'd before first deployment. Added: Container Apps (API with 1–2 replicas, a single worker so pg-boss schedules never run twice, managed identity reading Key Vault secrets), a monthly budget with 80 %/100 % actual and 100 % forecast alerts, an action group, a `/readyz` availability test, Postgres CPU and storage alerts, an audit-chain-broken log alert and an API 5xx alert. Production keeps the documented pilot tier (B2s, geo-redundant backups, 35-day PITR); zone-redundant HA is a parameter (`postgresHa`) for after the pilot, as ARCHITECTURE §7 says.
+- **M8 – budget amounts are assumptions**: £450/month production and £150/month staging, to be confirmed by the customer before deployment.
+- **M8 – rate limit is configurable** (`RATE_LIMIT_PER_MINUTE`, default 300 per user per minute; refused above 1,000 in production) so load tests can measure latency rather than throttling.
+- **M8 – test databases use the development role passwords.** Postgres roles are cluster-wide, so the test setup previously reset `hub_app`/`hub_migrator` to test passwords and locked a local `pnpm dev` out of its database after `pnpm test`. Tests now use the same passwords as `.env.example`.
+- **M8 – restore drill** is a script (`pnpm --filter @hub/db drill`): dump, restore into a new database, compare every table, verify each organisation's audit hash chain on the copy, time it against the 4-hour RTO and write a report. The runbook (`docs/runbooks/restore.md`) uses it after an Azure point-in-time or geo-restore. Build-machine drill: PASS (synthetic data).
+- **M8 – load and security scanning**: k6 is not installable here, so a dependency-free Node load check (`tests/load/smoke.mjs`) measured the pilot profile locally (all p95 under 700 ms at 20 concurrent clients); `tests/load/pilot.js` (k6) is for staging. ZAP needs Docker, so the baseline runs weekly in GitHub Actions against staging (`.github/workflows/zap-baseline.yml`). The axe pass (`tests/a11y/scan.mjs`, axe-core 4.14.0) found no violations on 12 screens.
+- **M8 – compliance artefacts are drafts for the controller** (`docs/compliance/`): DPIA with the data-flow section, ROPA entries, retention schedule configuration, Cyber Essentials and DSPT evidence maps, restore drill and load reports, accessibility scan and statement, and the pen-test remediation log (no external test yet). Organisation-specific answers are marked _[Controller]_/_[Organisation]_.
+- **M8 – deployment gaps found while writing the evidence were closed**: Defender for Storage malware scanning on upload (Bicep), the web app on Static Web Apps with security headers (`staticwebapp.config.json`; Static Web Apps has no UK region, and serves static assets only), Dockerfiles for the API and worker, and Dependabot with a 14-day cooldown. None of these could be built or deployed here (no Docker or Azure CLI).
+- **M8 – known product gap**: there is no web screen yet for adopting and publishing requirement library items; the admin guide gives the API calls. A library screen is the first follow-up.
+- **Post-M8 – web sign-in page and wireframe styling.** The web app now opens on a sign-in page instead of silently signing in. Development builds list the seeded synthetic users (mock OIDC); production builds show "Sign in with Microsoft", which reports "not configured" until the Entra External ID tenant exists. Tokens stay in memory only; in development the chosen user _name_ is kept in sessionStorage so a reload stays signed in (the token is re-minted). Sign-out clears the query cache. The layout and components now follow the wireframe styling (navy sidebar, teal active item and primary buttons, breadcrumb bar, navy table headers with row strips, outlined status badges that keep icon + word). The dashboard shows the 8 most urgent actions with "View all (n)". axe: no violations on 13 screens including sign-in.

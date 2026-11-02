@@ -1,0 +1,25 @@
+appId: uk.example.healthcarehub.crew
+name: Failed critical VDI item stops the vehicle and alerts control [FLT-03][UAT-02]
+---
+- runFlow: _sign-in.yaml
+- tapOn: 'Start vehicle check'
+- tapOn: 'Tyres and wheels: Fail'
+- tapOn: 'What is wrong – Tyres and wheels'
+- inputText: 'Nearside front tread below limit'
+- hideKeyboard
+- runFlow: _vdi-pass-rest.yaml
+- scrollUntilVisible:
+    element: 'Odometer (miles)'
+- tapOn: 'Odometer (miles)'
+- inputText: '45211'
+- hideKeyboard
+- scrollUntilVisible:
+    element: 'Submit vehicle check'
+- tapOn: 'Submit vehicle check'
+- assertVisible: '.*A critical item failed. Do not use this vehicle.*'
+- assertVisible: 'Call control'
+- tapOn: 'Back to my shift'
+# The server has blocked the vehicle (stop-use defect); My shift refreshes once the check is accepted.
+- extendedWaitUntil:
+    visible: 'Status: Blocked'
+    timeout: 30000

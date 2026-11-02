@@ -1,0 +1,34 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_ENV": "development" }
+    },
+    "pilot": {
+      "distribution": "internal",
+      "channel": "pilot",
+      "env": {
+        "APP_ENV": "pilot",
+        "HUB_API_URL": "https://api.pilot.healthcarehub.example",
+        "HUB_OIDC_ISSUER": "https://login.pilot.healthcarehub.example/v2.0",
+        "HUB_DEV_AUTH": "0"
+      },
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": false }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "APP_ENV": "production",
+        "HUB_API_URL": "https://api.healthcarehub.example",
+        "HUB_OIDC_ISSUER": "https://login.healthcarehub.example/v2.0",
+        "HUB_DEV_AUTH": "0"
+      }
+    }
+  },
+  "submit": { "production": {} }
+}
