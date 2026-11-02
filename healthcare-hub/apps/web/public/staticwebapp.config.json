@@ -1,0 +1,10 @@
+{
+  "navigationFallback": { "rewrite": "/index.html", "exclude": ["/assets/*"] },
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.healthcarehub.example https://login.microsoftonline.com https://*.ciamlogin.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  }
+}

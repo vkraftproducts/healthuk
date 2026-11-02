@@ -1,0 +1,11 @@
+# Maestro E2E (MOBILE_APP "Testing"). Prerequisites, all local and synthetic:
+#   pnpm dev                                  # postgres, API (4000), mock OIDC (4010)
+#   pnpm db:seed && pnpm --filter @hub/api demo:crew
+#   eas build --profile development (or expo run:android) and install on a device/emulator
+#   maestro test apps/mobile/.maestro
+# Each flow starts from a clean install (clearState) signed in as the seeded crew driver ST-0042.
+flows:
+  - shift-gate.yaml
+  - vdi-fail.yaml
+  - offline-sync-duplicate.yaml
+  - defect-during-journey.yaml

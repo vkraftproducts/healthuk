@@ -1,0 +1,23 @@
+appId: uk.example.healthcarehub.crew
+name: Offline work is queued and synced exactly once [APP-01][UAT-06]
+---
+- runFlow: _sign-in.yaml
+- setAirplaneMode: enabled
+- assertVisible: '○ Offline'
+- tapOn: 'Complete cleaning confirmation'
+- tapOn: 'Method: Detergent wipe'
+- tapOn: 'I confirm the vehicle has been cleaned to the required standard'
+- tapOn: 'Confirm cleaning'
+- tapOn: 'Back to my shift'
+- assertVisible: '1 waiting to send'
+- assertVisible: 'Done on this device – pending sync'
+# Flap the connection to force repeated sends; the server keeps one record per submission.
+- setAirplaneMode: disabled
+- setAirplaneMode: enabled
+- setAirplaneMode: disabled
+- extendedWaitUntil:
+    notVisible: '1 waiting to send'
+    timeout: 90000
+- tapOn: 'Messages'
+- assertVisible: 'Everything has been sent.'
+# Verified server-side by apps/api/test/m7.test.ts (one cleaning_record per clientSubmissionId).

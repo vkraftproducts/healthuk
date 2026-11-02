@@ -1,0 +1,190 @@
+import type { TenantTx } from '@hub/db';
+import {
+  MAX_DELIVERY_ATTEMPTS,
+  currentWarningWindow,
+  dedupeKey,
+  daysUntil,
+  escalationTarget,
+  londonDate,
+  notificationsPaused,
+  retryDelayMinutes,
+  type ISODate,
+} from '@hub/rules';
+
+export interface PlanOutcome {
+  created: number;
+  escalated: number;
+}
+
+const iso = (d: Date | null): ISODate | null => (d ? d.toISOString().slice(0, 10) : null);
+
+/**
+ * Plans notification deliveries for open alerts (ALERT-04): deduplicated by (alert, channel,
+ * window), owner first, then deputy, then the registered manager(s). Acknowledged and snoozed
+ * alerts are skipped; their status is untouched (ALERT-03). Content is IDs and codes only.
+ */
+export async function planNotifications(
+  tx: TenantTx,
+  orgId: string,
+  now: Date,
+): Promise<PlanOutcome> {
+  const org = await tx.organisation.findUniqueOrThrow({
+    where: { id: orgId },
+    select: { settings: true },
+  });
+  const settings = (org.settings ?? {}) as { emailReminders?: boolean; deputyEscalation?: boolean };
+  const email = settings.emailReminders !== false;
+  const deputyOn = settings.deputyEscalation !== false;
+  const alerts = await tx.alert.findMany({ where: { state: 'OPEN', sourceType: 'REQUIREMENT' } });
+  const managers = await tx.membership.findMany({
+    where: {
+      organisationId: orgId,
+      validTo: null,
+      role: { key: 'REGISTERED_MANAGER' },
+      user: { status: 'ACTIVE' },
+    },
+    select: { userId: true },
+  });
+  const today = londonDate(now);
+  let created = 0;
+  let escalated = 0;
+
+  for (const a of alerts) {
+    if (notificationsPaused(a.snoozedUntil, now)) continue;
+    const inst = await tx.requirementInstance.findUnique({
+      where: { id: a.sourceId },
+      include: { templateVersion: true },
+    });
+    if (!inst) continue;
+
+    // Window key: due-soon items notify once per warning threshold crossed; everything else daily.
+    let windowKey: string = today;
+    if (a.reasonCode === 'DUE_SOON') {
+      const kind = inst.templateVersion.deadlineKind;
+      const d = iso(
+        kind === 'DUE' ? inst.dueDate : kind === 'EXPIRY' ? inst.expiryDate : inst.reviewDate,
+      );
+      const w = d
+        ? currentWarningWindow(daysUntil(d, now), inst.templateVersion.warningDays)
+        : null;
+      if (w === null) continue; // inside the amber window but outside every configured warning threshold
+      windowKey = `W${w}`;
+    }
+
+    const active = async (id: string | null): Promise<boolean> =>
+      id
+        ? (await tx.appUser.count({
+            where: {
+              id,
+              status: 'ACTIVE',
+              memberships: { some: { organisationId: orgId, validTo: null } },
+            },
+          })) > 0
+        : false;
+    const ownerOk = await active(inst.ownerUserId);
+    const deputyOk = deputyOn && (await active(inst.deputyUserId));
+    const target = escalationTarget({
+      ownerAbsent: !ownerOk,
+      deputyAbsent: !deputyOk,
+      hasDeputy: deputyOn && inst.deputyUserId !== null,
+    });
+    const recipients =
+      target === 'OWNER'
+        ? [inst.ownerUserId as string]
+        : target === 'DEPUTY'
+          ? [inst.deputyUserId as string]
+          : managers.map((m) => m.userId);
+    if (target !== 'OWNER' && recipients.length > 0) escalated += 1;
+
+    for (const userId of recipients) {
+      for (const channel of email ? (['IN_APP', 'EMAIL'] as const) : (['IN_APP'] as const)) {
+        const key = `${dedupeKey(a.id, channel, windowKey)}|${userId}`;
+        const r = await tx.notificationDelivery.createMany({
+          data: [
+            {
+              organisationId: orgId,
+              alertId: a.id,
+              channel,
+              recipientUserId: userId,
+              dedupeKey: key,
+              escalatedTo: target === 'OWNER' ? null : target,
+            },
+          ],
+          skipDuplicates: true,
+        });
+        created += r.count;
+      }
+    }
+  }
+  return { created, escalated };
+}
+
+export interface Mailer {
+  send(msg: { to: string; subject: string; text: string }): Promise<void>;
+}
+
+export interface DispatchOutcome {
+  sent: number;
+  failed: number;
+  dead: number;
+}
+
+/** Delivers due notifications. Retries with backoff; after MAX_DELIVERY_ATTEMPTS the row is DEAD. */
+export async function dispatchNotifications(
+  tx: TenantTx,
+  orgId: string,
+  now: Date,
+  mailer: Mailer,
+  appUrl: string,
+): Promise<DispatchOutcome> {
+  const due = await tx.notificationDelivery.findMany({
+    where: { status: { in: ['PENDING', 'FAILED'] }, nextAttemptAt: { lte: now } },
+    include: { alert: true },
+    orderBy: { createdAt: 'asc' },
+    take: 200,
+  });
+  const out: DispatchOutcome = { sent: 0, failed: 0, dead: 0 };
+  for (const n of due) {
+    if (n.channel === 'IN_APP') {
+      await tx.notificationDelivery.update({
+        where: { id: n.id },
+        data: { status: 'SENT', sentAt: now, attempts: n.attempts + 1 },
+      });
+      out.sent += 1;
+      continue;
+    }
+    const user = await tx.appUser.findUnique({
+      where: { id: n.recipientUserId },
+      select: { email: true, status: true },
+    });
+    try {
+      if (!user || user.status !== 'ACTIVE') throw new Error('RECIPIENT_UNAVAILABLE');
+      // No patient or staff names: the code and a link only (non-negotiable 7).
+      await mailer.send({
+        to: user.email,
+        subject: `Compliance item needs attention (${n.alert.severity.toLowerCase()})`,
+        text: `A compliance item needs attention: ${n.alert.reasonCode}.\nOpen it here: ${appUrl}/compliance/requirements/${n.alert.sourceId}\n`,
+      });
+      await tx.notificationDelivery.update({
+        where: { id: n.id },
+        data: { status: 'SENT', sentAt: now, attempts: n.attempts + 1, lastError: null },
+      });
+      out.sent += 1;
+    } catch (e) {
+      const attempts = n.attempts + 1;
+      const dead = attempts >= MAX_DELIVERY_ATTEMPTS;
+      await tx.notificationDelivery.update({
+        where: { id: n.id },
+        data: {
+          status: dead ? 'DEAD' : 'FAILED',
+          attempts,
+          nextAttemptAt: new Date(now.getTime() + retryDelayMinutes(attempts) * 60_000),
+          lastError: (e instanceof Error ? e.message : 'ERROR').slice(0, 120),
+        },
+      });
+      if (dead) out.dead += 1;
+      else out.failed += 1;
+    }
+  }
+  return out;
+}

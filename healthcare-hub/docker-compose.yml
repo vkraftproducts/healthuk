@@ -1,0 +1,22 @@
+# Local dev services. Mock OIDC runs via `pnpm --filter @hub/api dev:oidc` (dev only).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hub
+    ports: ['5432:5432']
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      retries: 10
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports: ['10000:10000', '10001:10001', '10002:10002']
+  mailpit:
+    image: axllent/mailpit
+    ports: ['1025:1025', '8025:8025']
+volumes:
+  pgdata:

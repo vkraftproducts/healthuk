@@ -1,0 +1,5 @@
+{
+  "extends": "@hub/config/tsconfig.node.json",
+  "compilerOptions": { "noEmit": true, "rootDir": "." },
+  "include": ["src", "test"]
+}

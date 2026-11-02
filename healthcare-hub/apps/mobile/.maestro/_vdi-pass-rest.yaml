@@ -1,0 +1,27 @@
+appId: uk.example.healthcarehub.crew
+# Every seeded item except tyres.
+---
+- scrollUntilVisible:
+    element: 'Lights and indicators: Pass'
+- tapOn: 'Lights and indicators: Pass'
+- scrollUntilVisible:
+    element: 'Brakes: Pass'
+- tapOn: 'Brakes: Pass'
+- scrollUntilVisible:
+    element: 'Fluid levels: Pass'
+- tapOn: 'Fluid levels: Pass'
+- scrollUntilVisible:
+    element: 'Seat belts and restraints: Pass'
+- tapOn: 'Seat belts and restraints: Pass'
+- scrollUntilVisible:
+    element: 'Ramp or tail lift: Pass'
+- tapOn: 'Ramp or tail lift: Pass'
+- scrollUntilVisible:
+    element: 'Accessibility kit: Pass'
+- tapOn: 'Accessibility kit: Pass'
+- scrollUntilVisible:
+    element: 'Fire extinguisher and safety kit: Pass'
+- tapOn: 'Fire extinguisher and safety kit: Pass'
+- scrollUntilVisible:
+    element: 'Clinical kit and oxygen: Pass'
+- tapOn: 'Clinical kit and oxygen: Pass'

@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-hub-bg text-slate-900 antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply text-hub-navy;
+  }
+}
+
+:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 2px;
+}
+.on-dark :focus-visible {
+  outline-color: #ffffff;
+}

@@ -1,0 +1,1204 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+import { Prisma, type Db, type TenantTx } from '@hub/db';
+import {
+  allocationWindow,
+  nextCode,
+  queuePush,
+  resolveJobAlerts,
+  shiftCrewUserIds,
+  shiftGateFor,
+  travelBufferMinutes,
+  validateJobOnShift,
+} from '@hub/domain';
+import {
+  ALLOCATABLE,
+  checkJobTransition,
+  expandRecurrence,
+  londonDate,
+  type JobState,
+} from '@hub/rules';
+import type { ShiftGateDto } from '@hub/contracts';
+import {
+  AllocateInput,
+  BookingCreate,
+  CrewEndInput,
+  CrewInput,
+  ExceptionInput,
+  JobPatch,
+  JobPatchQuery,
+  PlannerQuery,
+  ShiftCreate,
+  ShiftsQuery,
+  StatusInput,
+  ValidateInput,
+  VehicleSwapInput,
+  type JobDetailDto,
+  type JobDto,
+  type ShiftDto,
+  type ValidationDto,
+} from '@hub/contracts';
+import { z } from 'zod';
+import { OrgMember, RequirePermission } from '../../common/decorators.js';
+import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
+import { assertNotFuture, audit, body, ifMatchVersion, requireAny } from '../../common/http.js';
+import { HubError, notFound } from '../../common/problem.filter.js';
+import { DB } from '../../db.provider.js';
+
+const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const MAX_OFFLINE_MS = 7 * 86_400_000;
+const ts = (d: Date | null) => (d ? d.toISOString() : null);
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const shiftInclude = {
+  crew: { orderBy: { startsAt: 'asc' } },
+  allocations: {
+    where: { active: true },
+    include: { job: { select: { code: true, state: true } } },
+    orderBy: { startsAt: 'asc' },
+  },
+  changes: { orderBy: { at: 'asc' } },
+} as const;
+type ShiftRow = Prisma.ShiftGetPayload<{ include: typeof shiftInclude }>;
+type JobRow = Prisma.JobGetPayload<{ include: { allocations: true } }>;
+
+function jobDto(j: JobRow): JobDto {
+  return {
+    id: j.id,
+    code: j.code,
+    bookingId: j.bookingId,
+    seriesIndex: j.seriesIndex,
+    detached: j.detached,
+    locationId: j.locationId,
+    journeyDate: iso(j.journeyDate),
+    pickupFrom: j.pickupFrom.toISOString(),
+    pickupTo: j.pickupTo.toISOString(),
+    appointmentAt: ts(j.appointmentAt),
+    plannedStart: j.plannedStart.toISOString(),
+    plannedEnd: j.plannedEnd.toISOString(),
+    pickupAddress: j.pickupAddress,
+    destinationAddress: j.destinationAddress,
+    accessNotes: j.accessNotes,
+    accessPlanReviewed: j.accessPlanReviewed,
+    patientRef: j.patientRef,
+    mobility: j.mobility,
+    weightKg: j.weightKg,
+    stairs: j.stairs,
+    escorts: j.escorts,
+    infectionPrecautions: j.infectionPrecautions,
+    commsNeeds: j.commsNeeds,
+    requiredEquipment: j.requiredEquipment,
+    requiredSkills: j.requiredSkills,
+    crewSize: j.crewSize,
+    state: j.state,
+    shiftId: j.allocations.find((a) => a.active)?.shiftId ?? null,
+    version: j.version,
+  };
+}
+
+const checksOf = (v: ValidationDto) =>
+  v.checks.map((c) => ({
+    code: c.code,
+    result: c.result,
+    reasonText: c.reasonText,
+    overridable: c.overridable,
+    excepted: c.excepted,
+    details: c.details,
+  }));
+const isExclusion = (e: unknown) =>
+  e instanceof Prisma.PrismaClientKnownRequestError &&
+  /23P01|exclusion|no_overlap/i.test(`${e.code} ${e.message}`);
+
+/** Bookings, jobs, allocation and status (JOB-01..04, wireframe 04). */
+@Controller()
+export class JobsController {
+  constructor(@Inject(DB) private readonly db: Db) {}
+
+  @RequirePermission('jobs.job.view')
+  @Get('bookings')
+  async bookings(@Hub() hub: HubRequestContext) {
+    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
+      tx.booking.findMany({
+        include: { jobs: { include: { allocations: true }, orderBy: { plannedStart: 'asc' } } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+    );
+    return {
+      data: rows.map((b) => ({
+        id: b.id,
+        customer: b.customer,
+        reference: b.reference,
+        jobs: b.jobs.map(jobDto),
+      })),
+    };
+  }
+
+  @RequirePermission('jobs.booking.manage')
+  @Post('bookings')
+  async book(@Hub() hub: HubRequestContext, @Body() raw: unknown) {
+    const input = body(BookingCreate, raw);
+    const j = input.job;
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.location.findUnique({ where: { id: j.locationId } }))) throw notFound();
+      if (hub.locationIds && !hub.locationIds.includes(j.locationId)) throw notFound();
+      const orgId = hub.orgId as string;
+      const b = await tx.booking.create({
+        data: {
+          organisationId: orgId,
+          customer: input.customer,
+          reference: input.reference ?? null,
+          recurrence: (input.recurrence ?? undefined) as Prisma.InputJsonObject | undefined,
+          createdBy: hub.user.id,
+        },
+      });
+      const firstDay = londonDate(new Date(j.plannedStart));
+      const days = input.recurrence ? expandRecurrence(firstDay, input.recurrence) : [firstDay];
+      if (days.length === 0)
+        throw new HubError('VALIDATION_FAILED', 400, 'The recurrence produces no journeys');
+      const base = new Date(`${firstDay}T00:00:00.000Z`).getTime();
+      const jobs = [];
+      for (const [i, d] of days.entries()) {
+        // Each instance keeps the same local clock times (Europe/London) shifted by whole days.
+        const delta = new Date(`${d}T00:00:00.000Z`).getTime() - base;
+        const at = (s: string) => new Date(new Date(s).getTime() + delta);
+        const row = await tx.job.create({
+          data: {
+            organisationId: orgId,
+            code: await nextCode(tx, orgId, 'J'),
+            bookingId: b.id,
+            seriesIndex: input.recurrence ? i : null,
+            locationId: j.locationId,
+            journeyDate: new Date(`${d}T00:00:00.000Z`),
+            pickupFrom: at(j.pickupFrom),
+            pickupTo: at(j.pickupTo),
+            appointmentAt: j.appointmentAt ? at(j.appointmentAt) : null,
+            plannedStart: at(j.plannedStart),
+            plannedEnd: at(j.plannedEnd),
+            pickupAddress: j.pickupAddress,
+            destinationAddress: j.destinationAddress,
+            accessNotes: j.accessNotes ?? null,
+            accessPlanReviewed: j.accessPlanReviewed,
+            patientRef: j.patientRef,
+            mobility: j.mobility,
+            weightKg: j.weightKg ?? null,
+            stairs: j.stairs,
+            escorts: j.escorts,
+            infectionPrecautions: j.infectionPrecautions,
+            commsNeeds: j.commsNeeds ?? null,
+            requiredEquipment: j.requiredEquipment,
+            requiredSkills: j.requiredSkills,
+            crewSize: j.crewSize,
+            createdBy: hub.user.id,
+          },
+          include: { allocations: true },
+        });
+        await tx.jobStatusEvent.create({
+          data: {
+            organisationId: orgId,
+            jobId: row.id,
+            fromState: null,
+            toState: 'BOOKED',
+            actorUserId: hub.user.id,
+            capturedAt: new Date(),
+          },
+        });
+        if (input.patientContact)
+          await tx.patientContact.createMany({
+            data: [
+              {
+                jobId: row.id,
+                organisationId: orgId,
+                name: input.patientContact.name,
+                phone: input.patientContact.phone ?? null,
+              },
+            ],
+          });
+        jobs.push(row);
+      }
+      // IDs and counts only: no patient details in the audit trail.
+      await audit(this.db, tx, hub, {
+        action: 'jobs.booking.create',
+        entity: 'booking',
+        entityId: b.id,
+        summary: { jobs: jobs.length },
+      });
+      return { id: b.id, customer: b.customer, reference: b.reference, jobs: jobs.map(jobDto) };
+    });
+  }
+
+  @RequirePermission('jobs.job.view')
+  @Get('jobs')
+  async jobs(@Hub() hub: HubRequestContext, @Query() q: unknown) {
+    const f = body(
+      z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        locationId: z.string().uuid().optional(),
+      }),
+      q,
+    );
+    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
+      tx.job.findMany({
+        where: {
+          journeyDate: new Date(`${f.date}T00:00:00.000Z`),
+          ...(f.locationId ? { locationId: f.locationId } : {}),
+        },
+        include: { allocations: true },
+        orderBy: { plannedStart: 'asc' },
+      }),
+    );
+    return { data: rows.map(jobDto) };
+  }
+
+  /** Control sees all jobs; crew only the jobs on their own shift (UAT-05: anything else is 404). */
+  @OrgMember()
+  @Get('jobs/:id')
+  async job(@Hub() hub: HubRequestContext, @Param('id', idPipe) id: string): Promise<JobDetailDto> {
+    requireAny(hub, 'jobs.job.view', 'crew.today.view');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.job.count({ where: { id } }))) throw notFound();
+      if (!hub.permissions.has('jobs.job.view') && !(await this.isCrewOn(tx, hub, id)))
+        throw notFound();
+      return this.detail(tx, hub, id);
+    });
+  }
+
+  @RequirePermission('jobs.booking.manage')
+  @Patch('jobs/:id')
+  async patch(
+    @Hub() hub: HubRequestContext,
+    @Req() req: HubRequest,
+    @Param('id', idPipe) id: string,
+    @Query() q: unknown,
+    @Body() raw: unknown,
+  ) {
+    const expected = ifMatchVersion(req);
+    const { scope } = body(JobPatchQuery, q);
+    const input = body(JobPatch, raw);
+    const absolute = [
+      'pickupFrom',
+      'pickupTo',
+      'appointmentAt',
+      'plannedStart',
+      'plannedEnd',
+    ].filter((k) => k in input);
+    if (scope === 'following' && absolute.length)
+      throw new HubError(
+        'VALIDATION_FAILED',
+        400,
+        'For this-and-following, move times with timeShiftMinutes',
+      );
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const j = await tx.job.findUnique({ where: { id } });
+      if (!j) throw notFound();
+      if (j.version !== expected)
+        throw new HubError(
+          'STALE_VERSION',
+          409,
+          'The job was changed by someone else; reload and retry',
+        );
+      const targets =
+        scope === 'following' && j.seriesIndex !== null
+          ? await tx.job.findMany({
+              where: {
+                bookingId: j.bookingId,
+                seriesIndex: { gte: j.seriesIndex },
+                detached: false,
+                state: { in: ['BOOKED', 'ASSESSED', 'REASSIGNED', 'REFUSED'] },
+              },
+              orderBy: { seriesIndex: 'asc' },
+            })
+          : [j];
+      if (!(ALLOCATABLE as readonly string[]).includes(j.state))
+        throw new HubError(
+          'CONFLICT',
+          409,
+          'Release the allocation before changing an allocated job',
+        );
+      const { timeShiftMinutes, ...fields } = input;
+      const shift = (d: Date | null) =>
+        d && timeShiftMinutes ? new Date(d.getTime() + timeShiftMinutes * 60_000) : d;
+      const updated = [];
+      for (const t of targets) {
+        const data: Prisma.JobUpdateInput = {
+          ...fields,
+          ...(timeShiftMinutes
+            ? {
+                pickupFrom: shift(t.pickupFrom)!,
+                pickupTo: shift(t.pickupTo)!,
+                plannedStart: shift(t.plannedStart)!,
+                plannedEnd: shift(t.plannedEnd)!,
+                appointmentAt: shift(t.appointmentAt),
+              }
+            : {}),
+          ...(input.pickupFrom ? { pickupFrom: new Date(input.pickupFrom) } : {}),
+          ...(input.pickupTo ? { pickupTo: new Date(input.pickupTo) } : {}),
+          ...(input.plannedStart ? { plannedStart: new Date(input.plannedStart) } : {}),
+          ...(input.plannedEnd ? { plannedEnd: new Date(input.plannedEnd) } : {}),
+          ...(input.appointmentAt ? { appointmentAt: new Date(input.appointmentAt) } : {}),
+          // An instance edited on its own leaves the series (later series edits skip it).
+          ...(scope === 'this' && t.seriesIndex !== null ? { detached: true } : {}),
+        };
+        updated.push(
+          await tx.job.update({ where: { id: t.id }, data, include: { allocations: true } }),
+        );
+      }
+      for (const u of updated)
+        if (u.plannedEnd <= u.plannedStart || u.pickupTo <= u.pickupFrom)
+          throw new HubError('VALIDATION_FAILED', 400, 'Windows must end after they start');
+      await audit(this.db, tx, hub, {
+        action: 'jobs.job.update',
+        entity: 'job',
+        entityId: id,
+        summary: { scope, jobs: updated.length, fields: Object.keys(input).join(',') },
+      });
+      return { data: updated.map(jobDto) };
+    });
+  }
+
+  @RequirePermission('jobs.allocate')
+  @Post('jobs/:id/validate')
+  async validate(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<ValidationDto> {
+    const { shiftId } = body(ValidateInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      await this.assertJobAndShift(tx, id, shiftId);
+      const current = await tx.jobAllocation.findFirst({
+        where: { jobId: id, active: true, shiftId },
+      });
+      const v = await validateJobOnShift(tx, {
+        jobId: id,
+        shiftId,
+        now: new Date(),
+        ignoreAllocationId: current?.id,
+      });
+      return { jobId: id, shiftId, ...v };
+    });
+  }
+
+  @RequirePermission('jobs.allocate')
+  @Post('jobs/:id/allocate')
+  async allocate(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<JobDetailDto> {
+    const { shiftId } = body(AllocateInput, raw);
+    const out = await this.db
+      .withTenant(tenantOf(hub), async (tx) => {
+        const { job } = await this.assertJobAndShift(tx, id, shiftId);
+        if (!(ALLOCATABLE as readonly string[]).includes(job.state))
+          throw new HubError(
+            'CONFLICT',
+            409,
+            `A ${job.state.toLowerCase()} job cannot be allocated`,
+          );
+        const now = new Date();
+        const v = await validateJobOnShift(tx, { jobId: id, shiftId, now });
+        if (!v.allowed) {
+          await audit(this.db, tx, hub, {
+            action: 'jobs.allocation.blocked',
+            entity: 'job',
+            entityId: id,
+            summary: { shiftId, blockers: v.blockers.join(',') },
+          });
+          return { blocked: v };
+        }
+        const w = allocationWindow(job, await travelBufferMinutes(tx, job.organisationId));
+        const exceptions = await tx.allocationException.findMany({
+          where: { jobId: id, expiresAt: { gt: now } },
+          select: { id: true },
+        });
+        await tx.jobAllocation.create({
+          data: {
+            organisationId: job.organisationId,
+            jobId: id,
+            shiftId,
+            startsAt: w.start,
+            endsAt: w.end,
+            validatedAt: now,
+            validationResult: checksOf({ jobId: id, shiftId, ...v }) as Prisma.InputJsonArray,
+            exceptionIds: exceptions.map((e) => e.id),
+            allocatedBy: hub.user.id,
+          },
+        });
+        await tx.jobStatusEvent.create({
+          data: {
+            organisationId: job.organisationId,
+            jobId: id,
+            fromState: job.state,
+            toState: 'ALLOCATED',
+            actorUserId: hub.user.id,
+            capturedAt: now,
+          },
+        });
+        await tx.job.update({ where: { id }, data: { state: 'ALLOCATED' } });
+        await resolveJobAlerts(tx, id, now);
+        await audit(this.db, tx, hub, {
+          action: 'jobs.allocate',
+          entity: 'job',
+          entityId: id,
+          summary: { shiftId, exceptions: exceptions.length },
+        });
+        return { detail: await this.detail(tx, hub, id) };
+      })
+      .catch((e: unknown) => {
+        // Two dispatchers racing for the same slot: the database exclusion constraint decides.
+        if (isExclusion(e))
+          throw new HubError(
+            'ALLOCATION_BLOCKED',
+            409,
+            'Another job was just allocated to that shift at an overlapping time',
+            [{ code: 'TIME_CONFLICT', result: 'FAIL', reasonText: 'Overlaps another booking' }],
+          );
+        throw e;
+      });
+    // Blocked: nothing was written except the audit event; the response lists every check.
+    if (out.blocked)
+      throw new HubError(
+        'ALLOCATION_BLOCKED',
+        409,
+        `Allocation blocked: ${out.blocked.blockers.join(', ')}`,
+        checksOf({ jobId: id, shiftId, ...out.blocked }),
+      );
+    return out.detail as JobDetailDto;
+  }
+
+  /** Re-checks at dispatch (PRD 4.8) before offering the job to the crew. */
+  @RequirePermission('jobs.allocate')
+  @Post('jobs/:id/offer')
+  async offer(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+  ): Promise<JobDetailDto> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const job = await tx.job.findUnique({ where: { id } });
+      if (!job) throw notFound();
+      if (job.state !== 'ALLOCATED')
+        throw new HubError('CONFLICT', 409, 'Only an allocated job can be offered');
+      const al = await tx.jobAllocation.findFirstOrThrow({ where: { jobId: id, active: true } });
+      const now = new Date();
+      const v = await validateJobOnShift(tx, {
+        jobId: id,
+        shiftId: al.shiftId,
+        now,
+        ignoreAllocationId: al.id,
+      });
+      if (!v.allowed)
+        throw new HubError(
+          'ALLOCATION_BLOCKED',
+          409,
+          `No longer valid: ${v.blockers.join(', ')}`,
+          checksOf({ jobId: id, shiftId: al.shiftId, ...v }),
+        );
+      await tx.jobStatusEvent.create({
+        data: {
+          organisationId: job.organisationId,
+          jobId: id,
+          fromState: 'ALLOCATED',
+          toState: 'OFFERED',
+          actorUserId: hub.user.id,
+          capturedAt: now,
+        },
+      });
+      await tx.job.update({ where: { id }, data: { state: 'OFFERED' } });
+      await queuePush(tx, {
+        orgId: job.organisationId,
+        userIds: await shiftCrewUserIds(tx, al.shiftId),
+        kind: 'JOB_OFFERED',
+        refId: id,
+        event: `offer:${al.id}`,
+      });
+      await audit(this.db, tx, hub, { action: 'jobs.offer', entity: 'job', entityId: id });
+      return this.detail(tx, hub, id);
+    });
+  }
+
+  @OrgMember()
+  @Post('jobs/:id/status')
+  async status(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<JobDetailDto> {
+    requireAny(hub, 'crew.job.progress', 'jobs.allocate', 'jobs.booking.manage');
+    const input = body(StatusInput, raw);
+    const now = new Date();
+    const captured = new Date(input.capturedAt);
+    assertNotFuture(captured, now);
+    if (now.getTime() - captured.getTime() > MAX_OFFLINE_MS)
+      throw new HubError('VALIDATION_FAILED', 400, 'Updates older than 7 days cannot be submitted');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const job = await tx.job.findUnique({ where: { id } });
+      if (!job) throw notFound();
+      const crew = await this.isCrewOn(tx, hub, id);
+      const control =
+        hub.permissions.has('jobs.allocate') || hub.permissions.has('jobs.booking.manage');
+      if (!crew && !control) throw notFound();
+      const dup = await tx.jobStatusEvent.findFirst({
+        where: { clientSubmissionId: input.clientSubmissionId },
+      });
+      if (dup) {
+        if (dup.jobId !== id || dup.actorUserId !== hub.user.id || dup.toState !== input.state)
+          throw new HubError('CONFLICT', 409, 'That submission id was used for a different update');
+        return this.detail(tx, hub, id); // retried from the offline outbox: exactly one record
+      }
+      const actor: 'CREW' | 'CONTROL' =
+        crew && hub.permissions.has('crew.job.progress') ? 'CREW' : 'CONTROL';
+      if (input.state === 'ALLOCATED' || input.state === 'OFFERED')
+        throw new HubError('TRANSITION_NOT_ALLOWED', 422, 'Use the allocate and offer actions');
+      const refusal = checkJobTransition({
+        from: job.state as JobState,
+        to: input.state,
+        actor,
+        reason: input.reason,
+      });
+      if (refusal === 'REASON_REQUIRED')
+        throw new HubError('VALIDATION_FAILED', 400, 'A reason is required');
+      if (refusal)
+        throw new HubError(
+          'TRANSITION_NOT_ALLOWED',
+          422,
+          `Cannot move a ${job.state.toLowerCase()} job to ${input.state.toLowerCase()}`,
+        );
+      await tx.jobStatusEvent.create({
+        data: {
+          organisationId: job.organisationId,
+          jobId: id,
+          fromState: job.state,
+          toState: input.state,
+          actorUserId: hub.user.id,
+          capturedAt: captured,
+          reason: input.reason ?? null,
+          clientSubmissionId: input.clientSubmissionId,
+        },
+      });
+      await tx.job.update({ where: { id }, data: { state: input.state } });
+      if (['CANCELLED', 'REFUSED', 'REASSIGNED'].includes(input.state)) {
+        const held = await tx.jobAllocation.findFirst({ where: { jobId: id, active: true } });
+        if (held && actor === 'CONTROL')
+          await queuePush(tx, {
+            orgId: job.organisationId,
+            userIds: await shiftCrewUserIds(tx, held.shiftId),
+            kind: 'JOB_CHANGED',
+            refId: id,
+            event: `${input.state}:${input.clientSubmissionId}`,
+          });
+        await tx.jobAllocation.updateMany({
+          where: { jobId: id, active: true },
+          data: { active: false, releasedAt: now, releaseReason: input.reason ?? input.state },
+        });
+      }
+      if (input.state === 'CANCELLED' || input.state === 'COMPLETED')
+        await resolveJobAlerts(tx, id, now);
+      // Reasons can mention circumstances: only codes go to the audit trail.
+      await audit(this.db, tx, hub, {
+        action: 'jobs.status',
+        entity: 'job',
+        entityId: id,
+        summary: { from: job.state, to: input.state, actor },
+      });
+      return this.detail(tx, hub, id);
+    });
+  }
+
+  /** Only policy-level failures can be excepted; statutory and safety failures have no path (JOB-03). */
+  @RequirePermission('allocation.exception.approve')
+  @Post('allocation-exceptions')
+  async exception(@Hub() hub: HubRequestContext, @Body() raw: unknown) {
+    const input = body(ExceptionInput, raw);
+    const now = new Date();
+    const expires = new Date(input.expiresAt);
+    if (expires <= now || expires.getTime() - now.getTime() > 7 * 86_400_000)
+      throw new HubError('VALIDATION_FAILED', 400, 'An exception lasts at most 7 days');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const { job } = await this.assertJobAndShift(tx, input.jobId, input.shiftId);
+      const v = await validateJobOnShift(tx, { jobId: job.id, shiftId: input.shiftId, now });
+      const c = v.checks.find((x) => x.code === input.checkCode);
+      if (!c || c.result !== 'FAIL')
+        throw new HubError('VALIDATION_FAILED', 400, 'That check is not failing');
+      if (!c.overridable)
+        throw new HubError(
+          'OVERRIDE_NOT_PERMITTED',
+          422,
+          'Statutory and safety-critical checks cannot be overridden',
+        );
+      const e = await tx.allocationException.create({
+        data: {
+          organisationId: job.organisationId,
+          jobId: job.id,
+          checkCode: input.checkCode,
+          approverId: hub.user.id,
+          reason: input.reason,
+          expiresAt: expires,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'allocation.exception.approve',
+        entity: 'job',
+        entityId: job.id,
+        summary: { checkCode: input.checkCode, expiresAt: input.expiresAt },
+      });
+      return {
+        id: e.id,
+        jobId: e.jobId,
+        checkCode: e.checkCode,
+        approverId: e.approverId,
+        reason: e.reason,
+        expiresAt: e.expiresAt.toISOString(),
+      };
+    });
+  }
+
+  // ---- helpers ------------------------------------------------------------------------
+  private async assertJobAndShift(tx: TenantTx, jobId: string, shiftId: string) {
+    const job = await tx.job.findUnique({ where: { id: jobId } });
+    const shift = await tx.shift.findUnique({ where: { id: shiftId } });
+    if (!job || !shift) throw notFound();
+    if (shift.state === 'ENDED' || shift.state === 'CANCELLED')
+      throw new HubError('CONFLICT', 409, 'The shift is not running');
+    return { job, shift };
+  }
+
+  private async isCrewOn(tx: TenantTx, hub: HubRequestContext, jobId: string): Promise<boolean> {
+    const staff = await tx.staff.findFirst({
+      where: { userId: hub.user.id },
+      select: { id: true },
+    });
+    if (!staff) return false;
+    const al = await tx.jobAllocation.findFirst({ where: { jobId, active: true } });
+    if (!al) return false;
+    return (
+      (await tx.crewAssignment.count({
+        where: { shiftId: al.shiftId, staffId: staff.id, active: true },
+      })) > 0
+    );
+  }
+
+  private async detail(tx: TenantTx, hub: HubRequestContext, id: string): Promise<JobDetailDto> {
+    const j = await tx.job.findUniqueOrThrow({
+      where: { id },
+      include: { allocations: true, events: { orderBy: { receivedAt: 'asc' } } },
+    });
+    let contact: JobDetailDto['patientContact'] = null;
+    if (hub.permissions.has('jobs.patient.view')) {
+      const c = await tx.patientContact.findUnique({ where: { jobId: id } });
+      if (c) {
+        contact = { name: c.name, phone: c.phone };
+        await audit(this.db, tx, hub, { action: 'jobs.patient.view', entity: 'job', entityId: id });
+      }
+    }
+    return {
+      ...jobDto(j),
+      patientContact: contact,
+      events: j.events.map((e) => ({
+        fromState: e.fromState,
+        toState: e.toState,
+        actorUserId: e.actorUserId,
+        capturedAt: e.capturedAt.toISOString(),
+        receivedAt: e.receivedAt.toISOString(),
+        reason: e.reason,
+      })),
+    };
+  }
+}
+
+/** Shifts, crew assignments (time-bounded) and the day planner. */
+@Controller()
+export class ShiftsController {
+  constructor(@Inject(DB) private readonly db: Db) {}
+
+  @RequirePermission('jobs.job.view')
+  @Get('planner')
+  async planner(@Hub() hub: HubRequestContext, @Query() q: unknown) {
+    const f = body(PlannerQuery, q);
+    const from = new Date(`${f.date}T00:00:00.000Z`);
+    const to = new Date(from.getTime() + 36 * 3_600_000);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const shifts = await tx.shift.findMany({
+        where: {
+          startsAt: { lt: to },
+          endsAt: { gt: new Date(from.getTime() - 12 * 3_600_000) },
+          state: { not: 'CANCELLED' },
+          ...(f.locationId ? { locationId: f.locationId } : {}),
+        },
+        include: shiftInclude,
+        orderBy: { startsAt: 'asc' },
+      });
+      const unallocated = await tx.job.findMany({
+        where: {
+          journeyDate: from,
+          state: { in: [...ALLOCATABLE] as JobState[] },
+          ...(f.locationId ? { locationId: f.locationId } : {}),
+        },
+        include: { allocations: true },
+        orderBy: { plannedStart: 'asc' },
+      });
+      return {
+        date: f.date,
+        shifts: await Promise.all(shifts.map((s) => this.dto(tx, s))),
+        unallocated: unallocated.map(jobDto),
+      };
+    });
+  }
+
+  @RequirePermission('jobs.job.view')
+  @Get('shifts')
+  async list(@Hub() hub: HubRequestContext, @Query() q: unknown) {
+    const f = body(ShiftsQuery, q);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const day = f.date ? new Date(`${f.date}T00:00:00.000Z`) : null;
+      const rows = await tx.shift.findMany({
+        where: {
+          ...(day
+            ? {
+                startsAt: {
+                  gte: new Date(day.getTime() - 12 * 3_600_000),
+                  lt: new Date(day.getTime() + 36 * 3_600_000),
+                },
+              }
+            : {}),
+          ...(f.locationId ? { locationId: f.locationId } : {}),
+        },
+        include: shiftInclude,
+        orderBy: { startsAt: 'asc' },
+        take: 300,
+      });
+      return { data: await Promise.all(rows.map((s) => this.dto(tx, s))) };
+    });
+  }
+
+  @RequirePermission('jobs.allocate')
+  @Post('shifts')
+  async create(@Hub() hub: HubRequestContext, @Body() raw: unknown): Promise<ShiftDto> {
+    const input = body(ShiftCreate, raw);
+    if (new Date(input.endsAt).getTime() - new Date(input.startsAt).getTime() > 16 * 3_600_000)
+      throw new HubError('VALIDATION_FAILED', 400, 'A shift is at most 16 hours');
+    return this.db
+      .withTenant(tenantOf(hub), async (tx) => {
+        if (!(await tx.location.findUnique({ where: { id: input.locationId } }))) throw notFound();
+        if (hub.locationIds && !hub.locationIds.includes(input.locationId)) throw notFound();
+        if (!(await tx.vehicle.findUnique({ where: { id: input.vehicleId } }))) throw notFound();
+        const orgId = hub.orgId as string;
+        const s = await tx.shift.create({
+          data: {
+            organisationId: orgId,
+            locationId: input.locationId,
+            vehicleId: input.vehicleId,
+            startsAt: new Date(input.startsAt),
+            endsAt: new Date(input.endsAt),
+            createdBy: hub.user.id,
+          },
+        });
+        await tx.resourceBooking.create({
+          data: {
+            organisationId: orgId,
+            resourceType: 'VEHICLE',
+            resourceId: input.vehicleId,
+            startsAt: s.startsAt,
+            endsAt: s.endsAt,
+            sourceType: 'SHIFT',
+            sourceId: s.id,
+          },
+        });
+        await tx.shiftChange.create({
+          data: {
+            organisationId: orgId,
+            shiftId: s.id,
+            kind: 'CREATED',
+            details: { vehicleId: input.vehicleId },
+            byUserId: hub.user.id,
+          },
+        });
+        for (const c of input.crew) await this.addCrew(tx, hub, s, c);
+        await audit(this.db, tx, hub, {
+          action: 'jobs.shift.create',
+          entity: 'shift',
+          entityId: s.id,
+          summary: { crew: input.crew.length },
+        });
+        return this.dto(
+          tx,
+          await tx.shift.findUniqueOrThrow({ where: { id: s.id }, include: shiftInclude }),
+        );
+      })
+      .catch(this.doubleBooked);
+  }
+
+  @OrgMember()
+  @Get('shifts/:id')
+  async get(@Hub() hub: HubRequestContext, @Param('id', idPipe) id: string): Promise<ShiftDto> {
+    requireAny(hub, 'jobs.job.view', 'crew.today.view');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const s = await tx.shift.findUnique({ where: { id }, include: shiftInclude });
+      if (!s) throw notFound();
+      if (!hub.permissions.has('jobs.job.view') && !(await this.myAssignment(tx, hub, id)))
+        throw notFound();
+      return this.dto(tx, s);
+    });
+  }
+
+  @RequirePermission('jobs.allocate')
+  @Post('shifts/:id/crew')
+  async crew(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<ShiftDto> {
+    const input = body(CrewInput, raw);
+    return this.db
+      .withTenant(tenantOf(hub), async (tx) => {
+        const s = await this.openShift(tx, id);
+        await this.addCrew(tx, hub, s, input);
+        await this.tellCrew(tx, s.organisationId, id, 'crew-add');
+        await audit(this.db, tx, hub, {
+          action: 'jobs.shift.crew_add',
+          entity: 'shift',
+          entityId: id,
+          summary: { staffId: input.staffId, role: input.role },
+        });
+        return this.dto(
+          tx,
+          await tx.shift.findUniqueOrThrow({ where: { id }, include: shiftInclude }),
+        );
+      })
+      .catch(this.doubleBooked);
+  }
+
+  @RequirePermission('jobs.allocate')
+  @Post('shifts/:id/crew/:assignmentId/end')
+  async endCrew(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Param('assignmentId', idPipe) assignmentId: string,
+    @Body() raw: unknown,
+  ): Promise<ShiftDto> {
+    const input = body(CrewEndInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      await this.openShift(tx, id);
+      const a = await tx.crewAssignment.findFirst({
+        where: { id: assignmentId, shiftId: id, active: true },
+      });
+      if (!a) throw notFound();
+      const now = new Date();
+      // Before it starts the assignment is withdrawn; once running it ends now (history kept).
+      const withdraw = now <= a.startsAt;
+      await tx.crewAssignment.update({
+        where: { id: a.id },
+        data: withdraw
+          ? { active: false, endedReason: input.reason }
+          : { endsAt: now, endedReason: input.reason },
+      });
+      await tx.resourceBooking.updateMany({
+        where: { sourceType: 'CREW', sourceId: a.id, active: true },
+        data: withdraw ? { active: false } : { endsAt: now },
+      });
+      await tx.shiftChange.create({
+        data: {
+          organisationId: a.organisationId,
+          shiftId: id,
+          kind: 'CREW_END',
+          details: { staffId: a.staffId, role: a.role },
+          reason: input.reason,
+          byUserId: hub.user.id,
+        },
+      });
+      const leaving = await tx.staff.findUnique({ where: { id: a.staffId } });
+      await this.tellCrew(tx, a.organisationId, id, `crew-end:${a.id}`, leaving?.userId);
+      await audit(this.db, tx, hub, {
+        action: 'jobs.shift.crew_end',
+        entity: 'shift',
+        entityId: id,
+        summary: { staffId: a.staffId },
+      });
+      return this.dto(
+        tx,
+        await tx.shift.findUniqueOrThrow({ where: { id }, include: shiftInclude }),
+      );
+    });
+  }
+
+  /** Vehicle swap: the replacement needs its own VDI and cleaning before the shift can run (UAT-03). */
+  @RequirePermission('jobs.allocate')
+  @Post('shifts/:id/vehicle')
+  async swap(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<ShiftDto> {
+    const input = body(VehicleSwapInput, raw);
+    return this.db
+      .withTenant(tenantOf(hub), async (tx) => {
+        const s = await this.openShift(tx, id);
+        if (s.vehicleId === input.vehicleId)
+          throw new HubError('CONFLICT', 409, 'That vehicle is already on the shift');
+        if (!(await tx.vehicle.findUnique({ where: { id: input.vehicleId } }))) throw notFound();
+        const now = new Date();
+        const from = now > s.startsAt ? now : s.startsAt;
+        await tx.resourceBooking.updateMany({
+          where: { sourceType: 'SHIFT', sourceId: id, resourceType: 'VEHICLE', active: true },
+          data: now > s.startsAt ? { endsAt: now } : { active: false },
+        });
+        await tx.resourceBooking.create({
+          data: {
+            organisationId: s.organisationId,
+            resourceType: 'VEHICLE',
+            resourceId: input.vehicleId,
+            startsAt: from,
+            endsAt: s.endsAt,
+            sourceType: 'SHIFT',
+            sourceId: id,
+          },
+        });
+        await tx.shift.update({ where: { id }, data: { vehicleId: input.vehicleId } });
+        await tx.shiftChange.create({
+          data: {
+            organisationId: s.organisationId,
+            shiftId: id,
+            kind: 'VEHICLE_SWAP',
+            details: { from: s.vehicleId, to: input.vehicleId },
+            reason: input.reason,
+            byUserId: hub.user.id,
+          },
+        });
+        await this.tellCrew(tx, s.organisationId, id, `swap:${input.vehicleId}`);
+        await audit(this.db, tx, hub, {
+          action: 'jobs.shift.vehicle_swap',
+          entity: 'shift',
+          entityId: id,
+          summary: { from: s.vehicleId, to: input.vehicleId },
+        });
+        return this.dto(
+          tx,
+          await tx.shift.findUniqueOrThrow({ where: { id }, include: shiftInclude }),
+        );
+      })
+      .catch(this.doubleBooked);
+  }
+
+  /** Generic "shift updated" push to the crew (and to anyone just removed from it). */
+  private async tellCrew(
+    tx: TenantTx,
+    orgId: string,
+    shiftId: string,
+    event: string,
+    extraUserId?: string | null,
+  ) {
+    const users = await shiftCrewUserIds(tx, shiftId);
+    await queuePush(tx, {
+      orgId,
+      userIds: extraUserId ? [...users, extraUserId] : users,
+      kind: 'SHIFT_CHANGED',
+      refId: shiftId,
+      event: `${event}:${Date.now()}`,
+    });
+  }
+
+  @OrgMember()
+  @Get('shifts/:id/gate')
+  async gate(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+  ): Promise<z.infer<typeof ShiftGateDto>> {
+    requireAny(hub, 'crew.today.view');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const mine = await this.myAssignment(tx, hub, id);
+      if (!mine) throw notFound();
+      const s = await tx.shift.findUniqueOrThrow({ where: { id } });
+      const g = await shiftGateFor(tx, id, mine.staffId, new Date());
+      return { shiftId: id, canStart: g.canStart, checks: g.checks, state: s.state };
+    });
+  }
+
+  @RequirePermission('crew.today.view')
+  @Post('shifts/:id/start')
+  async start(@Hub() hub: HubRequestContext, @Param('id', idPipe) id: string) {
+    return this.db
+      .withTenant(tenantOf(hub), async (tx) => {
+        const mine = await this.myAssignment(tx, hub, id);
+        if (!mine) throw notFound();
+        const s = await tx.shift.findUniqueOrThrow({ where: { id } });
+        if (s.state !== 'PLANNED' && s.state !== 'STARTED')
+          throw new HubError('CONFLICT', 409, 'The shift is not running');
+        const now = new Date();
+        const g = await shiftGateFor(tx, id, mine.staffId, now);
+        if (!g.canStart) {
+          await audit(this.db, tx, hub, {
+            action: 'jobs.shift.start_blocked',
+            entity: 'shift',
+            entityId: id,
+            summary: {
+              failing: g.checks
+                .filter((c) => c.result !== 'PASS')
+                .map((c) => c.code)
+                .join(','),
+            },
+          });
+          return { blocked: g };
+        }
+        if (s.state === 'PLANNED') {
+          await tx.shift.update({ where: { id }, data: { state: 'STARTED', startedAt: now } });
+          await tx.shiftChange.create({
+            data: {
+              organisationId: s.organisationId,
+              shiftId: id,
+              kind: 'STARTED',
+              details: { staffId: mine.staffId },
+              byUserId: hub.user.id,
+            },
+          });
+        }
+        await audit(this.db, tx, hub, {
+          action: 'jobs.shift.start',
+          entity: 'shift',
+          entityId: id,
+        });
+        return { shiftId: id, canStart: true, checks: g.checks, state: 'STARTED' as const };
+      })
+      .then((r) => {
+        if (r.blocked)
+          throw new HubError(
+            'SHIFT_GATE_BLOCKED',
+            422,
+            'The shift cannot start yet',
+            r.blocked.checks as unknown as Record<string, unknown>[],
+          );
+        return r;
+      });
+  }
+
+  // ---- helpers ----------------------------------------------------------------------------
+  private doubleBooked = (e: unknown): never => {
+    if (isExclusion(e))
+      throw new HubError(
+        'CONFLICT',
+        409,
+        'That vehicle or person is already booked at an overlapping time',
+      );
+    throw e;
+  };
+
+  private async openShift(tx: TenantTx, id: string) {
+    const s = await tx.shift.findUnique({ where: { id } });
+    if (!s) throw notFound();
+    if (s.state === 'ENDED' || s.state === 'CANCELLED')
+      throw new HubError('CONFLICT', 409, 'The shift is not running');
+    return s;
+  }
+
+  private async myAssignment(tx: TenantTx, hub: HubRequestContext, shiftId: string) {
+    const staff = await tx.staff.findFirst({
+      where: { userId: hub.user.id },
+      select: { id: true },
+    });
+    if (!staff) return null;
+    return tx.crewAssignment.findFirst({ where: { shiftId, staffId: staff.id, active: true } });
+  }
+
+  private async addCrew(
+    tx: TenantTx,
+    hub: HubRequestContext,
+    s: { id: string; organisationId: string; startsAt: Date; endsAt: Date },
+    c: z.infer<typeof CrewInput>,
+  ) {
+    const staff = await tx.staff.findUnique({ where: { id: c.staffId } });
+    if (!staff) throw notFound();
+    if (staff.lifecycleState === 'LEAVER')
+      throw new HubError('VALIDATION_FAILED', 400, 'A leaver cannot be rostered');
+    const start = c.startsAt ? new Date(c.startsAt) : s.startsAt;
+    const end = c.endsAt ? new Date(c.endsAt) : s.endsAt;
+    if (start < s.startsAt || end > s.endsAt || end <= start)
+      throw new HubError('VALIDATION_FAILED', 400, 'Crew time must fall within the shift');
+    const a = await tx.crewAssignment.create({
+      data: {
+        organisationId: s.organisationId,
+        shiftId: s.id,
+        staffId: c.staffId,
+        role: c.role,
+        startsAt: start,
+        endsAt: end,
+        createdBy: hub.user.id,
+      },
+    });
+    await tx.resourceBooking.create({
+      data: {
+        organisationId: s.organisationId,
+        resourceType: 'STAFF',
+        resourceId: c.staffId,
+        startsAt: start,
+        endsAt: end,
+        sourceType: 'CREW',
+        sourceId: a.id,
+      },
+    });
+    await tx.shiftChange.create({
+      data: {
+        organisationId: s.organisationId,
+        shiftId: s.id,
+        kind: 'CREW_ADD',
+        details: { staffId: c.staffId, role: c.role },
+        byUserId: hub.user.id,
+      },
+    });
+  }
+
+  private async dto(tx: TenantTx, s: ShiftRow): Promise<ShiftDto> {
+    const v = await tx.vehicle.findUniqueOrThrow({
+      where: { id: s.vehicleId },
+      select: { callsign: true, status: true },
+    });
+    const staff = await tx.staff.findMany({
+      where: { id: { in: s.crew.map((c) => c.staffId) } },
+      select: { id: true, staffNo: true, displayName: true },
+    });
+    return {
+      id: s.id,
+      locationId: s.locationId,
+      vehicleId: s.vehicleId,
+      vehicleCallsign: v.callsign,
+      vehicleStatus: v.status,
+      startsAt: s.startsAt.toISOString(),
+      endsAt: s.endsAt.toISOString(),
+      state: s.state,
+      crew: s.crew.map((c) => {
+        const p = staff.find((x) => x.id === c.staffId);
+        return {
+          id: c.id,
+          staffId: c.staffId,
+          staffNo: p?.staffNo ?? '',
+          displayName: p?.displayName ?? '',
+          role: c.role,
+          startsAt: c.startsAt.toISOString(),
+          endsAt: c.endsAt.toISOString(),
+          active: c.active,
+        };
+      }),
+      jobs: s.allocations.map((a) => ({
+        jobId: a.jobId,
+        code: a.job.code,
+        state: a.job.state,
+        startsAt: a.startsAt.toISOString(),
+        endsAt: a.endsAt.toISOString(),
+      })),
+      changes: s.changes.map((c) => ({
+        kind: c.kind,
+        details: c.details as Record<string, unknown>,
+        reason: c.reason,
+        at: c.at.toISOString(),
+      })),
+      version: s.version,
+    };
+  }
+}
