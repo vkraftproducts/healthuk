@@ -140,6 +140,43 @@ describe('web shell', () => {
     await waitFor(() => current('Dashboard'));
   });
 
+  it('refetches what is on screen when the server signals a change, and says it is live', async () => {
+    let signal: (e: 'ready' | 'change') => void = () => {};
+    const get = vi.fn(async () => ({ data: [] }));
+    renderApp(
+      {
+        me: async (o) => me(o, []),
+        readyz: async () => ({ status: 'ready' }),
+        get,
+        watchChanges: (_org, onEvent, abort) =>
+          new Promise<void>((resolve) => {
+            signal = onEvent;
+            onEvent('ready');
+            abort.addEventListener('abort', () => resolve());
+          }),
+      },
+      '/staff',
+    );
+    await waitFor(() => expect(screen.getByTestId('live-state')).toHaveTextContent('Live'));
+    await waitFor(() => expect(get).toHaveBeenCalled());
+    const before = get.mock.calls.length;
+    signal('change');
+    await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('says when live updates are down rather than implying the figures are current', async () => {
+    renderApp({
+      me: async (o) => me(o, []),
+      readyz: async () => ({ status: 'ready' }),
+      watchChanges: async () => {
+        throw new Error('offline');
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('live-state')).toHaveTextContent(/Reconnecting.*out of date/),
+    );
+  });
+
   it('links each action row to the page that deals with it', async () => {
     const row = (item: string, module: string, link: Record<string, string>) => ({
       key: item,

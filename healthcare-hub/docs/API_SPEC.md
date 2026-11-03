@@ -143,3 +143,7 @@ POST /workbook-imports {sheet, csv, columns} → GET /workbook-items → POST /w
 GET /audit-log?entity&actor&from&to   POST /audit-log/verify-chain
 POST /exports/full (org-wide data portability export, admin.export.full, audited) → export job (ZIP)
 ```
+
+### Live updates
+
+- `GET /live/changes` — any member of the organisation. `text/event-stream`: `ready` once listening, then `change` when the organisation has new data. Carries no record data: refetch through the normal endpoints. Ends after `LIVE_STREAM_MAX_SECONDS` (default 300); reconnect to continue.

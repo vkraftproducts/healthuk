@@ -82,6 +82,20 @@ records a synthetic licence check for ST-0042, and books, allocates and offers o
 Expect `"allocated": true` and a job code such as `J-100`. Run it again on another day for a
 new shift (on the same day it is refused: no double booking).
 
+### Load a realistic working day
+
+With the API and mock sign-in running:
+
+```bash
+pnpm demo:data
+```
+
+This adds synthetic staff, vehicles, defects, requirements with verified evidence, shifts, today's jobs, risks and events through the real API, with dates relative to today. Running it again does nothing. To start again from empty: `docker compose down -v`, then repeat the database steps above.
+
+### Live updates
+
+The header shows **Live** while the screen is connected. Changes by anyone in the organisation appear within a couple of seconds, with no reload. If the connection drops, the header says so and it reconnects by itself.
+
 ### Sign in as someone else (web)
 
 Select **Sign out** at the bottom of the left-hand menu, then pick another user on the sign-in

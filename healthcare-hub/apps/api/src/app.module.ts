@@ -34,6 +34,8 @@ import { ImportsController } from './modules/data/imports.controller.js';
 import { PrivacyController } from './modules/privacy/privacy.controller.js';
 import { JobsController, ShiftsController } from './modules/dispatch/jobs.controller.js';
 import { CrewController } from './modules/crew/crew.controller.js';
+import { LiveController } from './modules/live/live.controller.js';
+import { LiveChanges } from './modules/live/live.service.js';
 import { BLOB_STORE, LocalBlobStore, type BlobStore } from './storage/blob-store.js';
 import { BasicScanner, SCANNER, type Scanner } from './storage/scanner.js';
 
@@ -64,6 +66,7 @@ export const CONTROLLERS = [
   JobsController,
   ShiftsController,
   CrewController,
+  LiveController,
 ] as const;
 
 export interface AppDeps {
@@ -96,6 +99,7 @@ export class AppModule {
         { provide: SCANNER, useValue: deps.scanner ?? new BasicScanner() },
         TokenService,
         UserCache,
+        LiveChanges,
         // Order matters: authenticate + build context first, then authorise.
         { provide: APP_GUARD, useClass: HubGuard },
         { provide: APP_GUARD, useClass: PermissionGuard },

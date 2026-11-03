@@ -41,6 +41,7 @@ export async function sign(o: TokenOpts): Promise<string> {
 export async function makeApp(
   urls: { app: string },
   extraControllers: Parameters<typeof createApp>[0]['extraControllers'] = [],
+  configOverrides: Record<string, string> = {},
 ) {
   const config = loadConfig({
     NODE_ENV: 'test',
@@ -49,6 +50,7 @@ export async function makeApp(
     OIDC_AUDIENCE: AUDIENCE,
     OIDC_JWKS_URI: 'https://idp.test.example/jwks',
     LOG_LEVEL: 'silent' as never,
+    ...configOverrides,
   } as Record<string, string>);
   const logger = createLogger('silent');
   const db = createDb(urls.app);

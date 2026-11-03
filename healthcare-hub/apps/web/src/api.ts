@@ -26,6 +26,15 @@ export interface ApiClient {
   ): Promise<unknown>;
   /** Authenticated file download (CSV exports, evidence packs). */
   download?(path: string, orgId: string | null): Promise<Blob>;
+  /**
+   * Follows the organisation's live changes stream until it ends. Uses fetch, not EventSource,
+   * because the token goes in a header and never in a URL.
+   */
+  watchChanges?(
+    orgId: string,
+    onEvent: (event: 'ready' | 'change') => void,
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 export function createApiClient(auth: AuthClient, baseUrl = ''): ApiClient {
@@ -67,6 +76,26 @@ export function createApiClient(auth: AuthClient, baseUrl = ''): ApiClient {
       const res = await fetch(`${baseUrl}${path}`, { headers });
       if (!res.ok) throw new ApiError(res.status, 'DOWNLOAD_FAILED');
       return res.blob();
+    },
+    async watchChanges(orgId, onEvent, signal) {
+      const res = await fetch(`${baseUrl}/api/v1/live/changes`, {
+        headers: { authorization: `Bearer ${await auth.getToken()}`, 'x-org-id': orgId },
+        signal,
+      });
+      if (!res.ok || !res.body) throw new ApiError(res.status, 'LIVE_UNAVAILABLE');
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += value;
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) {
+          if (frame.startsWith('event: ready')) onEvent('ready');
+          else if (frame.startsWith('event: change')) onEvent('change');
+        }
+      }
     },
   };
 }

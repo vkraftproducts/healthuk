@@ -17,6 +17,8 @@ const Env = z.object({
   LOG_LEVEL: z.enum(['silent', 'fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   /** Requests per user (or IP) per minute. Raised only for load-test environments. */
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(100_000).default(300),
+  /** How long one live-updates stream stays open before the client must reconnect. */
+  LIVE_STREAM_MAX_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
 });
 
 export type AppConfig = z.infer<typeof Env>;

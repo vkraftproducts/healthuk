@@ -20,7 +20,8 @@
     "prepare": "husky || true",
     "dev:oidc": "pnpm --filter @hub/api dev:oidc",
     "db:bootstrap": "pnpm --filter @hub/db bootstrap",
-    "demo:crew": "pnpm --filter @hub/api demo:crew"
+    "demo:crew": "pnpm --filter @hub/api demo:crew",
+    "demo:data": "pnpm --filter @hub/api demo:data"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.4",

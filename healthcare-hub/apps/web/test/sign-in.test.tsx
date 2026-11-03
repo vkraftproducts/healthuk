@@ -45,6 +45,26 @@ beforeEach(() => sessionStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MockAuthClient', () => {
+  it('fetches a new token when the current one is about to expire, not only at sign-in', async () => {
+    let minted = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        minted += 1;
+        return new Response(JSON.stringify({ access_token: `t${minted}`, expires_in: 900 }));
+      }),
+    );
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const auth = new MockAuthClient('http://oidc.test');
+    await auth.signIn('manager');
+    expect(await auth.getToken()).toBe('t1');
+    now.mockReturnValue(1_000_000 + 10 * 60_000);
+    expect(await auth.getToken()).toBe('t1');
+    now.mockReturnValue(1_000_000 + 15 * 60_000);
+    expect(await auth.getToken()).toBe('t2');
+    now.mockRestore();
+  });
+
   it('needs a sign-in, keeps the token in memory and only the user name in session storage', async () => {
     tokenServer();
     const auth = new MockAuthClient('http://oidc.test');

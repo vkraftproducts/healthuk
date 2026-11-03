@@ -31,6 +31,7 @@ import { Planner } from './pages/planner/Planner.js';
 import { Reports } from './pages/reports/Reports.js';
 import { AppContext } from './shell/AppContext.js';
 import { Shell } from './shell/Shell.js';
+import { useLiveUpdates } from './shell/useLiveUpdates.js';
 
 /** Page for each top-level navigation item; anything not listed shows a "coming later" page. */
 const PAGES: Record<string, () => JSX.Element> = {
@@ -116,6 +117,7 @@ function Authenticated({
   // Default to the first membership; drop a stale selection the server no longer accepts.
   const me = meQ.data;
   const effectiveOrg = orgId ?? me?.memberships[0]?.organisationId ?? null;
+  const live = useLiveUpdates(api, me ? effectiveOrg : null);
   if (me && !orgId && effectiveOrg) queueMicrotask(() => setOrgId(effectiveOrg));
 
   if (meQ.isError) {
@@ -177,6 +179,7 @@ function Authenticated({
         },
         lastUpdated,
         sourceOk: readyQ.data?.status === 'ready',
+        live,
         signOut: signOut ? () => signOut('You have signed out.') : undefined,
       }}
     >

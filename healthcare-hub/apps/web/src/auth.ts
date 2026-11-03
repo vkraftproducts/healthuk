@@ -63,6 +63,7 @@ function writeSession(user: string | null): void {
 export class MockAuthClient implements AuthClient {
   readonly kind = 'dev' as const;
   private token: string | null = null;
+  private tokenExpiresAt = 0;
   private user: string | null;
 
   constructor(
@@ -73,7 +74,7 @@ export class MockAuthClient implements AuthClient {
   }
 
   async getToken(): Promise<string> {
-    if (this.token) return this.token;
+    if (this.token && Date.now() < this.tokenExpiresAt) return this.token;
     if (!this.user) throw new NotSignedInError();
     let res: Response;
     try {
@@ -82,8 +83,10 @@ export class MockAuthClient implements AuthClient {
       throw new Error('Dev sign-in failed: the mock sign-in server is not running (pnpm dev).');
     }
     if (!res.ok) throw new Error('Dev sign-in failed: unknown user.');
-    const body = (await res.json()) as { access_token: string };
+    const body = (await res.json()) as { access_token: string; expires_in?: number };
     this.token = body.access_token;
+    // A minute early, so a token is not sent just as it expires.
+    this.tokenExpiresAt = Date.now() + ((body.expires_in ?? 900) - 60) * 1000;
     return this.token;
   }
   async signIn(user?: string): Promise<void> {

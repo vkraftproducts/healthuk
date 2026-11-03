@@ -36,7 +36,7 @@ function useScope(orgId: string | null) {
 }
 
 export function Shell() {
-  const { me, orgId, setOrgId, refresh, lastUpdated, sourceOk, signOut } = useApp();
+  const { me, orgId, setOrgId, refresh, lastUpdated, sourceOk, live, signOut } = useApp();
   const orgs = [
     ...new Map(me.memberships.map((m) => [m.organisationId, m.organisationName])).entries(),
   ];
@@ -144,6 +144,22 @@ export function Shell() {
             </button>
             <span aria-hidden="true">|</span>
             <span>Last updated {lastUpdated ? londonTime.format(lastUpdated) : '—'}</span>
+            {live && (
+              <>
+                <span aria-hidden="true">|</span>
+                <span data-testid="live-state" className="inline-flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
+                  />
+                  {live === 'live'
+                    ? 'Live'
+                    : live === 'connecting'
+                      ? 'Connecting…'
+                      : 'Reconnecting… figures may be out of date'}
+                </span>
+              </>
+            )}
             {sourceOk ? (
               <StatusBadge status="GREEN" reason="all sources available" />
             ) : (

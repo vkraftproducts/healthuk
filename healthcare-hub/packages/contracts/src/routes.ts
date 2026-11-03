@@ -139,6 +139,13 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Current user, memberships and permissions',
     response: MeResponse,
   },
+  liveChanges: {
+    method: 'get',
+    path: '/live/changes',
+    summary:
+      'Server-sent events: `ready` once listening, then `change` when this organisation has new data. Carries no record data; refetch through the normal endpoints.',
+    response: z.object({}),
+  },
   orgGet: {
     method: 'get',
     path: '/organisations/{id}',
