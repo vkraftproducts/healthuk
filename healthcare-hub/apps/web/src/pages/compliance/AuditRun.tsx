@@ -1,8 +1,6 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { Link, useParams } from '@tanstack/react-router';
-import { useRef, useState } from 'react';
 import { Section, smallButton, useCan, useRun, words } from '../../components.js';
-import type { ApiClient } from '../../api.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useOne } from '../settings/hooks.js';
 import { ActionsTable } from './Compliance.js';
@@ -16,27 +14,6 @@ const RESULT_KIND: Record<string, StatusKind> = {
   NOT_APPLICABLE: 'NOT_APPLICABLE',
 };
 
-/** Uploads one file as evidence (no requirement link) and returns its evidence item id. */
-export async function uploadFile(
-  api: ApiClient,
-  orgId: string | null,
-  file: File,
-): Promise<string> {
-  const req = (await api.send('POST', '/api/v1/evidence/uploads', orgId, {
-    title: file.name.slice(0, 200),
-    mime: file.type || 'application/pdf',
-    sizeBytes: file.size,
-  })) as Row;
-  const put = await fetch(req.uploadUrl, {
-    method: 'PUT',
-    headers: { 'content-type': file.type || 'application/pdf' },
-    body: file,
-  });
-  if (!put.ok) throw new Error('upload failed');
-  await api.send('POST', `/api/v1/evidence/${req.evidenceVersionId}/complete`, orgId, {});
-  return req.evidenceItemId as string;
-}
-
 /** Compliance and audit workspace (wireframe 03, UI_SPEC 03). */
 export function AuditRun() {
   const { id } = useParams({ strict: false }) as { id: string };
@@ -44,15 +21,10 @@ export function AuditRun() {
   const can = useCan();
   const res = useOne<Row>(`/api/v1/audit-runs/${id}`);
   const { run, msg } = useRun();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [target, setTarget] = useState<string | null>(null);
   if (res.isLoading) return <p role="status">Loading…</p>;
   if (res.isError || !res.data) return <p role="alert">This audit is not available.</p>;
   const a = res.data;
   const open = a.status === 'SCHEDULED' || a.status === 'IN_PROGRESS';
-  const mine = (a.actions as Row[]).filter(
-    (x) => x.ownerUserId === me.user.id && x.kind === 'ACTION' && x.status !== 'VERIFIED',
-  );
   return (
     <div className="space-y-4">
       <nav aria-label="Breadcrumb" className="text-sm">
@@ -148,40 +120,8 @@ export function AuditRun() {
           ]}
         />
       </Section>
-      <Section
-        title="Actions"
-        actions={
-          mine.length > 0 ? (
-            <button
-              className={smallButton}
-              onClick={() => {
-                setTarget(mine[0]!.id);
-                fileRef.current?.click();
-              }}
-            >
-              Upload evidence for {mine[0]!.code}
-            </button>
-          ) : undefined
-        }
-      >
+      <Section title="Actions">
         <ActionsTable rows={a.actions} caption="Actions from this audit" />
-        <input
-          ref={fileRef}
-          type="file"
-          className="sr-only"
-          aria-label="Action evidence file"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file && target)
-              void run(async () => {
-                const item = await uploadFile(api, orgId, file);
-                await api.send('POST', `/api/v1/actions/${target}/evidence`, orgId, {
-                  evidenceItemIds: [item],
-                });
-              }, 'Evidence submitted. The action stays open until a verifier accepts it.');
-            e.target.value = '';
-          }}
-        />
       </Section>
       <Section title="Evidence and decision history">
         <ol className="space-y-1 text-sm">

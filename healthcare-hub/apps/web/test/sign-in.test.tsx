@@ -17,7 +17,7 @@ const me: MeResponse = {
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'HR_LEAD',
       roleName: 'HR lead',

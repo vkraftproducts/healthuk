@@ -1,6 +1,6 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import { SEED_IDS, SEED_SUPPORT, makeApp, sign } from './harness.js';
 
 const urls = inject('urls');
@@ -67,14 +67,18 @@ describe('organisation', () => {
   it('returns the organisation to any member and refuses a mismatched id with 404', async () => {
     const ok = await call('GET', `/api/v1/organisations/${ORG}`, { sub: 'dev|crew' });
     expect(ok.status).toBe(200);
-    expect(ok.body).toMatchObject({ id: ORG, name: 'Example organisation', regulator: 'CQC' });
+    expect(ok.body).toMatchObject({
+      id: ORG,
+      name: 'Meadowbank Patient Transport',
+      regulator: 'CQC',
+    });
     expect((await call('GET', `/api/v1/organisations/${OTHER_ORG}`)).status).toBe(404);
   });
 
   it('updates with If-Match, rejects stale versions (409) and a missing If-Match (400), audits the change', async () => {
     const cur = (await call('GET', `/api/v1/organisations/${ORG}`)).body;
     const ok = await call('PATCH', `/api/v1/organisations/${ORG}`, {
-      body: { name: 'Example organisation' },
+      body: { name: 'Meadowbank Patient Transport' },
       ifMatch: cur.version,
     });
     expect(ok.status).toBe(200);
@@ -267,6 +271,28 @@ describe('users, invites and revoke', () => {
     });
     expect(r.status).toBe(422);
     expect(r.body.code).toBe('OVERRIDE_NOT_PERMITTED');
+  });
+
+  it('a database clock ahead of the API neither delays a new member nor extends a revoked one', async () => {
+    const crew = await role('CREW');
+    const email = 'skew.person@example.test';
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() - 5000 });
+    try {
+      const inv = await call('POST', '/api/v1/admin/users', {
+        body: { email, displayName: 'Skew Person', roleId: crew },
+      });
+      expect(inv.status).toBe(201);
+      const joined = await call('GET', '/api/v1/me', { sub: 'idp|skew', email, org: ORG });
+      expect(joined.status).toBe(200);
+      const rev = await call('POST', `/api/v1/admin/users/${inv.body.id}/revoke`, {
+        body: { reason: 'Left the company' },
+      });
+      expect(rev.status).toBe(200);
+      const after = await call('GET', '/api/v1/me', { sub: 'idp|skew', org: ORG });
+      expect(after.status).toBe(401);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('denies user management to non-admins', async () => {

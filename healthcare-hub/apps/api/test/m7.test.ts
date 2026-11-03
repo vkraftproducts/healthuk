@@ -540,7 +540,8 @@ describe('devices, push and revocation [APP-02, MOBILE_APP device security]', ()
     await call('POST', `/api/v1/jobs/${j.id}/offer`);
     const sender = new MemoryPushSender();
     const r = await db.withTenant({ orgId: ORG, userId: SYSTEM_USER_ID }, (tx) =>
-      sendPendingPush(tx, new Date(), sender),
+      // A worker clock behind the database must not hold back a message that is already due.
+      sendPendingPush(tx, new Date(Date.now() - 5000), sender),
     );
     expect(r.sent).toBeGreaterThanOrEqual(1);
     const mine = sender.sent.filter((x) => x.target.token === 'ExponentPushToken[synthetic-1]');

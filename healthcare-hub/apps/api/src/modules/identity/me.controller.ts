@@ -3,6 +3,7 @@ import type { Db } from '@hub/db';
 import type { MeResponse } from '@hub/contracts';
 import { AuthenticatedOnly } from '../../common/decorators.js';
 import { Hub, type HubRequestContext } from '../../common/context.js';
+import { dbNow } from '../../common/http.js';
 import { DB } from '../../db.provider.js';
 
 @Controller('me')
@@ -12,9 +13,9 @@ export class MeController {
   @AuthenticatedOnly()
   @Get()
   async me(@Hub() hub: HubRequestContext): Promise<MeResponse> {
-    const now = new Date();
-    const memberships = await this.db.withIdentity(hub.user.id, (tx) =>
-      tx.membership.findMany({
+    const memberships = await this.db.withIdentity(hub.user.id, async (tx) => {
+      const now = await dbNow(tx);
+      return tx.membership.findMany({
         where: {
           userId: hub.user.id,
           validFrom: { lte: now },
@@ -25,8 +26,8 @@ export class MeController {
           role: { select: { key: true, name: true } },
         },
         orderBy: { createdAt: 'asc' },
-      }),
-    );
+      });
+    });
     return {
       user: { id: hub.user.id, email: hub.user.email, displayName: hub.user.displayName },
       memberships: memberships.map((m) => ({

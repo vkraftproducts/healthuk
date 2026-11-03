@@ -33,7 +33,7 @@ let serious = 0;
 // Sign-in page first (scanned), then sign in as the seeded registered manager.
 await page.goto(base, { waitUntil: 'networkidle' });
 await scan('Sign in');
-await page.getByRole('radio', { name: /Dev Manager/ }).check();
+await page.getByRole('radio', { name: /Manager/ }).check();
 await page.getByRole('button', { name: 'Sign in' }).click();
 await page.getByRole('navigation', { name: 'Primary' }).waitFor();
 for (const s of SCREENS) {

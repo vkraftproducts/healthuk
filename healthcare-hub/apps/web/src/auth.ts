@@ -28,12 +28,11 @@ export class NotSignedInError extends Error {
 
 /** Synthetic users created by `pnpm db:seed` (packages/db/src/admin/seed.ts). */
 export const DEV_USERS = [
-  { key: 'manager', name: 'Dev Manager', role: 'Registered manager' },
-  { key: 'admin', name: 'Ola Admin', role: 'Organisation admin' },
+  { key: 'manager', name: 'Manager', role: 'Registered manager' },
   { key: 'hr', name: 'Hana Rowe', role: 'HR lead' },
   { key: 'fleet', name: 'Finn Lee', role: 'Fleet lead' },
   { key: 'governance', name: 'Gina Ode', role: 'Governance lead' },
-  { key: 'dispatcher', name: 'Dev Dispatcher', role: 'Dispatcher' },
+  { key: 'dispatcher', name: 'Dispatcher', role: 'Dispatcher' },
   { key: 'auditor', name: 'Audrey Ward', role: 'Auditor (read only)' },
   { key: 'crew', name: 'Alex Morgan', role: 'Crew' },
   { key: 'other-manager', name: 'Other Manager', role: 'Manager, other organisation' },

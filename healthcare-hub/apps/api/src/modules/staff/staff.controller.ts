@@ -53,7 +53,7 @@ import {
 import { CONFIG, type AppConfig } from '../../config.js';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
-import { audit, body, ifMatchVersion, staleOrNotFound } from '../../common/http.js';
+import { audit, body, dbNow, ifMatchVersion, staleOrNotFound } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { encryptField, fieldKey } from '../../common/field-crypto.js';
 import { DB } from '../../db.provider.js';
@@ -583,7 +583,7 @@ export class StaffController {
         // Leavers lose access immediately (SEC: joiner/mover/leaver).
         await tx.membership.updateMany({
           where: { userId: s.userId, validTo: null },
-          data: { validTo: now, updatedBy: hub.user.id },
+          data: { validTo: await dbNow(tx), updatedBy: hub.user.id },
         });
       }
       if (input.to === 'ACTIVE') await syncStaffRequirements(tx, id, hub.user.id, now);

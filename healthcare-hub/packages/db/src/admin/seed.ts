@@ -1,6 +1,6 @@
 import pg from 'pg';
 
-// Synthetic data only (CLAUDE.md #10). Matches the wireframes: "Example organisation / Watford"
+// Synthetic data only (CLAUDE.md #10). Matches the wireframes: "Meadowbank Patient Transport / Watford"
 // plus a second organisation used by isolation tests. Fixed IDs make the seed idempotent.
 // Runs as the migrator role; sets the org context itself because RLS is FORCEd.
 // Requires migrations (which sync the system roles) to have run first.
@@ -121,7 +121,7 @@ export const SEED_USERS: Record<string, SeedUser> = {
     id: u(1),
     subject: 'dev|manager',
     email: 'manager@example.test',
-    name: 'Dev Manager',
+    name: 'Manager',
     org: SEED_IDS.orgExample,
     role: 'REGISTERED_MANAGER',
   },
@@ -137,7 +137,7 @@ export const SEED_USERS: Record<string, SeedUser> = {
     id: u(3),
     subject: 'dev|dispatcher',
     email: 'dispatcher@example.test',
-    name: 'Dev Dispatcher',
+    name: 'Dispatcher',
     org: SEED_IDS.orgExample,
     role: 'DISPATCHER',
   },
@@ -156,14 +156,6 @@ export const SEED_USERS: Record<string, SeedUser> = {
     name: 'Gina Ode',
     org: SEED_IDS.orgExample,
     role: 'GOVERNANCE_LEAD',
-  },
-  admin: {
-    id: u(6),
-    subject: 'dev|admin',
-    email: 'admin@example.test',
-    name: 'Ola Admin',
-    org: SEED_IDS.orgExample,
-    role: 'ORG_ADMIN',
   },
   crew: {
     id: u(7),
@@ -223,7 +215,7 @@ export async function seed(adminUrl: string): Promise<void> {
     const orgs: [string, string, string[], string, string, boolean][] = [
       [
         SEED_IDS.orgExample,
-        'Example organisation',
+        'Meadowbank Patient Transport',
         ['ambulance'],
         SEED_IDS.locWatford,
         'Watford',

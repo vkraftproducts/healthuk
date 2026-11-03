@@ -135,6 +135,8 @@ export const ActionDto = z.object({
   verifierUserId: uuid.nullable(),
   verifiedAt: isoDateTime.nullable(),
   reauditRunId: uuid.nullable(),
+  /** The audit behind a finding's action. Only on the actions list. */
+  auditRunId: uuid.optional(),
   overdue: z.boolean(),
   history: z.array(
     z.object({
@@ -632,7 +634,12 @@ export const ActionRow = z.object({
   status: RagStatus,
   reasonText: z.string(),
   tiles: z.array(z.string()),
-  link: z.object({ type: z.string(), id: uuid }),
+  link: z.object({
+    type: z.string(),
+    id: uuid,
+    subjectType: z.string().optional(),
+    subjectId: uuid.optional(),
+  }),
 });
 export type ActionRow = z.infer<typeof ActionRow>;
 export const ActionRowsQuery = DashboardQuery.extend({ tile: DashboardTile.default('all') });

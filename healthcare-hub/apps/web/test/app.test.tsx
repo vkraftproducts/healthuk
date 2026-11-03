@@ -14,12 +14,12 @@ const me = (orgId: string | null, permissions: string[]): MeResponse => ({
   user: {
     id: '01900000-0000-7000-8000-000000000101',
     email: 'm@example.test',
-    displayName: 'Dev Manager',
+    displayName: 'Manager',
   },
   memberships: [
     {
       organisationId: ORG_A,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'REGISTERED_MANAGER',
       roleName: 'Registered manager',
@@ -68,7 +68,7 @@ describe('web shell', () => {
       within(select)
         .getAllByRole('option')
         .map((o) => o.textContent),
-    ).toEqual(['Example organisation', 'Second organisation']);
+    ).toEqual(['Meadowbank Patient Transport', 'Second organisation']);
     await userEvent.selectOptions(select, ORG_B);
     await waitFor(() => expect(meFn).toHaveBeenCalledWith(ORG_B));
   });
@@ -116,6 +116,116 @@ describe('web shell', () => {
     );
     expect(screen.getByText('Internal measure — not a CQC rating')).toBeInTheDocument();
     expect(screen.getByText(/not CQC ratings/)).toBeInTheDocument();
+  });
+
+  it('goes back to the previous page from the breadcrumb, or home when there is none', async () => {
+    const shell = {
+      me: async (o: string | null) => me(o, []),
+      readyz: async () => ({ status: 'ready' as const }),
+      get: async () => ({ data: [] }),
+    };
+    const current = (name: string) =>
+      expect(screen.getByRole('link', { name })).toHaveAttribute('aria-current', 'page');
+    const back = () => screen.findByRole('button', { name: /^Go back: / });
+
+    const view = renderApp(shell, '/premises');
+    await userEvent.click(await screen.findByRole('link', { name: 'Staff' }));
+    await waitFor(() => current('Staff'));
+    await userEvent.click(await back());
+    await waitFor(() => current('Premises safety'));
+    view.unmount();
+
+    renderApp(shell, '/staff');
+    await userEvent.click(await back());
+    await waitFor(() => current('Dashboard'));
+  });
+
+  it('links each action row to the page that deals with it', async () => {
+    const row = (item: string, module: string, link: Record<string, string>) => ({
+      key: item,
+      module,
+      item,
+      ownerUserId: null,
+      deadline: null,
+      status: 'RED',
+      reasonText: 'Needs action',
+      tiles: [],
+      link,
+    });
+    const rows = [
+      row('Vehicle', 'FLEET', { type: 'VEHICLE', id: 'v1' }),
+      row('Audit', 'COMPLIANCE', { type: 'AUDIT_RUN', id: 'a1' }),
+      row('Action', 'COMPLIANCE', { type: 'ACTION', id: 'x' }),
+      row('Event', 'EVENTS', { type: 'EVENT', id: 'x' }),
+      row('Job', 'JOBS', { type: 'JOB', id: 'x' }),
+      row('Staff check', 'STAFF', {
+        type: 'REQUIREMENT',
+        id: 'x',
+        subjectType: 'STAFF',
+        subjectId: 's1',
+      }),
+      row('Vehicle check', 'FLEET', {
+        type: 'REQUIREMENT',
+        id: 'x',
+        subjectType: 'VEHICLE',
+        subjectId: 'v2',
+      }),
+      row('Fire check', 'PREMISES', {
+        type: 'REQUIREMENT',
+        id: 'x',
+        subjectType: 'PREMISES',
+        subjectId: 'p1',
+      }),
+    ];
+    renderApp({
+      me: async (o) => me(o, ['dashboard.view']),
+      readyz: async () => ({ status: 'ready' }),
+      get: async (p: string) =>
+        p.startsWith('/api/v1/dashboard/summary')
+          ? {
+              tiles: {},
+              modules: [],
+              operations: {},
+              coverage: { percent: null },
+              lastRefreshedAt: '2026-10-30T09:00:00Z',
+              sources: [],
+            }
+          : { data: rows },
+    });
+    const expected: [string, string][] = [
+      ['Fleet: Vehicle', '/vehicles/v1'],
+      ['Compliance: Audit', '/compliance/audits/a1'],
+      ['Compliance: Action', '/compliance?tab=actions'],
+      ['Events: Event', '/compliance?tab=events'],
+      ['Jobs: Job', '/planner'],
+      ['Staff: Staff check', '/staff/s1'],
+      ['Fleet: Vehicle check', '/vehicles/v2'],
+      ['Premises: Fire check', '/premises'],
+    ];
+    for (const [name, href] of expected)
+      expect(await screen.findByRole('link', { name })).toHaveAttribute('href', href);
+  });
+
+  it('opens the Compliance tab named in the URL, unless the user may not see it', async () => {
+    const get = async () => ({ data: [] });
+    const readyz = async () => ({ status: 'ready' }) as const;
+    const view = renderApp(
+      { me: async (o) => me(o, ['compliance.audit.view']), readyz, get },
+      '/compliance?tab=actions',
+    );
+    expect(await screen.findByRole('tab', { name: 'Actions' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    view.unmount();
+    renderApp(
+      { me: async (o) => me(o, ['compliance.audit.view']), readyz, get },
+      '/compliance?tab=events',
+    );
+    expect(await screen.findByRole('tab', { name: 'Audits' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('shows "source unavailable" rather than stale or zero figures when the dashboard cannot load', async () => {

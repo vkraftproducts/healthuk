@@ -132,7 +132,8 @@ export interface ActionRowOut {
   reasonText: string;
   /** Which tiles this row is counted in: every tile number equals its drill-down rows. */
   tiles: string[];
-  link: { type: string; id: string };
+  /** Requirements have no page of their own: subject says whose page shows them. */
+  link: { type: string; id: string; subjectType?: string; subjectId?: string };
 }
 
 const MODULE_OF: Record<string, Module> = {
@@ -224,7 +225,7 @@ export async function dashboardRows(
       status: r.status,
       reasonText: r.reasonText,
       tiles,
-      link: { type: 'REQUIREMENT', id: i.id },
+      link: { type: 'REQUIREMENT', id: i.id, subjectType: i.subjectType, subjectId: i.subjectId },
     });
   }
   if (!f.module || f.module === 'FLEET') {

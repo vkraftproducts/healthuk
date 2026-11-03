@@ -1,4 +1,4 @@
-import { Link, Outlet } from '@tanstack/react-router';
+import { Link, Outlet, useRouter } from '@tanstack/react-router';
 import { StatusBadge } from '@hub/ui';
 import { NAV_ITEMS } from '../nav.js';
 import { useList, useOne } from '../pages/settings/hooks.js';
@@ -20,7 +20,7 @@ const SERVICE_NAME: Record<string, string> = {
   'care-home': 'Care home',
 };
 
-/** "Example organisation / Watford / Ambulance service" from the user's scope. */
+/** "Meadowbank Patient Transport / Watford / Ambulance service" from the user's scope. */
 function useScope(orgId: string | null) {
   const { me } = useApp();
   const org = useOne<{ sectorPacks?: string[] }>(orgId ? `/api/v1/organisations/${orgId}` : null);
@@ -42,6 +42,11 @@ export function Shell() {
   ];
   const activeOrg = orgs.find(([id]) => id === orgId)?.[1];
   const scope = useScope(orgId);
+  const crumbs = [activeOrg ?? 'No organisation', scope.location, scope.service];
+  const router = useRouter();
+  // Opened directly (nothing to go back to): the dashboard is the way out.
+  const goBack = () =>
+    router.history.canGoBack() ? router.history.back() : void router.navigate({ to: '/' });
 
   return (
     <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
@@ -112,13 +117,20 @@ export function Shell() {
       <div className="min-w-0 flex-1 space-y-5 p-4 md:p-6">
         <header className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-hub-line bg-white px-5 py-3.5">
           <nav aria-label="Breadcrumb">
-            <ol className="flex flex-wrap gap-x-3 font-semibold text-hub-navy">
-              <li>{activeOrg ?? 'No organisation'}</li>
-              <li aria-hidden="true">/</li>
-              <li>{scope.location}</li>
-              <li aria-hidden="true">/</li>
-              <li aria-current="page">{scope.service}</li>
-            </ol>
+            <button
+              type="button"
+              onClick={goBack}
+              title="Go back"
+              aria-label={`Go back: ${crumbs.join(' / ')}`}
+              className="flex flex-wrap gap-x-3 text-left font-semibold text-hub-navy underline-offset-2 hover:underline"
+            >
+              {crumbs.map((crumb, i) => (
+                <span key={crumb} className="flex gap-x-3">
+                  {i > 0 && <span aria-hidden="true">/</span>}
+                  {crumb}
+                </span>
+              ))}
+            </button>
           </nav>
           <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-hub-muted">
             <time dateTime={new Date().toISOString()}>{londonDate.format(new Date())}</time>

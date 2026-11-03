@@ -1,7 +1,7 @@
 # Run Healthcare Hub locally (Windows) and test M0–M7
 
 Everything here is local and synthetic: a Postgres container, a development-only sign-in
-server (mock OIDC) and the seeded "Example organisation / Watford" data. Commands are for
+server (mock OIDC) and the seeded "Meadowbank Patient Transport / Watford" data. Commands are for
 **PowerShell** in the repository folder:
 
 ```powershell
@@ -43,11 +43,11 @@ docker compose ps             # wait until postgres shows "healthy"
 pnpm build                    # builds the shared packages (and generates the Prisma client)
 pnpm db:bootstrap             # creates roles hub_app / hub_migrator; hands them the hub database
 pnpm db:migrate               # applies migrations 0001 … 0010
-pnpm db:seed                  # synthetic Example organisation / Watford
+pnpm db:seed                  # synthetic Meadowbank Patient Transport / Watford
 ```
 
 Expected: `bootstrap complete`, `applied: 0001_foundations.sql, … 0010_m7_crew.sql`, and
-`seeded Example organisation / Watford`. Re-running migrate or seed is safe.
+`seeded Meadowbank Patient Transport / Watford`. Re-running migrate or seed is safe.
 
 ## 4. Start the stack
 
@@ -67,7 +67,7 @@ Invoke-RestMethod http://localhost:4000/readyz      # status: ready, database: o
 ```
 
 Open **http://localhost:5173**. The sign-in page lists the seeded synthetic users: pick
-**Dev Manager** (registered manager) and select **Sign in**.
+**Manager** (registered manager) and select **Sign in**.
 
 ### Give the crew a shift for today
 
@@ -89,12 +89,11 @@ page. Each browser tab keeps its own sign-in, so two tabs can be two different u
 
 | User            | Name                     | Role                            | Good for                         |
 | --------------- | ------------------------ | ------------------------------- | -------------------------------- |
-| `manager`       | Dev Manager              | Registered manager              | Everything; dashboard            |
-| `admin`         | Ola Admin                | Organisation admin              | Settings, users, roles (M1)      |
+| `manager`       | Manager                  | Registered manager              | Everything; dashboard            |
 | `hr`            | Hana Rowe                | HR lead                         | Staff, checks, verification (M3) |
 | `fleet`         | Finn Lee                 | Fleet lead                      | Vehicles, defects, VDIs (M4)     |
 | `governance`    | Gina Ode                 | Governance lead                 | Audits, policies, events (M5)    |
-| `dispatcher`    | Dev Dispatcher           | Dispatcher                      | Work planner, allocation (M6)    |
+| `dispatcher`    | Dispatcher               | Dispatcher                      | Work planner, allocation (M6)    |
 | `crew`/`crew2`  | Alex Morgan / Sam Taylor | Crew                            | Crew API and app (M7)            |
 | `auditor`       | Audrey Ward              | Auditor (read-only)             | Checking that read-only holds    |
 | `other-manager` | Other Manager            | Manager, **other organisation** | Tenant isolation checks          |

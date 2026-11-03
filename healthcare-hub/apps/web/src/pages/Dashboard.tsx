@@ -1,4 +1,5 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { saveBlob, useCan, useRun, words } from '../components.js';
 import { useApp } from '../shell/AppContext.js';
@@ -30,6 +31,26 @@ const MODULE_LABEL: Record<string, string> = {
   EVENTS: 'Events',
   JOBS: 'Jobs',
 };
+/** Where a row goes when it has no record page of its own. */
+const MODULE_PAGE: Record<string, { to: string; search?: { tab: string } }> = {
+  STAFF: { to: '/staff' },
+  FLEET: { to: '/vehicles' },
+  COMPLIANCE: { to: '/compliance' },
+  PREMISES: { to: '/premises' },
+  EVENTS: { to: '/compliance', search: { tab: 'events' } },
+  JOBS: { to: '/planner' },
+};
+
+/** The page that deals with an action row, from the API's link. Access is still checked there. */
+function destination(r: Row): { to: string; params?: { id: string }; search?: { tab: string } } {
+  const { type, id, subjectType, subjectId } = r.link;
+  if (type === 'VEHICLE') return { to: '/vehicles/$id', params: { id } };
+  if (type === 'AUDIT_RUN') return { to: '/compliance/audits/$id', params: { id } };
+  if (type === 'ACTION') return { to: '/compliance', search: { tab: 'actions' } };
+  if (subjectType === 'STAFF') return { to: '/staff/$id', params: { id: subjectId } };
+  if (subjectType === 'VEHICLE') return { to: '/vehicles/$id', params: { id: subjectId } };
+  return MODULE_PAGE[r.module] ?? { to: '/' };
+}
 
 export function Dashboard() {
   const { me, orgId, api } = useApp();
@@ -178,7 +199,14 @@ export function Dashboard() {
                   {
                     key: 'item',
                     header: 'Item',
-                    cell: (r) => `${MODULE_LABEL[r.module] ?? r.module}: ${r.item}`,
+                    cell: (r) => (
+                      <Link
+                        {...destination(r)}
+                        className="font-medium text-hub-teal-dark underline"
+                      >
+                        {`${MODULE_LABEL[r.module] ?? r.module}: ${r.item}`}
+                      </Link>
+                    ),
                   },
                   {
                     key: 'owner',

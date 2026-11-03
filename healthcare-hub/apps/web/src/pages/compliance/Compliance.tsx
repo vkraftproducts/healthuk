@@ -1,6 +1,6 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
-import { Link } from '@tanstack/react-router';
-import { useState, type FormEvent } from 'react';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { useRef, type FormEvent } from 'react';
 import {
   Field,
   Section,
@@ -12,6 +12,7 @@ import {
   useRun,
   words,
 } from '../../components.js';
+import type { ApiClient } from '../../api.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useOne } from '../settings/hooks.js';
 
@@ -40,45 +41,46 @@ const ACK_TEXT: Record<string, string> = {
 export function Compliance() {
   const can = useCan();
   const { orgId } = useApp();
-  const [tab, setTab] = useState('audits');
+  const tabs = [
+    { id: 'audits', label: 'Audits', show: can('compliance.audit.view') },
+    {
+      id: 'actions',
+      label: 'Actions',
+      show: can('compliance.audit.view') || can('compliance.action.manage'),
+    },
+    {
+      id: 'policies',
+      label: 'Policies',
+      show: can('compliance.policy.manage') || can('compliance.policy.acknowledge'),
+    },
+    {
+      id: 'risks',
+      label: 'Risk register',
+      show: can('compliance.risk.manage') || can('compliance.audit.view'),
+    },
+    { id: 'events', label: 'Events', show: can('events.event.view') },
+    {
+      id: 'registration',
+      label: 'Registration',
+      show: can('compliance.registration.manage') || can('compliance.audit.view'),
+    },
+    {
+      id: 'pack',
+      label: 'Evidence pack',
+      show: can('reports.export') && can('compliance.audit.view'),
+    },
+  ];
+  // The tab lives in the URL, so links can open one and Back returns to it; one this user cannot
+  // see is ignored.
+  const { tab: linked } = useSearch({ strict: false }) as { tab?: string };
+  const tab = tabs.find((t) => t.id === linked && t.show)?.id ?? 'audits';
+  const navigate = useNavigate();
+  const setTab = (id: string) => void navigate({ to: '/compliance', search: { tab: id } });
   if (!orgId) return <p role="status">Select an organisation to continue.</p>;
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Compliance</h1>
-      <Tabs
-        label="Compliance sections"
-        current={tab}
-        onChange={setTab}
-        tabs={[
-          { id: 'audits', label: 'Audits', show: can('compliance.audit.view') },
-          {
-            id: 'actions',
-            label: 'Actions',
-            show: can('compliance.audit.view') || can('compliance.action.manage'),
-          },
-          {
-            id: 'policies',
-            label: 'Policies',
-            show: can('compliance.policy.manage') || can('compliance.policy.acknowledge'),
-          },
-          {
-            id: 'risks',
-            label: 'Risk register',
-            show: can('compliance.risk.manage') || can('compliance.audit.view'),
-          },
-          { id: 'events', label: 'Events', show: can('events.event.view') },
-          {
-            id: 'registration',
-            label: 'Registration',
-            show: can('compliance.registration.manage') || can('compliance.audit.view'),
-          },
-          {
-            id: 'pack',
-            label: 'Evidence pack',
-            show: can('reports.export') && can('compliance.audit.view'),
-          },
-        ]}
-      >
+      <Tabs label="Compliance sections" current={tab} onChange={setTab} tabs={tabs}>
         {tab === 'audits' && <Audits />}
         {tab === 'actions' && <Actions />}
         {tab === 'policies' && <Policies />}
@@ -197,10 +199,79 @@ function Audits() {
   );
 }
 
-export function ActionsTable({ rows, caption }: { rows: Row[]; caption: string }) {
+/** Uploads one file as evidence (no requirement link) and returns its evidence item id. */
+async function uploadFile(api: ApiClient, orgId: string | null, file: File): Promise<string> {
+  const req = (await api.send('POST', '/api/v1/evidence/uploads', orgId, {
+    title: file.name.slice(0, 200),
+    mime: file.type || 'application/pdf',
+    sizeBytes: file.size,
+  })) as Row;
+  const put = await fetch(req.uploadUrl, {
+    method: 'PUT',
+    headers: { 'content-type': file.type || 'application/pdf' },
+    body: file,
+  });
+  if (!put.ok) throw new Error('upload failed');
+  await api.send('POST', `/api/v1/evidence/${req.evidenceVersionId}/complete`, orgId, {});
+  return req.evidenceItemId as string;
+}
+
+/** Where an action's work is done, and how the next step reads. Access is still checked there. */
+function actionWork(a: Row): {
+  step: string;
+  link: { to: string; params?: { id: string }; search?: { tab: string } };
+} {
+  const inRun = (step: string, id: string) => ({
+    step,
+    link: { to: '/compliance/audits/$id', params: { id } },
+  });
+  const inTab = (step: string, tab: string) => ({
+    step,
+    link: { to: '/compliance', search: { tab } },
+  });
+  if (a.kind === 'REAUDIT' && a.reauditRunId) return inRun('Complete the re-audit', a.reauditRunId);
+  if (a.auditRunId) return inRun('Open the audit', a.auditRunId);
+  if (a.sourceType === 'EVENT') return inTab('Open the event', 'events');
+  if (a.sourceType === 'RISK') return inTab('Open the risk', 'risks');
+  return inTab('Open the registration records', 'registration');
+}
+
+/** `linked`: the table is away from the action's source, so rows link to it. */
+export function ActionsTable({
+  rows,
+  caption,
+  linked = false,
+}: {
+  rows: Row[];
+  caption: string;
+  linked?: boolean;
+}) {
   const { api, orgId, me } = useApp();
   const can = useCan();
   const { run, msg } = useRun();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const uploadFor = useRef<string | null>(null);
+  /** Mirrors the API: the owner, or anyone who manages actions. A re-audit closes by completing it. */
+  const canUpload = (a: Row) =>
+    a.kind === 'ACTION' &&
+    a.status !== 'VERIFIED' &&
+    can('compliance.evidence.upload') &&
+    (a.ownerUserId === me.user.id || can('compliance.action.manage'));
+  const uploadButton = (a: Row) => {
+    const label = a.status === 'EVIDENCE_SUBMITTED' ? 'Add evidence' : 'Upload evidence';
+    return (
+      <button
+        className={smallButton}
+        aria-label={`${label} for ${a.code}`}
+        onClick={() => {
+          uploadFor.current = a.id;
+          fileRef.current?.click();
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
   const verify = (a: Row, decision: 'ACCEPTED' | 'REJECTED') => {
     const reason = window.prompt(
       decision === 'ACCEPTED'
@@ -229,7 +300,16 @@ export function ActionsTable({ rows, caption }: { rows: Row[]; caption: string }
           {
             key: 'c',
             header: 'Action',
-            cell: (r) => `${r.code} ${r.title}${r.kind === 'REAUDIT' ? ' (re-audit)' : ''}`,
+            cell: (r) => {
+              const title = `${r.code} ${r.title}${r.kind === 'REAUDIT' ? ' (re-audit)' : ''}`;
+              return linked ? (
+                <Link {...actionWork(r).link} className="font-medium text-hub-teal-dark underline">
+                  {title}
+                </Link>
+              ) : (
+                title
+              );
+            },
           },
           {
             key: 'o',
@@ -267,14 +347,42 @@ export function ActionsTable({ rows, caption }: { rows: Row[]; caption: string }
                   </button>
                 </div>
               ) : r.status === 'EVIDENCE_SUBMITTED' ? (
-                'Awaiting a verifier'
+                <div className="flex flex-wrap items-center gap-2">
+                  Awaiting a verifier
+                  {canUpload(r) && uploadButton(r)}
+                </div>
+              ) : r.status === 'VERIFIED' ? null : canUpload(r) ? (
+                uploadButton(r)
+              ) : linked ? (
+                <Link {...actionWork(r).link} className="font-medium text-hub-teal-dark underline">
+                  {actionWork(r).step}
+                </Link>
               ) : r.kind === 'REAUDIT' ? (
                 'Complete the re-audit'
-              ) : r.status !== 'VERIFIED' ? (
-                'Upload evidence from the audit'
-              ) : null,
+              ) : (
+                'Awaiting evidence from the owner'
+              ),
           },
         ]}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        className="sr-only"
+        aria-label="Action evidence file"
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          const target = uploadFor.current;
+          if (file && target)
+            void run(async () => {
+              const item = await uploadFile(api, orgId, file);
+              await api.send('POST', `/api/v1/actions/${target}/evidence`, orgId, {
+                evidenceItemIds: [item],
+              });
+            }, 'Evidence submitted. The action stays open until a verifier accepts it.');
+          e.target.value = '';
+        }}
       />
     </>
   );
@@ -283,7 +391,7 @@ export function ActionsTable({ rows, caption }: { rows: Row[]; caption: string }
 function Actions() {
   const res = useOne<{ data: Row[] }>('/api/v1/actions');
   if (res.isError) return <p role="alert">Could not load actions.</p>;
-  return <ActionsTable rows={res.data?.data ?? []} caption="Open actions" />;
+  return <ActionsTable rows={res.data?.data ?? []} caption="Open actions" linked />;
 }
 
 function Policies() {

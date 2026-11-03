@@ -6,6 +6,7 @@ import type { Db, ResolvedUser } from '@hub/db';
 import { CONFIG, type AppConfig } from '../config.js';
 import { PUBLIC_KEY } from '../common/decorators.js';
 import type { HubRequest } from '../common/context.js';
+import { dbNow } from '../common/http.js';
 import { HubError, notFound } from '../common/problem.filter.js';
 import { mfaRequiredFor } from './mfa.js';
 import { TokenService } from './token.service.js';
@@ -56,11 +57,12 @@ export class HubGuard implements CanActivate {
     const { memberships, grants, supportPerms, deviceRevoked } = await this.db.withIdentity(
       user.id,
       async (tx) => {
+        const dbTime = await dbNow(tx);
         const memberships = await tx.membership.findMany({
           where: {
             userId: user.id,
-            validFrom: { lte: now },
-            OR: [{ validTo: null }, { validTo: { gt: now } }],
+            validFrom: { lte: dbTime },
+            OR: [{ validTo: null }, { validTo: { gt: dbTime } }],
           },
           include: { role: { include: { rolePermissions: true } } },
         });

@@ -33,6 +33,8 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
   await fastify.register(cors, {
     origin: [deps.config.WEB_ORIGIN],
     credentials: true,
+    // The library's default leaves out PUT, which the browser needs for direct evidence uploads.
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: [
       'Authorization',
       'Content-Type',

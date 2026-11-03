@@ -559,8 +559,8 @@ export class AuditsController {
   ): Promise<{ data: ActionDto[] }> {
     requireAny(hub, 'compliance.audit.view', 'compliance.action.manage', 'events.event.view');
     const f = body(ActionListQuery, q);
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.action.findMany({
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.action.findMany({
         where: {
           ...(f.status === 'ACTIVE' ? { status: { not: 'VERIFIED' } } : { status: f.status }),
           ...(f.ownerUserId ? { ownerUserId: f.ownerUserId } : {}),
@@ -568,9 +568,21 @@ export class AuditsController {
         include: { history: true },
         orderBy: [{ deadline: 'asc' }, { code: 'asc' }],
         take: 500,
-      }),
-    );
-    return { data: rows.map((a) => toActionDto(a)) };
+      });
+      const findings = await tx.auditFinding.findMany({
+        where: {
+          id: { in: rows.filter((a) => a.sourceType === 'FINDING').map((a) => a.sourceId) },
+        },
+        select: { id: true, runId: true },
+      });
+      const runOf = new Map(findings.map((x) => [x.id, x.runId]));
+      return {
+        data: rows.map((a) => {
+          const auditRunId = a.sourceType === 'FINDING' ? runOf.get(a.sourceId) : undefined;
+          return { ...toActionDto(a), ...(auditRunId ? { auditRunId } : {}) };
+        }),
+      };
+    });
   }
 
   @OrgMember()

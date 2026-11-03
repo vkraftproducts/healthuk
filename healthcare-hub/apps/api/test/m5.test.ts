@@ -139,6 +139,19 @@ describe('AUD-102 and corrective actions [UAT-04]', () => {
   });
 });
 
+describe('actions list', () => {
+  it('names the audit run behind each action raised from a finding', async () => {
+    const rows = (await call('GET', '/api/v1/actions')).body.data as J[];
+    const fromFindings = rows.filter((a) => a.sourceType === 'FINDING');
+    expect(fromFindings.length).toBeGreaterThan(0);
+    for (const a of fromFindings) {
+      const audit = await call('GET', `/api/v1/audit-runs/${a.auditRunId}`);
+      expect(audit.status).toBe(200);
+      expect((audit.body.findings as J[]).map((f) => f.id)).toContain(a.sourceId);
+    }
+  });
+});
+
 describe('audit builder, runs and sampling [AUD-01, AUD-02]', () => {
   it('drafts need a second person to publish and management to activate before they can run', async () => {
     const code = `AUD-T${Date.now().toString(36).toUpperCase().slice(-6)}`;

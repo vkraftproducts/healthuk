@@ -110,8 +110,10 @@ export async function sendPendingPush(
   sender: PushSender,
 ): Promise<{ sent: number; failed: number; dead: number }> {
   const out = { sent: 0, failed: 0, dead: 0 };
+  // New messages are stamped by the database (column default), so due-ness uses its clock too.
+  const [clock] = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
   const due = await tx.pushMessage.findMany({
-    where: { sentAt: null, dead: false, nextAttemptAt: { lte: now } },
+    where: { sentAt: null, dead: false, nextAttemptAt: { lte: clock!.now } },
     orderBy: { createdAt: 'asc' },
     take: 200,
   });
