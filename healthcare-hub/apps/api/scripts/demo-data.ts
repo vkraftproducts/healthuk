@@ -3,6 +3,7 @@
 // nothing once the data is loaded. To start again, reset the database (see RUN_LOCALLY).
 import { SEED_IDS } from '@hub/db/admin';
 import type { Call } from './crew-demo-lib.js';
+import { devToken } from './dev-token.js';
 import { loadDemoData, type PutFile } from './demo-data-lib.js';
 
 if (process.env.NODE_ENV === 'production') {
@@ -17,13 +18,10 @@ if (!/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(`${API}/`)) {
 }
 
 const call: Call = async (method, path, sub, body) => {
-  const t = (await (await fetch(`${OIDC}/token?user=${sub.replace('dev|', '')}&mfa=1`)).json()) as {
-    access_token: string;
-  };
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${t.access_token}`,
+      authorization: `Bearer ${await devToken(OIDC, sub.replace('dev|', ''))}`,
       'x-org-id': SEED_IDS.orgExample,
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
     },

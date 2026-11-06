@@ -47,7 +47,7 @@ beforeAll(async () => {
   const admin = rename(urls.admin, dbName);
   await bootstrap({ superuserUrl: server, adminUrl: admin, appUrl: app_ });
   await migrate(admin);
-  await seed(admin);
+  await seed(admin, { singleOrganisation: true });
   const made = await makeApp({ app: app_ });
   app = made.app;
   close = () => made.db.close();
@@ -62,6 +62,14 @@ afterAll(async () => {
 });
 
 describe('demo data', () => {
+  it('starts from a database with one organisation, Exora', async () => {
+    const su = new pg.Client({ connectionString: rename(urls.superuser, dbName) });
+    await su.connect();
+    const { rows } = await su.query<{ name: string }>('SELECT name FROM organisation');
+    await su.end();
+    expect(rows.map((r) => r.name)).toEqual(['Exora']);
+  });
+
   it('loads a working day through the real API, with nothing refused', async () => {
     const r = await loadDemoData(call, { locationId: SEED_IDS.locWatford }, putFile);
     expect(r.problems).toEqual([]);

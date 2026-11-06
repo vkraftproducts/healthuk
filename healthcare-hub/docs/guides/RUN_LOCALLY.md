@@ -1,7 +1,7 @@
 # Run Healthcare Hub locally (Windows) and test M0–M7
 
 Everything here is local and synthetic: a Postgres container, a development-only sign-in
-server (mock OIDC) and the seeded "Meadowbank Patient Transport / Watford" data. Commands are for
+server (mock OIDC) and the seeded "Exora / Watford" data. Commands are for
 **PowerShell** in the repository folder:
 
 ```powershell
@@ -43,11 +43,11 @@ docker compose ps             # wait until postgres shows "healthy"
 pnpm build                    # builds the shared packages (and generates the Prisma client)
 pnpm db:bootstrap             # creates roles hub_app / hub_migrator; hands them the hub database
 pnpm db:migrate               # applies migrations 0001 … 0010
-pnpm db:seed                  # synthetic Meadowbank Patient Transport / Watford
+pnpm db:seed                  # synthetic Exora / Watford
 ```
 
 Expected: `bootstrap complete`, `applied: 0001_foundations.sql, … 0010_m7_crew.sql`, and
-`seeded Meadowbank Patient Transport / Watford`. Re-running migrate or seed is safe.
+`seeded Exora / Watford`. Re-running migrate or seed is safe.
 
 ## 4. Start the stack
 
@@ -66,8 +66,11 @@ Check it is healthy (second PowerShell window):
 Invoke-RestMethod http://localhost:4000/readyz      # status: ready, database: ok
 ```
 
-Open **http://localhost:5173**. The sign-in page lists the seeded synthetic users: pick
-**Manager** (registered manager) and select **Sign in**.
+Open **http://localhost:5173** and sign in with username **manager** and password
+**Exora-dev-2026** (every development account starts with that password; set `DEV_PASSWORD`
+before `pnpm db:seed` to use another). Five wrong passwords lock an account for 15 minutes.
+Change a password with `pnpm dev:password <username>`. Reloading keeps you signed in (the tab
+keeps a refresh token until it closes); restarting the mock sign-in server signs everyone out.
 
 ### Give the crew a shift for today
 
@@ -98,19 +101,18 @@ The header shows **Live** while the screen is connected. Changes by anyone in th
 
 ### Sign in as someone else (web)
 
-Select **Sign out** at the bottom of the left-hand menu, then pick another user on the sign-in
+Select **Sign out** at the bottom of the left-hand menu, then sign in with another username on the sign-in
 page. Each browser tab keeps its own sign-in, so two tabs can be two different users.
 
-| User            | Name                     | Role                            | Good for                         |
-| --------------- | ------------------------ | ------------------------------- | -------------------------------- |
-| `manager`       | Manager                  | Registered manager              | Everything; dashboard            |
-| `hr`            | Hana Rowe                | HR lead                         | Staff, checks, verification (M3) |
-| `fleet`         | Finn Lee                 | Fleet lead                      | Vehicles, defects, VDIs (M4)     |
-| `governance`    | Gina Ode                 | Governance lead                 | Audits, policies, events (M5)    |
-| `dispatcher`    | Dispatcher               | Dispatcher                      | Work planner, allocation (M6)    |
-| `crew`/`crew2`  | Alex Morgan / Sam Taylor | Crew                            | Crew API and app (M7)            |
-| `auditor`       | Audrey Ward              | Auditor (read-only)             | Checking that read-only holds    |
-| `other-manager` | Other Manager            | Manager, **other organisation** | Tenant isolation checks          |
+| User           | Name                     | Role                | Good for                         |
+| -------------- | ------------------------ | ------------------- | -------------------------------- |
+| `manager`      | Manager                  | Registered manager  | Everything; dashboard            |
+| `hr`           | Hana Rowe                | HR lead             | Staff, checks, verification (M3) |
+| `fleet`        | Finn Lee                 | Fleet lead          | Vehicles, defects, VDIs (M4)     |
+| `governance`   | Gina Ode                 | Governance lead     | Audits, policies, events (M5)    |
+| `dispatcher`   | Dispatcher               | Dispatcher          | Work planner, allocation (M6)    |
+| `crew`/`crew2` | Alex Morgan / Sam Taylor | Crew                | Crew API and app (M7)            |
+| `auditor`      | Audrey Ward              | Auditor (read-only) | Checking that read-only holds    |
 
 ## 5. What to look at, milestone by milestone
 
@@ -128,7 +130,8 @@ page. Each browser tab keeps its own sign-in, so two tabs can be two different u
 
 ```powershell
 $org   = "01900000-0000-7000-8000-000000000001"
-$token = (Invoke-RestMethod "http://localhost:4010/token?user=crew").access_token
+$login = @{ username = "crew"; password = "Exora-dev-2026" } | ConvertTo-Json
+$token = (Invoke-RestMethod http://localhost:4010/token -Method Post -ContentType application/json -Body $login).access_token
 $h     = @{ Authorization = "Bearer $token"; "x-org-id" = $org }
 $today = Invoke-RestMethod http://localhost:4000/api/v1/crew/today -Headers $h
 $today.shift.gate.cards | Format-Table label, state, reasonText   # Driving clearance APPROVED, VDI/Cleaning REQUIRED

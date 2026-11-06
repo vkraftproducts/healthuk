@@ -12,9 +12,10 @@ import {
   keepPreviousData,
   useQuery,
 } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { ApiError, type ApiClient } from './api.js';
 import type { AuthClient } from './auth.js';
+import { NotSignedInError } from './auth.js';
 import { SignIn } from './pages/SignIn.js';
 import { NAV_ITEMS } from './nav.js';
 import { ComingSoon } from './pages/ComingSoon.js';
@@ -119,6 +120,12 @@ function Authenticated({
   const effectiveOrg = orgId ?? me?.memberships[0]?.organisationId ?? null;
   const live = useLiveUpdates(api, me ? effectiveOrg : null);
   if (me && !orgId && effectiveOrg) queueMicrotask(() => setOrgId(effectiveOrg));
+
+  // A stored development session the sign-in server no longer accepts: back to the sign-in page.
+  const sessionEnded = meQ.error instanceof NotSignedInError;
+  useEffect(() => {
+    if (sessionEnded) signOut?.('Your session has ended. Sign in again.');
+  }, [sessionEnded, signOut]);
 
   if (meQ.isError) {
     const inactive = meQ.error instanceof ApiError && meQ.error.status === 401;

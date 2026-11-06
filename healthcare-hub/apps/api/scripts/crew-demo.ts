@@ -2,6 +2,7 @@
 // DEV-ONLY: `pnpm --filter @hub/api demo:crew` with the API and mock OIDC running locally.
 import { SEED_IDS } from '@hub/db/admin';
 import { bookCrewDay, type Call } from './crew-demo-lib.js';
+import { devToken } from './dev-token.js';
 
 if (process.env.NODE_ENV === 'production') {
   console.error('crew-demo must never run in production');
@@ -11,13 +12,10 @@ const API = process.env.HUB_API_URL ?? `http://localhost:${process.env.API_PORT 
 const OIDC = process.env.OIDC_ISSUER ?? 'http://localhost:4010';
 
 const call: Call = async (method, path, sub, body) => {
-  const t = (await (await fetch(`${OIDC}/token?user=${sub.replace('dev|', '')}&mfa=1`)).json()) as {
-    access_token: string;
-  };
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${t.access_token}`,
+      authorization: `Bearer ${await devToken(OIDC, sub.replace('dev|', ''))}`,
       'x-org-id': SEED_IDS.orgExample,
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
     },

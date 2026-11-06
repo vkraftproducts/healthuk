@@ -11,6 +11,7 @@
     "dev:mobile": "pnpm --filter @hub/mobile dev",
     "db:migrate": "pnpm --filter @hub/db migrate",
     "db:seed": "pnpm --filter @hub/db seed",
+    "dev:password": "pnpm --filter @hub/db dev:password",
     "build": "turbo run build",
     "test": "turbo run test",
     "test:e2e": "echo 'Web Playwright E2E is part of M8; crew app E2E: maestro test apps/mobile/.maestro'",

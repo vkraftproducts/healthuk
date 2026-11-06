@@ -7,6 +7,8 @@ export interface MobileConfig {
   /** Local development against the mock OIDC only. */
   devAuth: boolean;
   devUser: string;
+  /** Development sign-in password for devUser (local development builds only). */
+  devPassword: string;
   /** Control room number for one-tap "Call control" (APP-02). */
   controlPhone: string;
   easProjectId?: string;
@@ -24,6 +26,7 @@ export function loadConfig(): MobileConfig {
     },
     devAuth: extra.devAuth ?? false,
     devUser: extra.devUser ?? 'crew',
+    devPassword: extra.devPassword ?? 'Exora-dev-2026',
     // Synthetic default from the Ofcom drama range.
     controlPhone: extra.controlPhone ?? '01632960000',
     ...(extra.easProjectId ? { easProjectId: extra.easProjectId } : {}),

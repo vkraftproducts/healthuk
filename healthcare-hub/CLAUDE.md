@@ -80,7 +80,7 @@ pnpm install
 pnpm dev              # docker compose (postgres, azurite, mailpit) + api + web
 pnpm dev:mobile       # Expo
 pnpm db:migrate       # prisma migrate dev
-pnpm db:seed          # synthetic "Meadowbank Patient Transport / Watford" data matching wireframes
+pnpm db:seed          # synthetic "Exora / Watford" data matching wireframes
 pnpm test             # vitest unit + integration (testcontainers postgres)
 pnpm test:e2e         # playwright web E2E incl. UAT scenarios
 pnpm lint && pnpm typecheck

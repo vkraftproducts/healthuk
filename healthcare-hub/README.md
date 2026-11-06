@@ -16,7 +16,7 @@ export DATABASE_SUPERUSER_URL=postgresql://postgres:postgres@localhost:5432/post
 export DATABASE_URL=postgresql://hub_app:hub_app_dev@localhost:5432/hub
 export DATABASE_ADMIN_URL=postgresql://hub_migrator:hub_migrator_dev@localhost:5432/hub
 pnpm --filter @hub/db bootstrap          # roles + database (once)
-pnpm db:migrate && pnpm db:seed          # schema + synthetic "Meadowbank Patient Transport / Watford"
+pnpm db:migrate && pnpm db:seed          # schema + synthetic "Exora / Watford"
 
 pnpm --filter @hub/api dev:oidc          # dev-only mock identity provider  (:4010)
 pnpm --filter @hub/api dev               # API                              (:4000)

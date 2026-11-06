@@ -19,7 +19,7 @@ const me = (orgId: string | null, permissions: string[]): MeResponse => ({
   memberships: [
     {
       organisationId: ORG_A,
-      organisationName: 'Meadowbank Patient Transport',
+      organisationName: 'Exora',
       locationId: null,
       roleKey: 'REGISTERED_MANAGER',
       roleName: 'Registered manager',
@@ -60,6 +60,20 @@ describe('web shell', () => {
     );
   });
 
+  it('shows the name, with nothing to choose, when the user has one organisation', async () => {
+    renderApp({
+      me: async (o) => {
+        const full = me(o, ['dashboard.view']);
+        return { ...full, memberships: full.memberships.slice(0, 1) };
+      },
+      readyz: async () => ({ status: 'ready' }),
+      get: unused,
+    });
+    await screen.findByRole('navigation', { name: 'Primary' });
+    expect(screen.queryByLabelText('Organisation')).toBeNull();
+    expect(screen.getByRole('complementary')).toHaveTextContent('Exora');
+  });
+
   it("lists only the user's organisations and re-queries with the selected one", async () => {
     const meFn = vi.fn(async (o: string | null) => me(o, ['dashboard.view']));
     renderApp({ me: meFn, readyz: async () => ({ status: 'ready' }) });
@@ -68,7 +82,7 @@ describe('web shell', () => {
       within(select)
         .getAllByRole('option')
         .map((o) => o.textContent),
-    ).toEqual(['Meadowbank Patient Transport', 'Second organisation']);
+    ).toEqual(['Exora', 'Second organisation']);
     await userEvent.selectOptions(select, ORG_B);
     await waitFor(() => expect(meFn).toHaveBeenCalledWith(ORG_B));
   });

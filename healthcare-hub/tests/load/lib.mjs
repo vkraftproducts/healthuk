@@ -5,7 +5,14 @@ export const ORG = process.env.HUB_ORG_ID ?? '01900000-0000-7000-8000-0000000000
 const tokens = new Map();
 export async function token(user) {
   if (!tokens.has(user)) {
-    const r = await fetch(`${OIDC}/token?user=${user}&mfa=1`);
+    const r = await fetch(`${OIDC}/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: user,
+        password: process.env.DEV_PASSWORD ?? 'Exora-dev-2026',
+      }),
+    });
     tokens.set(user, (await r.json()).access_token);
   }
   return tokens.get(user);

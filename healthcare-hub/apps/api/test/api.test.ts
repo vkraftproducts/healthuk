@@ -111,7 +111,7 @@ describe('/me and organisation selection', () => {
     expect(body.memberships).toEqual([
       expect.objectContaining({
         organisationId: SEED_IDS.orgExample,
-        organisationName: 'Meadowbank Patient Transport',
+        organisationName: 'Exora',
         roleKey: 'REGISTERED_MANAGER',
       }),
     ]);

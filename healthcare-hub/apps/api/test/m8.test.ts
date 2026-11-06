@@ -820,7 +820,7 @@ describe('restore to a new server within the RTO [UAT-08, NFR-01]', () => {
       const text = readFileSync(report, 'utf8');
       expect(text).toContain('**Result: PASS**');
       expect(text).toContain('mismatched tables: none');
-      expect(text).toMatch(/Meadowbank Patient Transport intact/);
+      expect(text).toMatch(/Exora intact/);
     },
     120_000,
   );

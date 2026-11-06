@@ -2,8 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { DEV_USERS, type AuthClient } from '../auth.js';
 
 /**
- * Sign-in page. Production: Microsoft Entra External ID (ADR-0003). Development: pick one of the
- * seeded synthetic users; the mock sign-in server mints a token for them (never in production).
+ * Sign-in page. Production: Microsoft Entra External ID (ADR-0003). Development: username and
+ * password, checked by the mock sign-in server against the development database (never in production).
  */
 export function SignIn({
   auth,
@@ -15,7 +15,8 @@ export function SignIn({
   /** Why the user is here again, e.g. "Your session ended". */
   notice?: string | null;
 }) {
-  const [user, setUser] = useState<string>(DEV_USERS[0].key);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,9 +25,13 @@ export function SignIn({
     setBusy(true);
     setError(null);
     try {
-      await auth.signIn(auth.kind === 'dev' ? user : undefined);
+      await auth.signIn(
+        auth.kind === 'dev' ? username : undefined,
+        auth.kind === 'dev' ? password : undefined,
+      );
       onSignedIn();
     } catch (err) {
+      setPassword('');
       setError(err instanceof Error ? err.message : 'Sign-in failed.');
     } finally {
       setBusy(false);
@@ -59,7 +64,9 @@ export function SignIn({
           <div>
             <h1 className="text-2xl font-bold">Sign in</h1>
             <p className="mt-1 text-sm text-hub-muted">
-              Use your organisation account. Multi-factor authentication is required.
+              {auth.kind === 'entra'
+                ? 'Use your organisation account. Multi-factor authentication is required.'
+                : 'Development sign-in. There is no second factor here; production requires one.'}
             </p>
           </div>
 
@@ -94,36 +101,37 @@ export function SignIn({
             </button>
           ) : (
             <form onSubmit={(e) => void go(e)} className="space-y-4">
-              <fieldset className="space-y-2">
-                <legend className="mb-2 text-sm font-semibold text-hub-navy">
-                  Development sign-in: choose a synthetic user
-                </legend>
-                <div className="space-y-1.5">
-                  {DEV_USERS.map((u) => (
-                    <label
-                      key={u.key}
-                      className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-1.5 text-sm ${
-                        user === u.key
-                          ? 'border-hub-teal bg-teal-50 ring-1 ring-hub-teal'
-                          : 'border-hub-line hover:bg-hub-row'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="dev-user"
-                        value={u.key}
-                        checked={user === u.key}
-                        onChange={() => setUser(u.key)}
-                        className="accent-hub-teal"
-                      />
-                      <span className="flex flex-1 flex-wrap justify-between gap-x-3">
-                        <span className="font-semibold text-hub-navy">{u.name}</span>
-                        <span className="text-hub-muted">{u.role}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <div className="space-y-1">
+                <label htmlFor="sign-in-username" className="text-sm font-semibold text-hub-navy">
+                  Username
+                </label>
+                <input
+                  id="sign-in-username"
+                  name="username"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full rounded-md border border-hub-line px-3 py-2"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="sign-in-password" className="text-sm font-semibold text-hub-navy">
+                  Password
+                </label>
+                <input
+                  id="sign-in-password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-md border border-hub-line px-3 py-2"
+                />
+              </div>
               <button
                 type="submit"
                 disabled={busy}
@@ -131,10 +139,20 @@ export function SignIn({
               >
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
-              <p className="text-xs text-hub-muted">
-                Development only. Production uses Microsoft sign-in; these synthetic accounts come
-                from <code>pnpm db:seed</code>.
-              </p>
+              <details className="text-xs text-hub-muted">
+                <summary className="cursor-pointer">Development accounts</summary>
+                <ul className="mt-2 space-y-0.5">
+                  {DEV_USERS.map((u) => (
+                    <li key={u.key}>
+                      <code>{u.key}</code> – {u.name}, {u.role}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2">
+                  Development only: production uses Microsoft sign-in. Passwords are set by{' '}
+                  <code>pnpm db:seed</code> and changed with <code>pnpm dev:password</code>.
+                </p>
+              </details>
             </form>
           )}
         </div>

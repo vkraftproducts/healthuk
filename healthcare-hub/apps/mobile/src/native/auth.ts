@@ -47,14 +47,18 @@ export function entraAuth(cfg: MobileConfig): AuthProvider {
 }
 
 /**
- * Local development only: tokens from the API's mock OIDC (`/token?user=crew`). Refused unless the
+ * Local development only: signs devUser in to the mock OIDC with its password. Refused unless the
  * build is a development build pointing at a local mock issuer.
  */
 export function devAuth(cfg: MobileConfig, fetchImpl: typeof fetch = fetch): AuthProvider {
   if (!cfg.devAuth || !/localhost|127\.0\.0\.1|10\.0\.2\.2/.test(cfg.oidc.issuer))
     throw new Error('Development sign-in is not available in this build');
   const get = async (): Promise<Tokens> => {
-    const r = await fetchImpl(`${cfg.oidc.issuer}/token?user=${encodeURIComponent(cfg.devUser)}`);
+    const r = await fetchImpl(`${cfg.oidc.issuer}/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: cfg.devUser, password: cfg.devPassword }),
+    });
     if (!r.ok) throw new Error('Development sign-in failed');
     const b = (await r.json()) as { access_token: string; expires_in?: number };
     return {

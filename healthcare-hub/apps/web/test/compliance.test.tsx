@@ -14,7 +14,7 @@ const me = (permissions: string[]): MeResponse => ({
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Meadowbank Patient Transport',
+      organisationName: 'Exora',
       locationId: null,
       roleKey: 'X',
       roleName: 'X',

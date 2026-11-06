@@ -69,7 +69,7 @@ describe('organisation', () => {
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({
       id: ORG,
-      name: 'Meadowbank Patient Transport',
+      name: 'Exora',
       regulator: 'CQC',
     });
     expect((await call('GET', `/api/v1/organisations/${OTHER_ORG}`)).status).toBe(404);
@@ -78,7 +78,7 @@ describe('organisation', () => {
   it('updates with If-Match, rejects stale versions (409) and a missing If-Match (400), audits the change', async () => {
     const cur = (await call('GET', `/api/v1/organisations/${ORG}`)).body;
     const ok = await call('PATCH', `/api/v1/organisations/${ORG}`, {
-      body: { name: 'Meadowbank Patient Transport' },
+      body: { name: 'Exora' },
       ifMatch: cur.version,
     });
     expect(ok.status).toBe(200);

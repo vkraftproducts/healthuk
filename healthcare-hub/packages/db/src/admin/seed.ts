@@ -1,6 +1,7 @@
 import pg from 'pg';
+import { DEV_DEFAULT_PASSWORD, ensureDevAuth, seedDevCredentials } from './dev-auth.js';
 
-// Synthetic data only (CLAUDE.md #10). Matches the wireframes: "Meadowbank Patient Transport / Watford"
+// Synthetic data only (CLAUDE.md #10). Matches the wireframes: "Exora / Watford"
 // plus a second organisation used by isolation tests. Fixed IDs make the seed idempotent.
 // Runs as the migrator role; sets the org context itself because RLS is FORCEd.
 // Requires migrations (which sync the system roles) to have run first.
@@ -206,24 +207,26 @@ export const SEED_SUPPORT = {
   name: 'Platform Support',
 } as const;
 
-export async function seed(adminUrl: string): Promise<void> {
+/**
+ * `singleOrganisation` is what `pnpm db:seed` uses. Tests leave it off: they need the second
+ * organisation to prove that tenants stay separate.
+ */
+export async function seed(
+  adminUrl: string,
+  { singleOrganisation = false }: { singleOrganisation?: boolean } = {},
+): Promise<void> {
   const c = new pg.Client({ connectionString: adminUrl });
   await c.connect();
   try {
     await c.query('BEGIN');
     const ctx = (org: string) => c.query(`SELECT set_config('app.org_id', $1, true)`, [org]);
     const orgs: [string, string, string[], string, string, boolean][] = [
-      [
-        SEED_IDS.orgExample,
-        'Meadowbank Patient Transport',
-        ['ambulance'],
-        SEED_IDS.locWatford,
-        'Watford',
-        true,
-      ],
+      [SEED_IDS.orgExample, 'Exora', ['ambulance'], SEED_IDS.locWatford, 'Watford', true],
       [SEED_IDS.orgOther, 'Other organisation', [], SEED_IDS.locOther, 'Elsewhere', false],
     ];
-    for (const [id, name, packs, loc, locName, registered] of orgs) {
+    for (const [id, name, packs, loc, locName, registered] of singleOrganisation
+      ? orgs.slice(0, 1)
+      : orgs) {
       await ctx(id);
       await c.query(
         `INSERT INTO organisation (id, name, sector_packs) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,
@@ -515,6 +518,16 @@ export async function seed(adminUrl: string): Promise<void> {
       `INSERT INTO app_user (id, idp_subject, email, display_name, status, is_platform_support)
        VALUES ($1, $2, $3, $4, 'ACTIVE', true) ON CONFLICT (id) DO NOTHING`,
       [SEED_SUPPORT.id, SEED_SUPPORT.subject, SEED_SUPPORT.email, SEED_SUPPORT.name],
+    );
+    // Development sign-in: every seeded account gets the development password.
+    await ensureDevAuth(c);
+    const accounts = await c.query<{ idp_subject: string }>(
+      `SELECT idp_subject FROM app_user WHERE idp_subject LIKE 'dev|%'`,
+    );
+    await seedDevCredentials(
+      c,
+      accounts.rows.map((a) => ({ username: a.idp_subject.slice(4), subject: a.idp_subject })),
+      process.env.DEV_PASSWORD ?? DEV_DEFAULT_PASSWORD,
     );
     await c.query('COMMIT');
   } catch (e) {

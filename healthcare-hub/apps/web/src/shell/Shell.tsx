@@ -20,7 +20,7 @@ const SERVICE_NAME: Record<string, string> = {
   'care-home': 'Care home',
 };
 
-/** "Meadowbank Patient Transport / Watford / Ambulance service" from the user's scope. */
+/** "Exora / Watford / Ambulance service" from the user's scope. */
 function useScope(orgId: string | null) {
   const { me } = useApp();
   const org = useOne<{ sectorPacks?: string[] }>(orgId ? `/api/v1/organisations/${orgId}` : null);
@@ -81,23 +81,27 @@ export function Shell() {
         </nav>
 
         <div className="mt-auto space-y-3 px-5 pb-5 pt-6 text-xs text-slate-200">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="org-switcher" className="text-slate-300">
-              Organisation
-            </label>
-            <select
-              id="org-switcher"
-              className="rounded-md border border-slate-400 bg-hub-navy-2 px-2 py-1.5 text-sm text-white"
-              value={orgId ?? ''}
-              onChange={(e) => setOrgId(e.target.value)}
-            >
-              {orgs.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {orgs.length > 1 ? (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="org-switcher" className="text-slate-300">
+                Organisation
+              </label>
+              <select
+                id="org-switcher"
+                className="rounded-md border border-slate-400 bg-hub-navy-2 px-2 py-1.5 text-sm text-white"
+                value={orgId ?? ''}
+                onChange={(e) => setOrgId(e.target.value)}
+              >
+                {orgs.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            activeOrg && <div className="text-sm font-semibold text-white">{activeOrg}</div>
+          )}
           <div className="border-t border-hub-navy-2 pt-3">
             <div className="text-sm font-semibold text-white">{me.user.displayName}</div>
             {scope.role && <div>{scope.role}</div>}
