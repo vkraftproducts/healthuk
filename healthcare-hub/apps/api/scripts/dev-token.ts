@@ -20,3 +20,13 @@ export async function devToken(oidc: string, username: string): Promise<string> 
   });
   return b.access_token;
 }
+
+/** fetch that, when the API says "too many requests", waits as long as it asks and tries again. */
+export async function fetchPolitely(url: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 || attempt >= 30) return res;
+    const wait = Number(res.headers.get('retry-after') ?? '5');
+    await new Promise((r) => setTimeout(r, (Number.isFinite(wait) ? wait : 5) * 1000 + 250));
+  }
+}

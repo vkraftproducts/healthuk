@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { HubError } from './common/problem.filter.js';
 import { AppModule, type AppDeps } from './app.module.js';
 
 /** Builds the configured Nest/Fastify app (shared by main.ts and tests). */
@@ -45,14 +46,12 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     ],
   });
   await fastify.register(rateLimit, {
-    max: deps.config.NODE_ENV === 'test' ? 10_000 : deps.config.RATE_LIMIT_PER_MINUTE,
+    max: deps.config.RATE_LIMIT_PER_MINUTE,
     timeWindow: '1 minute',
-    errorResponseBuilder: () => ({
-      type: 'https://healthcare-hub.example/problems/rate-limited',
-      title: 'Too many requests',
-      status: 429,
-      code: 'RATE_LIMITED',
-    }),
+    // Thrown as a HubError so the problem filter answers 429 RATE_LIMITED: a plain object here
+    // was not recognised and went out as a 500 internal error.
+    errorResponseBuilder: (_req, ctx) =>
+      new HubError('RATE_LIMITED', 429, `Too many requests. Try again in ${ctx.after}.`),
   });
   app.setGlobalPrefix('api/v1', { exclude: ['healthz', 'readyz'] });
   return app;

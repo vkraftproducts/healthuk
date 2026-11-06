@@ -308,3 +308,24 @@ describe('browser access', () => {
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 });
+
+describe('rate limiting', () => {
+  it('answers 429 "too many requests" with a Retry-After, never a 500 internal error', async () => {
+    const limited = await makeApp(urls, [], { RATE_LIMIT_PER_MINUTE: '10' });
+    try {
+      const codes: number[] = [];
+      let last;
+      for (let i = 0; i < 11; i++) {
+        last = await limited.app.inject({ method: 'GET', url: '/readyz' });
+        codes.push(last.statusCode);
+      }
+      expect(codes.slice(0, 10).every((s) => s === 200)).toBe(true);
+      expect(last!.statusCode).toBe(429);
+      expect(last!.json()).toMatchObject({ status: 429, code: 'RATE_LIMITED' });
+      expect(last!.headers['retry-after']).toBeDefined();
+    } finally {
+      await limited.app.close();
+      await limited.db.close();
+    }
+  });
+});

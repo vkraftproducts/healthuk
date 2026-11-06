@@ -50,6 +50,7 @@ export async function makeApp(
     OIDC_AUDIENCE: AUDIENCE,
     OIDC_JWKS_URI: 'https://idp.test.example/jwks',
     LOG_LEVEL: 'silent' as never,
+    RATE_LIMIT_PER_MINUTE: '10000',
     ...configOverrides,
   } as Record<string, string>);
   const logger = createLogger('silent');
