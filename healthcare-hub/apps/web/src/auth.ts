@@ -26,17 +26,6 @@ export class NotSignedInError extends Error {
   }
 }
 
-/** Development accounts created by `pnpm db:seed`; the key is the username. */
-export const DEV_USERS = [
-  { key: 'manager', name: 'Manager', role: 'Registered manager' },
-  { key: 'hr', name: 'Hana Rowe', role: 'HR lead' },
-  { key: 'fleet', name: 'Finn Lee', role: 'Fleet lead' },
-  { key: 'governance', name: 'Gina Ode', role: 'Governance lead' },
-  { key: 'dispatcher', name: 'Dispatcher', role: 'Dispatcher' },
-  { key: 'auditor', name: 'Audrey Ward', role: 'Auditor (read only)' },
-  { key: 'crew', name: 'Alex Morgan', role: 'Crew' },
-] as const;
-
 const SESSION_KEY = 'hub.devSession';
 type StoredSession = { user: string; refreshToken: string };
 

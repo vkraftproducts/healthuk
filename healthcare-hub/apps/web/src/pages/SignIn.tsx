@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { DEV_USERS, type AuthClient } from '../auth.js';
+import type { AuthClient } from '../auth.js';
 
 /**
  * Sign-in page. Production: Microsoft Entra External ID (ADR-0003). Development: username and
@@ -139,20 +139,6 @@ export function SignIn({
               >
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
-              <details className="text-xs text-hub-muted">
-                <summary className="cursor-pointer">Development accounts</summary>
-                <ul className="mt-2 space-y-0.5">
-                  {DEV_USERS.map((u) => (
-                    <li key={u.key}>
-                      <code>{u.key}</code> – {u.name}, {u.role}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-2">
-                  Development only: production uses Microsoft sign-in. Passwords are set by{' '}
-                  <code>pnpm db:seed</code> and changed with <code>pnpm dev:password</code>.
-                </p>
-              </details>
             </form>
           )}
         </div>
