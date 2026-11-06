@@ -104,7 +104,9 @@ Enums as Postgres enums via Prisma. Snake_case in DB, camelCase in TS.
 
 ## 8. Premises
 
-- `premises_item` (location, control_area, responsible_person, applicability, assessment
+- `feedback_item` (kind COMPLIMENT / STAFF_FEEDBACK / PATIENT_SURVEY, received_on, source, minimised summary, optional rating, themes; immutable) — EVT-04.
+- `integration_connection` (adapter, mode MOCK only, enabled, last run) and `integration_run` (append-only run log with counts and notes) - INT-01, migration 0017. `odometer_reading.source` gains TELEMATICS.
+- `premises_item` (also contractor_name, assessment_ref, assessed_on, action_owner_user_id — HSE-01) (location, control_area, responsible_person, applicability, assessment
   evidence, frequency_source) → requirement instances
 
 ## 9. Jobs

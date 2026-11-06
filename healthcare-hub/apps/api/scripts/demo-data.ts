@@ -3,9 +3,7 @@
 // nothing once the data is loaded. To start again, reset the database (see RUN_LOCALLY).
 import { SEED_IDS } from '@hub/db/admin';
 import type { Call } from './crew-demo-lib.js';
-import { devToken, fetchPolitely } from './dev-token.js';
 import { loadDemoData, type PutFile } from './demo-data-lib.js';
-import { completeDemoRecords } from './demo-records-lib.js';
 
 if (process.env.NODE_ENV === 'production') {
   console.error('demo-data must never run in production');
@@ -19,10 +17,13 @@ if (!/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(`${API}/`)) {
 }
 
 const call: Call = async (method, path, sub, body) => {
-  const res = await fetchPolitely(`${API}${path}`, {
+  const t = (await (await fetch(`${OIDC}/token?user=${sub.replace('dev|', '')}&mfa=1`)).json()) as {
+    access_token: string;
+  };
+  const res = await fetch(`${API}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${await devToken(OIDC, sub.replace('dev|', ''))}`,
+      authorization: `Bearer ${t.access_token}`,
       'x-org-id': SEED_IDS.orgExample,
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
     },
@@ -36,7 +37,7 @@ const call: Call = async (method, path, sub, body) => {
 
 const putFile: PutFile = async (uploadUrl, bytes, mime) =>
   (
-    await fetchPolitely(uploadUrl, {
+    await fetch(uploadUrl, {
       method: 'PUT',
       headers: { 'content-type': mime },
       body: Buffer.from(bytes),
@@ -47,8 +48,3 @@ const r = await loadDemoData(call, { locationId: SEED_IDS.locWatford }, putFile)
 if (r.alreadyLoaded) console.log('Demo data is already loaded: nothing to do.');
 else console.log(JSON.stringify(r, null, 2));
 if (r.problems.length > 0) process.exit(1);
-
-// Every status rests on records and verified documents; safe to re-run.
-const records = await completeDemoRecords(call, putFile);
-console.log('Records and documents:', JSON.stringify(records, null, 2));
-if (records.problems.length > 0) process.exit(1);

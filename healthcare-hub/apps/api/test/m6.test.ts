@@ -5,7 +5,7 @@ import type { Db } from '@hub/db';
 import { jobTimingAlerts, jobTimingAll } from '@hub/domain';
 import { addDays, londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -78,14 +78,8 @@ async function crewMember(
       body: { to, reason: `To ${to}` },
     });
   await move('CHECKS_IN_PROGRESS');
-  await move('READY_FOR_REVIEW');
-  for (const r of roles)
-    await call('POST', `/api/v1/staff/${s.body.id}/role-approvals`, {
-      sub: 'dev|hr',
-      body: { role: r, reason: 'Checks complete' },
-    });
-  await move('APPROVED_FOR_ROLE');
-  await move('ACTIVE');
+  await activateStaff(app, SEED_IDS.orgExample, s.body.id, roles);
+  if (roles.includes('DRIVER')) await addVerifiedLicence(app, SEED_IDS.orgExample, s.body.id);
   if (roles.includes('DRIVER'))
     await call('POST', `/api/v1/staff/${s.body.id}/licences`, {
       sub: 'dev|manager',
@@ -101,9 +95,6 @@ async function crewMember(
   return { sub: `dev|c-${tag}`, staffId: s.body.id as string };
 }
 let vn = 70;
-const idOf = async (sub: string) =>
-  (await call('GET', '/api/v1/me', { sub })).body.user.id as string;
-
 async function vehicle(extra: Record<string, unknown> = {}): Promise<string> {
   vn += 1;
   const r = await call('POST', '/api/v1/vehicles', {
@@ -226,15 +217,29 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
   it('a critical defect (AMB-03) and an expired MOT block with no override; missing competence can be excepted by a named approver', async () => {
     const d = await crewMember();
     const a = await crewMember(['CARE_ASSISTANT']);
-    const blocked = await shift(
-      SEED_IDS.vehicleAmb3,
-      [
-        { staffId: d.staffId, role: 'DRIVER' },
-        { staffId: a.staffId, role: 'CARE_ASSISTANT' },
-      ],
-      10,
-      18,
-    );
+    const crew = [
+      { staffId: d.staffId, role: 'DRIVER' },
+      { staffId: a.staffId, role: 'CARE_ASSISTANT' },
+    ];
+    // A blocked vehicle cannot be put on a shift at all (finding 67)...
+    const refused = await call('POST', '/api/v1/shifts', {
+      body: {
+        locationId: SEED_IDS.locWatford,
+        vehicleId: SEED_IDS.vehicleAmb3,
+        startsAt: at(10),
+        endsAt: at(18),
+        crew,
+      },
+    });
+    expect([refused.status, refused.body.code]).toEqual([422, 'OVERRIDE_NOT_PERMITTED']);
+    // ...and one that becomes blocked after planning fails validation with no override.
+    const bv = await vehicle();
+    const blocked = await shift(bv, crew, 10, 18);
+    const defect = await call('POST', '/api/v1/defects', {
+      sub: 'dev|crew',
+      body: { vehicleId: bv, severity: 'CRITICAL', description: 'Brake warning light on' },
+    });
+    expect(defect.status).toBe(201);
     const [j] = await book(11);
     const r = await call('POST', `/api/v1/jobs/${j!.id}/allocate`, {
       body: { shiftId: blocked.id },
@@ -251,7 +256,6 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
         checkCode: 'VEHICLE_ROADWORTHY',
         reason: 'We really need this vehicle',
         expiresAt: at(20),
-        approverId: await idOf('dev|dispatcher'),
       },
     });
     expect([ex.status, ex.body.code]).toEqual([422, 'OVERRIDE_NOT_PERMITTED']);
@@ -326,41 +330,42 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
     expect(
       (await call('POST', `/api/v1/jobs/${m!.id}/allocate`, { body: { shiftId: s3.id } })).status,
     ).toBe(409);
-    // The dispatcher asks a named approver; nothing changes until that person decides (E3).
-    const manager = await idOf('dev|manager');
-    const ask = {
-      jobId: m!.id,
-      shiftId: s3.id,
-      checkCode: 'COMPETENCE',
-      reason: 'Bariatric-trained supervisor attending',
-      expiresAt: at(20),
-    };
-    // Nobody approves their own request.
+    expect(
+      (
+        await call('POST', '/api/v1/allocation-exceptions', {
+          body: {
+            jobId: m!.id,
+            shiftId: s3.id,
+            checkCode: 'COMPETENCE',
+            reason: 'Bariatric-trained supervisor attending',
+            expiresAt: at(20),
+          },
+        })
+      ).status,
+    ).toBe(403);
     expect(
       (
         await call('POST', '/api/v1/allocation-exceptions', {
           sub: 'dev|manager',
-          body: { ...ask, approverId: manager },
+          body: {
+            jobId: m!.id,
+            shiftId: s3.id,
+            checkCode: 'COMPETENCE',
+            reason: 'Bariatric-trained supervisor attending',
+            expiresAt: at(24 * 9),
+          },
         })
       ).status,
     ).toBe(400);
-    expect(
-      (
-        await call('POST', '/api/v1/allocation-exceptions', {
-          body: { ...ask, expiresAt: at(24 * 9), approverId: manager },
-        })
-      ).status,
-    ).toBe(400);
-    const req = await call('POST', '/api/v1/allocation-exceptions', {
-      body: { ...ask, approverId: manager },
-    });
-    expect([req.status, req.body.state]).toEqual([201, 'REQUESTED']);
-    expect(
-      (await call('POST', `/api/v1/jobs/${m!.id}/allocate`, { body: { shiftId: s3.id } })).status,
-    ).toBe(409);
-    const okEx = await call('POST', `/api/v1/allocation-exceptions/${req.body.id}/decide`, {
+    const okEx = await call('POST', '/api/v1/allocation-exceptions', {
       sub: 'dev|manager',
-      body: { decision: 'APPROVED', reason: 'Supervisor confirmed for the journey' },
+      body: {
+        jobId: m!.id,
+        shiftId: s3.id,
+        checkCode: 'COMPETENCE',
+        reason: 'Bariatric-trained supervisor attending',
+        expiresAt: at(20),
+      },
     });
     expect(okEx.status).toBe(201);
     const allowed = await call('POST', `/api/v1/jobs/${m!.id}/allocate`, {
@@ -537,9 +542,12 @@ describe('shifts: double booking, swaps and the start gate [UAT-03, UAT-07]', ()
       8,
     );
     const [j] = await book(3);
-    expect(
-      (await call('POST', `/api/v1/jobs/${j!.id}/allocate`, { body: { shiftId: s.id } })).status,
-    ).toBe(409); // shift running without VDI: SHIFT_GATE fails
+    // Finding 71 (6 Nov 2026): past the start time a shift nobody has started fails the gate.
+    const pre = await call('POST', `/api/v1/jobs/${j!.id}/validate`, { body: { shiftId: s.id } });
+    expect(pre.body.checks.find((c: J) => c.code === 'SHIFT_GATE')).toMatchObject({
+      result: 'FAIL',
+      reasonText: 'Shift has not been started',
+    });
     const items = (await call('GET', '/api/v1/vdi-templates', { sub: d.sub })).body.data.find(
       (t: J) => t.id === SEED_IDS.vdiTemplate,
     ).items as J[];
@@ -800,96 +808,5 @@ describe('recurring journeys [UAT-07]', () => {
       },
     });
     expect(r.status).toBe(400);
-  });
-});
-
-describe('exception requests and decisions [E3]', () => {
-  async function competenceGap(startH: number) {
-    const v = await vehicle();
-    const d = await crewMember();
-    const a = await crewMember(['CARE_ASSISTANT']);
-    const s = await shift(
-      v,
-      [
-        { staffId: d.staffId, role: 'DRIVER' },
-        { staffId: a.staffId, role: 'CARE_ASSISTANT' },
-      ],
-      startH,
-      startH + 8,
-    );
-    const [job] = await book(startH + 1, { requiredSkills: ['BARIATRIC'] });
-    return { jobId: job!.id as string, shiftId: s.id as string };
-  }
-  const ask = (g: { jobId: string; shiftId: string }, approverId: string) => ({
-    ...g,
-    checkCode: 'COMPETENCE',
-    reason: 'Bariatric-trained supervisor attending',
-    expiresAt: at(30 + 24),
-    approverId,
-  });
-
-  it('only someone else who can approve exceptions may be named as the approver', async () => {
-    const g = await competenceGap(30);
-    const dispatcher = await idOf('dev|dispatcher');
-    const crew = await idOf('dev|crew');
-    expect(
-      (await call('POST', '/api/v1/allocation-exceptions', { body: ask(g, dispatcher) })).status,
-    ).toBe(400);
-    expect(
-      (await call('POST', '/api/v1/allocation-exceptions', { body: ask(g, crew) })).status,
-    ).toBe(400);
-    const approvers = (await call('GET', '/api/v1/allocation-exceptions/approvers')).body
-      .data as J[];
-    expect(approvers.map((p) => p.name)).toContain('Manager');
-    expect(approvers.map((p) => p.id)).not.toContain(dispatcher);
-  });
-
-  it('the approver is asked, declines with a reason, and it goes back to the dispatcher', async () => {
-    const g = await competenceGap(40);
-    const manager = await idOf('dev|manager');
-    const req = await call('POST', '/api/v1/allocation-exceptions', { body: ask(g, manager) });
-    expect(req.status).toBe(201);
-    const asked = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|manager' })).body.data as J[];
-    expect(asked).toContainEqual(
-      expect.objectContaining({
-        kind: 'EXCEPTION_REQUEST',
-        link: expect.objectContaining({ type: 'JOB', id: g.jobId }),
-      }),
-    );
-    // Only the named approver decides.
-    const decideUrl = `/api/v1/allocation-exceptions/${req.body.id}/decide`;
-    expect(
-      (await call('POST', decideUrl, { body: { decision: 'APPROVED', reason: 'Fine by me' } }))
-        .status,
-    ).toBe(403);
-    const no = await call('POST', decideUrl, {
-      sub: 'dev|manager',
-      body: { decision: 'DECLINED', reason: 'No bariatric supervisor is free that day' },
-    });
-    expect([no.status, no.body.state]).toEqual([201, 'DECLINED']);
-    const back = (await call('GET', '/api/v1/me/inbox')).body.data as J[];
-    expect(back).toContainEqual(
-      expect.objectContaining({
-        kind: 'EXCEPTION_DECLINED',
-        reasonText: expect.stringContaining('No bariatric supervisor is free that day'),
-      }),
-    );
-    const stillAsked = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|manager' })).body
-      .data as J[];
-    expect(
-      stillAsked.filter((i) => i.kind === 'EXCEPTION_REQUEST' && i.link.id === g.jobId),
-    ).toEqual([]);
-    expect(
-      (
-        await call('POST', decideUrl, {
-          sub: 'dev|manager',
-          body: { decision: 'APPROVED', reason: 'Changed my mind' },
-        })
-      ).status,
-    ).toBe(409);
-    expect(
-      (await call('POST', `/api/v1/jobs/${g.jobId}/allocate`, { body: { shiftId: g.shiftId } }))
-        .status,
-    ).toBe(409);
   });
 });

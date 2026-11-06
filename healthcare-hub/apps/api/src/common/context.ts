@@ -15,6 +15,8 @@ export interface HubRequestContext {
   ipHash: string;
   /** Acting through an org-approved break-glass grant (platform support). */
   support: boolean;
+  /** When that grant ends (A4 banner); absent outside support access. */
+  supportEndsAt?: Date;
 }
 
 export type HubRequest = FastifyRequest & { hub?: HubRequestContext };

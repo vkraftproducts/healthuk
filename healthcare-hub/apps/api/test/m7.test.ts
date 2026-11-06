@@ -5,7 +5,7 @@ import { SYSTEM_USER_ID, type Db } from '@hub/db';
 import { ExpoPushSender, MemoryPushSender, sendPendingPush } from '@hub/domain';
 import { londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -82,14 +82,8 @@ async function crewMember(roles: string[] = ['DRIVER', 'CARE_ASSISTANT']) {
       body: { to, reason: `To ${to}` },
     });
   await move('CHECKS_IN_PROGRESS');
-  await move('READY_FOR_REVIEW');
-  for (const r of roles)
-    await call('POST', `/api/v1/staff/${s.body.id}/role-approvals`, {
-      sub: 'dev|hr',
-      body: { role: r, reason: 'Checks complete' },
-    });
-  await move('APPROVED_FOR_ROLE');
-  await move('ACTIVE');
+  await activateStaff(app, SEED_IDS.orgExample, s.body.id, roles);
+  if (roles.includes('DRIVER')) await addVerifiedLicence(app, SEED_IDS.orgExample, s.body.id);
   if (roles.includes('DRIVER'))
     await call('POST', `/api/v1/staff/${s.body.id}/licences`, {
       sub: 'dev|manager',

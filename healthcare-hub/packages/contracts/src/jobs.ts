@@ -21,7 +21,17 @@ export const JobState = z.enum([
   'ABORTED',
   'REASSIGNED',
 ]);
-export const Mobility = z.enum(['WALKING', 'WHEELCHAIR', 'STRETCHER', 'CARRY_CHAIR']);
+export const Mobility = z.enum([
+  'WALKING',
+  'WHEELCHAIR',
+  'OWN_WHEELCHAIR',
+  'STRETCHER',
+  'BARIATRIC',
+  'CARRY_CHAIR',
+]);
+/** Mobility values that need a wheelchair space, a stretcher, or a weight check. */
+export const WHEELCHAIR_MOBILITY: readonly string[] = ['WHEELCHAIR', 'OWN_WHEELCHAIR'];
+export const STRETCHER_MOBILITY: readonly string[] = ['STRETCHER', 'BARIATRIC'];
 const code = z
   .string()
   .trim()
@@ -40,7 +50,10 @@ export const JobFields = z.strictObject({
   destinationAddress: z.string().trim().min(3).max(300),
   accessNotes: z.string().trim().max(500).optional(),
   accessPlanReviewed: z.boolean().default(false),
+  /** E1: the booking reference, never a patient name (letters, numbers and hyphens only). */
   patientRef: z.string().regex(/^[A-Za-z0-9-]{2,30}$/, 'Use the booking reference, not a name'),
+  /** E1: an emergency job driven under blue lights. */
+  blueLights: z.boolean().default(false),
   mobility: Mobility,
   weightKg: z.number().int().min(1).max(500).optional(),
   stairs: z.boolean().default(false),
@@ -62,10 +75,29 @@ const windowOk = (j: {
 }) =>
   new Date(j.pickupTo) > new Date(j.pickupFrom) &&
   new Date(j.plannedEnd) > new Date(j.plannedStart);
+export const PICKUP_WINDOW_MESSAGE = 'The pickup window must end after it starts';
+export const JobContractType = z.enum(['NHS', 'PRIVATE', 'INSURER']);
+const legTimes = z.strictObject({
+  pickupFrom: isoDateTime,
+  pickupTo: isoDateTime,
+  plannedStart: isoDateTime,
+  plannedEnd: isoDateTime,
+});
 export const BookingCreate = z
   .strictObject({
     customer: z.string().trim().min(2).max(120),
     reference: z.string().trim().max(60).optional(),
+    /** E1: who pays; NHS work records the eligibility decision and who assessed it. */
+    contractType: JobContractType.optional(),
+    nhsEligibility: z
+      .strictObject({
+        met: z.boolean(),
+        criteria: z.string().trim().min(3).max(500),
+        assessedBy: z.string().trim().min(2).max(120),
+      })
+      .optional(),
+    /** E1: a return journey becomes its own job, addresses swapped. */
+    returnJourney: legTimes.optional(),
     job: JobFields,
     patientContact: z
       .strictObject({
@@ -82,7 +114,34 @@ export const BookingCreate = z
       })
       .optional(),
   })
-  .refine((b) => windowOk(b.job), 'Windows must end after they start');
+  .refine((b) => new Date(b.job.pickupTo) > new Date(b.job.pickupFrom), {
+    message: PICKUP_WINDOW_MESSAGE,
+    path: ['job', 'pickupTo'],
+  })
+  .refine((b) => windowOk(b.job), 'Windows must end after they start')
+  .refine((b) => !b.returnJourney || windowOk(b.returnJourney), {
+    message: 'The return journey windows must end after they start',
+    path: ['returnJourney'],
+  })
+  .refine(
+    (b) => !b.returnJourney || new Date(b.returnJourney.plannedStart) >= new Date(b.job.plannedEnd),
+    {
+      message: 'The return journey must start after the outward one ends',
+      path: ['returnJourney'],
+    },
+  )
+  .refine((b) => b.contractType !== 'NHS' || !!b.nhsEligibility, {
+    message: 'NHS work needs the eligibility criteria and who assessed them',
+    path: ['nhsEligibility'],
+  })
+  .refine((b) => !STRETCHER_MOBILITY.includes(b.job.mobility) || !!b.job.weightKg, {
+    message: 'Stretcher and bariatric journeys need the patient weight',
+    path: ['job', 'weightKg'],
+  })
+  .refine((b) => !b.recurrence?.byWeekday || b.recurrence.freq === 'WEEKLY', {
+    message: 'Choose weekdays only for a weekly repeat',
+    path: ['recurrence', 'byWeekday'],
+  });
 export const JobPatch = JobFields.omit({ locationId: true })
   .partial()
   .extend({ timeShiftMinutes: z.number().int().min(-720).max(720).optional() })
@@ -116,6 +175,9 @@ export const JobDto = z.object({
   requiredEquipment: z.array(z.string()),
   requiredSkills: z.array(z.string()),
   crewSize: z.number(),
+  blueLights: z.boolean().optional(),
+  /** E1: set on the return leg of a journey. */
+  returnOfJobId: uuid.nullable().optional(),
   state: JobState,
   shiftId: uuid.nullable(),
   version,
@@ -128,6 +190,8 @@ export const JobDetailDto = JobDto.extend({
       fromState: JobState.nullable(),
       toState: JobState,
       actorUserId: uuid,
+      /** E4: who made each step, by name. */
+      actorName: z.string().nullable().optional(),
       capturedAt: isoDateTime,
       receivedAt: isoDateTime,
       reason: z.string().nullable(),
@@ -139,7 +203,10 @@ export const BookingDto = z.object({
   id: uuid,
   customer: z.string(),
   reference: z.string().nullable(),
+  contractType: JobContractType.nullable().optional(),
   jobs: z.array(JobDto),
+  /** E1: plain warnings that do not stop the booking (e.g. weight above every vehicle). */
+  warnings: z.array(z.string()).optional(),
 });
 
 // Shifts --------------------------------------------------------------------------
@@ -163,6 +230,30 @@ export const VehicleSwapInput = z.strictObject({
   reason: z.string().trim().min(3).max(300),
 });
 export const CrewEndInput = z.strictObject({ reason: z.string().trim().min(3).max(300) });
+/** E2: swap one crew member for another for the rest of the assignment. */
+export const CrewSwapInput = z.strictObject({
+  staffId: uuid,
+  reason: z.string().trim().min(3).max(300),
+});
+/** E2: readiness for a person as they are picked for a shift role. */
+export const CrewReadinessQuery = z
+  .object({
+    staffId: uuid,
+    role: StaffRole,
+    from: isoDateTime,
+    to: isoDateTime,
+    vehicleId: uuid.optional(),
+  })
+  .refine((q) => new Date(q.to) > new Date(q.from), 'to must be after from');
+export const CrewReadinessDto = z.object({
+  staffId: uuid,
+  state: z.enum(['READY', 'BLOCKED', 'RESTRICTED']),
+  checks: z.array(
+    z.object({ code: z.string(), result: z.string(), reasonText: z.string(), group: z.string() }),
+  ),
+});
+/** Task 26: cancel a planned shift; its jobs go back for reallocation. */
+export const ShiftCancelInput = z.strictObject({ reason: z.string().trim().min(3).max(300) });
 export const ShiftDto = z.object({
   id: uuid,
   locationId: uuid,
@@ -229,6 +320,14 @@ export const AllocationCheckDto = z.object({
   overridable: z.boolean(),
   excepted: z.boolean(),
   details: z.array(z.string()),
+  /** E3: how to fix a failing check, and the screen that does it. */
+  fix: z
+    .object({
+      text: z.string(),
+      action: z.enum(['SHIFT_ACTIONS', 'STAFF', 'VEHICLE', 'EXCEPTION']),
+    })
+    .nullable()
+    .optional(),
 });
 export const ValidationDto = z.object({
   jobId: uuid,
@@ -258,32 +357,7 @@ export const ExceptionInput = z.strictObject({
   ]),
   reason: z.string().trim().min(10).max(1000),
   expiresAt: isoDateTime,
-  /** The named person asked to approve it: someone else, who can approve exceptions (E3). */
-  approverId: uuid,
 });
-export const ExceptionDecisionInput = z.strictObject({
-  decision: z.enum(['APPROVED', 'DECLINED']),
-  reason: z.string().trim().min(3).max(1000),
-});
-/** A request for a policy exception and, once made, the approver's decision (E3). */
-export const ExceptionRequestDto = z.object({
-  id: uuid,
-  jobId: uuid,
-  jobCode: z.string(),
-  shiftId: uuid,
-  checkCode: z.string(),
-  reason: z.string(),
-  expiresAt: isoDateTime,
-  requestedBy: uuid,
-  requestedByName: z.string(),
-  approverId: uuid,
-  approverName: z.string(),
-  state: z.enum(['REQUESTED', 'APPROVED', 'DECLINED']),
-  decisionReason: z.string().nullable(),
-  createdAt: isoDateTime,
-});
-export type ExceptionRequestDto = z.infer<typeof ExceptionRequestDto>;
-export const ApproverDto = z.object({ id: uuid, name: z.string() });
 export const ExceptionDto = z.object({
   id: uuid,
   jobId: uuid,
@@ -292,11 +366,52 @@ export const ExceptionDto = z.object({
   reason: z.string(),
   expiresAt: isoDateTime,
 });
+/** A dispatcher asks; a different person with allocation.exception.approve decides (finding 69). */
+export const ExceptionRequestCreate = ExceptionInput;
+export const ExceptionRequestDecision = z
+  .strictObject({
+    decision: z.enum(['APPROVED', 'REJECTED']),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine(
+    (d) => d.decision !== 'REJECTED' || (d.note ?? '').length >= 3,
+    'Say why the exception is refused',
+  );
+export const ExceptionRequestQuery = z.object({
+  status: z.enum(['REQUESTED', 'APPROVED', 'REJECTED']).optional(),
+  jobId: uuid.optional(),
+});
+export const ExceptionRequestDto = z.object({
+  id: uuid,
+  jobId: uuid,
+  jobCode: z.string(),
+  shiftId: uuid,
+  vehicleCallsign: z.string().nullable(),
+  checkCode: z.string(),
+  reason: z.string(),
+  expiresAt: isoDateTime,
+  requestedBy: uuid,
+  requestedByName: z.string().nullable(),
+  requestedAt: isoDateTime,
+  status: z.enum(['REQUESTED', 'APPROVED', 'REJECTED']),
+  decidedBy: uuid.nullable(),
+  decidedByName: z.string().nullable(),
+  decidedAt: isoDateTime.nullable(),
+  decisionNote: z.string().nullable(),
+  /** The allocation exception created on approval; null until approved and when rejected. */
+  exceptionId: uuid.nullable(),
+});
+export type ExceptionRequestDto = z.infer<typeof ExceptionRequestDto>;
 export const StatusInput = z.strictObject({
   state: JobState,
   capturedAt: isoDateTime,
   reason: z.string().trim().max(500).optional(),
   clientSubmissionId: uuid,
+});
+/** E5: move a job to another shift; E3 runs again and the old allocation ends with the reason. */
+export const ReassignInput = z.strictObject({
+  shiftId: uuid,
+  reason: z.string().trim().min(3).max(500),
 });
 export const ShiftGateDto = z.object({
   shiftId: uuid,

@@ -19,6 +19,18 @@ const Env = z.object({
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(100_000).default(300),
   /** How long one live-updates stream stays open before the client must reconnect. */
   LIVE_STREAM_MAX_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
+  /**
+   * dev = mock OIDC pick-a-user (default), local = username + password sign-in run by this API
+   * (ADR 0006; only tokens it signed are accepted), entra = Entra External ID (ADR 0003).
+   */
+  AUTH_MODE: z.enum(['dev', 'local', 'entra']).default('dev'),
+  /** PKCS#8 PEM (EC P-256 or RSA) signing key for local sign-in. Generated at start-up in dev. */
+  LOCAL_AUTH_PRIVATE_KEY: z.string().min(1).optional(),
+  /** Local development only: privileged roles sign in without an authenticator code. */
+  DEV_DISABLE_MFA: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type AppConfig = z.infer<typeof Env>;
@@ -49,6 +61,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   if (cfg.NODE_ENV === 'production' && cfg.RATE_LIMIT_PER_MINUTE > 1000) {
     throw new Error('RATE_LIMIT_PER_MINUTE above 1000 is not permitted in production');
+  }
+  if (cfg.NODE_ENV === 'production' && cfg.AUTH_MODE === 'local' && !cfg.LOCAL_AUTH_PRIVATE_KEY) {
+    throw new Error('LOCAL_AUTH_PRIVATE_KEY is required for AUTH_MODE=local in production');
+  }
+  if (cfg.NODE_ENV === 'production' && cfg.DEV_DISABLE_MFA) {
+    throw new Error('DEV_DISABLE_MFA is not permitted in production');
   }
   return cfg;
 }

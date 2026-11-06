@@ -86,6 +86,36 @@ export function toEvidenceDto(v: VersionRow): EvidenceVersionDto {
   };
 }
 
+/** Display names for user ids in this organisation (members only; others show as unknown). */
+export async function userNames(
+  tx: TenantTx,
+  ids: (string | null)[],
+): Promise<Map<string, string>> {
+  const want = [...new Set(ids.filter((x): x is string => !!x))];
+  if (want.length === 0) return new Map();
+  const rows = await tx.membership.findMany({
+    where: { userId: { in: want } },
+    select: { userId: true, user: { select: { displayName: true } } },
+  });
+  return new Map(rows.map((r) => [r.userId, r.user.displayName]));
+}
+
+/** Adds uploader and reviewer names to evidence DTOs. */
+export async function withNames(
+  tx: TenantTx,
+  rows: EvidenceVersionDto[],
+): Promise<EvidenceVersionDto[]> {
+  const names = await userNames(
+    tx,
+    rows.flatMap((r) => [r.uploadedBy, r.reviewerId]),
+  );
+  return rows.map((r) => ({
+    ...r,
+    uploadedByName: names.get(r.uploadedBy) ?? null,
+    reviewerName: r.reviewerId ? (names.get(r.reviewerId) ?? null) : null,
+  }));
+}
+
 export async function evidenceForInstance(
   tx: TenantTx,
   instanceId: string,
@@ -96,7 +126,8 @@ export async function evidenceForInstance(
     include: versionInclude,
     orderBy: [{ createdAt: 'desc' }],
   });
-  return rows
-    .filter((r) => canSeeEvidence(hub, r.item.sensitivity, r.uploadedBy))
-    .map(toEvidenceDto);
+  return withNames(
+    tx,
+    rows.filter((r) => canSeeEvidence(hub, r.item.sensitivity, r.uploadedBy)).map(toEvidenceDto),
+  );
 }

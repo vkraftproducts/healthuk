@@ -1,4 +1,4 @@
-import { addMonths, londonDate, type ISODate } from './dates.js';
+import { addDays, addMonths, londonDate, type ISODate } from './dates.js';
 
 /**
  * UK GDPR timing rules (SECURITY_COMPLIANCE §4). Pure: the API and worker pass `now`.
@@ -9,6 +9,45 @@ export const subjectRequestDue = (receivedOn: ISODate): ISODate => addMonths(rec
 /** It may be extended by up to two further months for complex or numerous requests. */
 export const subjectRequestLatestExtension = (receivedOn: ISODate): ISODate =>
   addMonths(receivedOn, 3);
+
+/**
+ * K2: the clock pauses while proof of identity is awaited. The effective due date is the due
+ * date (or the agreed extension) moved on by the days paused.
+ */
+export function subjectRequestEffectiveDue(
+  dueOn: ISODate,
+  extendedTo: ISODate | null,
+  pausedDays: number,
+): ISODate {
+  return addDays(extendedTo ?? dueOn, Math.max(0, pausedDays));
+}
+
+/** K2: whole days between asking for identity and receiving it (never negative). */
+export function identityPauseDays(requestedOn: ISODate | null, verifiedOn: ISODate): number {
+  if (!requestedOn) return 0;
+  return Math.max(0, utcDay(verifiedOn) - utcDay(requestedOn));
+}
+const utcDay = (d: ISODate) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86_400_000);
+
+export interface BreachAnswerSet {
+  specialCategory: boolean;
+  identifiable: boolean;
+  volume: 'ONE' | 'FEW' | 'MANY';
+  likelyHarm: 'NONE' | 'SOME' | 'SERIOUS';
+  recovered: boolean;
+}
+
+/**
+ * K1: the risk the guided answers point to. A suggestion shown beside the decision: the person
+ * deciding still records the risk and their reason.
+ */
+export function suggestBreachRisk(a: BreachAnswerSet): 'UNLIKELY' | 'RISK' | 'HIGH_RISK' {
+  if (!a.identifiable) return 'UNLIKELY';
+  if (a.likelyHarm === 'SERIOUS' || (a.specialCategory && a.likelyHarm !== 'NONE'))
+    return 'HIGH_RISK';
+  if (a.likelyHarm === 'NONE' && a.recovered && a.volume !== 'MANY') return 'UNLIKELY';
+  return 'RISK';
+}
 
 export const ICO_HOURS = 72;
 export type BreachClockState = 'REPORTED' | 'NOT_REPORTABLE' | 'OVERDUE' | 'DUE_SOON' | 'OPEN';

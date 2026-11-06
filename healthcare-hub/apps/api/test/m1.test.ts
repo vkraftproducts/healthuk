@@ -1,3 +1,4 @@
+import { WorkbookDecisionInput } from '@hub/contracts';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
@@ -69,7 +70,7 @@ describe('organisation', () => {
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({
       id: ORG,
-      name: 'Exora',
+      name: 'Exora International Ltd',
       regulator: 'CQC',
     });
     expect((await call('GET', `/api/v1/organisations/${OTHER_ORG}`)).status).toBe(404);
@@ -78,7 +79,7 @@ describe('organisation', () => {
   it('updates with If-Match, rejects stale versions (409) and a missing If-Match (400), audits the change', async () => {
     const cur = (await call('GET', `/api/v1/organisations/${ORG}`)).body;
     const ok = await call('PATCH', `/api/v1/organisations/${ORG}`, {
-      body: { name: 'Exora' },
+      body: { name: 'Exora International Ltd' },
       ifMatch: cur.version,
     });
     expect(ok.status).toBe(200);
@@ -129,11 +130,18 @@ describe('locations, services, registered activities', () => {
       ifMatch: c.body.version,
     });
     expect(renamed.body.name).toBe('Luton depot');
-    const archived = await call('PATCH', `/api/v1/organisations/${ORG}/locations/${locId}`, {
+    // A2: archiving needs a reason.
+    const noReason = await call('PATCH', `/api/v1/organisations/${ORG}/locations/${locId}`, {
       body: { archived: true },
       ifMatch: renamed.body.version,
     });
+    expect(noReason.status).toBe(400);
+    const archived = await call('PATCH', `/api/v1/organisations/${ORG}/locations/${locId}`, {
+      body: { archived: true, archiveReason: 'Depot lease ended' },
+      ifMatch: renamed.body.version,
+    });
     expect(archived.body.archived).toBe(true);
+    expect(archived.body.archiveReason).toBe('Depot lease ended');
     expect(await auditActions()).toEqual(
       expect.arrayContaining(['org.location.create', 'org.location.update']),
     );
@@ -202,7 +210,7 @@ describe('locations, services, registered activities', () => {
     const crewRole = await role('CREW');
     const watford = (
       (await call('GET', `/api/v1/organisations/${ORG}/locations`)).body.data as J[]
-    ).find((l) => l.name === 'Watford')!.id as string;
+    ).find((l) => l.name === 'London')!.id as string;
     const inv = await call('POST', '/api/v1/admin/users', {
       body: {
         email: 'scoped.crew@example.test',
@@ -219,7 +227,7 @@ describe('locations, services, registered activities', () => {
     });
     expect(link.status).toBe(200);
     const list = await call('GET', `/api/v1/organisations/${ORG}/locations`, { sub: 'idp|scoped' });
-    expect((list.body.data as J[]).map((l) => l.name)).toEqual(['Watford']);
+    expect((list.body.data as J[]).map((l) => l.name)).toEqual(['London']);
     expect(
       (await call('GET', `/api/v1/organisations/${ORG}/locations`, { sub: 'idp|scoped', org: ORG }))
         .status,
@@ -365,6 +373,98 @@ describe('users, invites and revoke', () => {
       ).status,
     ).toBe(403);
     expect(await auditActions()).toContain('admin.user.revoke');
+  });
+
+  it('changes a role or location by ending the old membership and starting a new one [task 14]', async () => {
+    const crew = await role('CREW');
+    const dispatcher = await role('DISPATCHER');
+    const watford = (
+      (await call('GET', `/api/v1/organisations/${ORG}/locations`)).body.data as J[]
+    ).find((l) => l.name === 'London')!.id as string;
+    const inv = await call('POST', '/api/v1/admin/users', {
+      body: { email: 't14.mover@example.test', displayName: 'Task Mover', roleId: crew },
+    });
+    expect(inv.status).toBe(201);
+    const find = async () =>
+      ((await call('GET', '/api/v1/admin/users')).body.data as J[]).find(
+        (u) => u.email === 't14.mover@example.test',
+      )!;
+    const before = (await find()).memberships[0] as J;
+    const url = `/api/v1/admin/memberships/${before.membershipId}`;
+    expect(
+      (
+        await call('PATCH', url, {
+          sub: 'dev|dispatcher',
+          body: { roleId: dispatcher, reason: 'Moved to control' },
+        })
+      ).status,
+    ).toBe(403);
+    const same = await call('PATCH', url, { body: { roleId: crew, reason: 'No real change' } });
+    expect(same.status).toBe(400);
+    const short = await call('PATCH', url, { body: { roleId: dispatcher, reason: 'x' } });
+    expect(short.status).toBe(400);
+    const ok = await call('PATCH', url, {
+      body: { roleId: dispatcher, locationId: watford, reason: 'Moved to control room' },
+    });
+    expect(ok.status).toBe(200);
+    const after = await find();
+    const old = (after.memberships as J[]).find((m) => m.membershipId === before.membershipId)!;
+    const cur = (after.memberships as J[]).find((m) => m.membershipId === ok.body.membershipId)!;
+    expect(old.validTo).not.toBeNull();
+    expect(cur).toMatchObject({ roleKey: 'DISPATCHER', locationId: watford, validTo: null });
+    expect(
+      (await call('PATCH', url, { body: { roleId: crew, reason: 'Change it back' } })).status,
+    ).toBe(409);
+    expect(await auditActions()).toContain('admin.membership.change');
+  });
+
+  it('refuses to change your own membership and never grants support access as a role [task 14]', async () => {
+    const meId = (await call('GET', '/api/v1/me')).body.user.id as string;
+    const mine = ((await call('GET', '/api/v1/admin/users')).body.data as J[]).find(
+      (u) => u.id === meId,
+    )!;
+    const own = (mine.memberships as J[]).find((m) => m.validTo === null)!;
+    const crew = await role('CREW');
+    expect(
+      (
+        await call('PATCH', `/api/v1/admin/memberships/${own.membershipId}`, {
+          body: { roleId: crew, reason: 'Demote myself' },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call('POST', `/api/v1/admin/users/${meId}/memberships`, {
+          body: { roleId: crew },
+        })
+      ).status,
+    ).toBe(403);
+    const roles = (await call('GET', '/api/v1/admin/roles')).body.data as J[];
+    const support = roles.find((r) => r.key === 'PLATFORM_SUPPORT');
+    if (support) {
+      const r = await call('POST', '/api/v1/admin/users', {
+        body: { email: 't14.support@example.test', displayName: 'Support', roleId: support.id },
+      });
+      expect(r.status).toBe(403);
+    }
+  });
+
+  it('the audit log shows who did each action by name [task 14]', async () => {
+    const { body } = await call('GET', '/api/v1/audit-log?limit=20');
+    const named = (body.data as J[]).filter((a) => a.actorUserId);
+    expect(named.length).toBeGreaterThan(0);
+    for (const a of named) expect(typeof a.actorName).toBe('string');
+  });
+
+  it('a workbook mapping can only be rejected with a reason [task 14]', () => {
+    expect(WorkbookDecisionInput.safeParse({ decision: 'REJECTED' }).success).toBe(false);
+    expect(WorkbookDecisionInput.safeParse({ decision: 'REJECTED', note: 'no' }).success).toBe(
+      false,
+    );
+    expect(
+      WorkbookDecisionInput.safeParse({ decision: 'REJECTED', note: 'Wrong subject' }).success,
+    ).toBe(true);
+    expect(WorkbookDecisionInput.safeParse({ decision: 'APPROVED' }).success).toBe(true);
   });
 
   it('cannot revoke a user of another organisation (404)', async () => {

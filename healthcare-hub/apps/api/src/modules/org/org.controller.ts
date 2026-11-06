@@ -1,11 +1,12 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
-import type { Db } from '@hub/db';
+import type { Db, TenantTx } from '@hub/db';
 import {
   ActivityCreate,
   ActivityPatch,
   LocationCreate,
   LocationPatch,
   OrganisationPatch,
+  SECTOR_PACKS,
   ServiceCreate,
   ServicePatch,
   type ActivityDto,
@@ -25,29 +26,33 @@ const toLocation = (l: {
   name: string;
   address: unknown;
   type: 'PATIENT_FACING' | 'ADMIN_ONLY';
+  kind: string | null;
+  cqcLocationId: string | null;
   registered: boolean;
   archivedAt: Date | null;
+  archiveReason: string | null;
   version: number;
 }): LocationDto => ({
   id: l.id,
   name: l.name,
   address: (l.address ?? {}) as LocationDto['address'],
   type: l.type,
+  kind: (l.kind ?? null) as LocationDto['kind'],
+  cqcLocationId: l.cqcLocationId,
   registered: l.registered,
   archived: l.archivedAt !== null,
+  archiveReason: l.archiveReason,
   version: l.version,
 });
-const toService = (s: {
-  id: string;
-  code: string;
-  name: string;
-  archivedAt: Date | null;
-  version: number;
-}): ServiceDto => ({
+const toService = (
+  s: { id: string; code: string; name: string; archivedAt: Date | null; version: number },
+  locationIds: string[],
+): ServiceDto => ({
   id: s.id,
   code: s.code,
   name: s.name,
   archived: s.archivedAt !== null,
+  locationIds,
   version: s.version,
 });
 const toActivity = (a: {
@@ -65,8 +70,40 @@ const toActivity = (a: {
   archived: a.archivedAt !== null,
   version: a.version,
 });
+const toOrg = (o: {
+  id: string;
+  name: string;
+  legalName: string | null;
+  tradingName: string | null;
+  cqcProviderId: string | null;
+  address: unknown;
+  mainContact: unknown;
+  sectorPacks: string[];
+  regulator: string;
+  timezone: string;
+  version: number;
+}): OrganisationDto => ({
+  id: o.id,
+  name: o.name,
+  legalName: o.legalName,
+  tradingName: o.tradingName,
+  cqcProviderId: o.cqcProviderId,
+  address: (o.address ?? {}) as OrganisationDto['address'],
+  mainContact: (o.mainContact ?? {}) as OrganisationDto['mainContact'],
+  sectorPacks: o.sectorPacks,
+  regulator: o.regulator,
+  timezone: o.timezone,
+  version: o.version,
+});
 
-/** Organisation, locations, services and registered activities (PRD §3, §4.11). */
+/** Library pack prefixes that belong to each sector pack (pack-only content). */
+const PACK_PREFIX: Record<string, string> = {
+  ambulance: 'AMBULANCE',
+  dental: 'DENTAL',
+  care_home: 'CARE_HOME',
+};
+
+/** Organisation, locations, services and registered activities (PRD §3, §4.11, WORKFLOWS A2). */
 @Controller('organisations')
 export class OrgController {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -78,14 +115,7 @@ export class OrgController {
     const o = await this.db.withTenant(tenantOf(hub), (tx) =>
       tx.organisation.findUniqueOrThrow({ where: { id } }),
     );
-    return {
-      id: o.id,
-      name: o.name,
-      sectorPacks: o.sectorPacks,
-      regulator: o.regulator,
-      timezone: o.timezone,
-      version: o.version,
-    };
+    return toOrg(o);
   }
 
   @RequirePermission('admin.org.manage')
@@ -100,27 +130,34 @@ export class OrgController {
     const patch = body(OrganisationPatch, raw);
     const version = ifMatchVersion(req);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const cur = await tx.organisation.findUnique({ where: { id } });
+      if (!cur) throw staleOrNotFound(false);
+      if (patch.sectorPacks) {
+        const off = cur.sectorPacks.filter((p) => !patch.sectorPacks!.includes(p));
+        for (const pack of off) await this.assertPackUnused(tx, id, pack);
+      }
+      const { address, mainContact, ...rest } = patch;
       const r = await tx.organisation.updateMany({
         where: { id, version },
-        data: { ...patch, updatedBy: hub.user.id },
+        data: {
+          ...rest,
+          ...(address ? { address } : {}),
+          ...(mainContact ? { mainContact } : {}),
+          updatedBy: hub.user.id,
+        },
       });
-      if (r.count === 0)
-        throw staleOrNotFound((await tx.organisation.findUnique({ where: { id } })) !== null);
+      if (r.count === 0) throw staleOrNotFound(true);
       const o = await tx.organisation.findUniqueOrThrow({ where: { id } });
       await audit(this.db, tx, hub, {
         action: 'org.organisation.update',
         entity: 'organisation',
         entityId: id,
-        summary: { fields: Object.keys(patch).join(',') },
+        summary: {
+          fields: Object.keys(patch).join(','),
+          ...(patch.sectorPacks ? { sectorPacks: patch.sectorPacks.join(',') } : {}),
+        },
       });
-      return {
-        id: o.id,
-        name: o.name,
-        sectorPacks: o.sectorPacks,
-        regulator: o.regulator,
-        timezone: o.timezone,
-        version: o.version,
-      };
+      return toOrg(o);
     });
   }
 
@@ -151,6 +188,7 @@ export class OrgController {
     assertOrgParam(hub, id);
     const input = body(LocationCreate, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
+      await this.assertUniqueName(tx, input.name);
       const l = await tx.location.create({
         data: { organisationId: id, ...input, createdBy: hub.user.id, updatedBy: hub.user.id },
       });
@@ -158,6 +196,7 @@ export class OrgController {
         action: 'org.location.create',
         entity: 'location',
         entityId: l.id,
+        summary: { kind: l.kind, registered: l.registered },
       });
       return toLocation(l);
     });
@@ -173,22 +212,31 @@ export class OrgController {
     @Body() raw: unknown,
   ): Promise<LocationDto> {
     assertOrgParam(hub, id);
-    const { archived, ...rest } = body(LocationPatch, raw);
+    const { archived, archiveReason, ...rest } = body(LocationPatch, raw);
     const version = ifMatchVersion(req);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const cur = await tx.location.findUnique({ where: { id: locationId } });
+      if (!cur) throw staleOrNotFound(false);
+      if (rest.name && rest.name.toLowerCase() !== cur.name.toLowerCase())
+        await this.assertUniqueName(tx, rest.name, locationId);
+      if (archived === true && cur.archivedAt === null) await this.assertArchivable(tx, cur);
       const data: Json = { ...rest, updatedBy: hub.user.id };
-      if (archived !== undefined) data.archivedAt = archived ? new Date() : null;
+      if (archived !== undefined) {
+        data.archivedAt = archived ? new Date() : null;
+        data.archiveReason = archived ? (archiveReason ?? null) : null;
+      }
       const r = await tx.location.updateMany({ where: { id: locationId, version }, data });
-      if (r.count === 0)
-        throw staleOrNotFound(
-          (await tx.location.findUnique({ where: { id: locationId } })) !== null,
-        );
+      if (r.count === 0) throw staleOrNotFound(true);
       const l = await tx.location.findUniqueOrThrow({ where: { id: locationId } });
       await audit(this.db, tx, hub, {
-        action: 'org.location.update',
+        action: archived === true ? 'org.location.archive' : 'org.location.update',
         entity: 'location',
         entityId: locationId,
-        summary: { archived: l.archivedAt !== null },
+        summary: {
+          archived: l.archivedAt !== null,
+          fields: Object.keys(rest).join(','),
+          ...(archived === true && archiveReason ? { reason: archiveReason } : {}),
+        },
       });
       return toLocation(l);
     });
@@ -202,10 +250,14 @@ export class OrgController {
     @Param('id') id: string,
   ): Promise<{ data: ServiceDto[] }> {
     assertOrgParam(hub, id);
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.serviceType.findMany({ orderBy: { code: 'asc' } }),
-    );
-    return { data: rows.map(toService) };
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const [rows, links] = await Promise.all([
+        tx.serviceType.findMany({ orderBy: { code: 'asc' } }),
+        tx.serviceLocation.findMany({ select: { serviceId: true, locationId: true } }),
+      ]);
+      const of = (sid: string) => links.filter((l) => l.serviceId === sid).map((l) => l.locationId);
+      return { data: rows.map((s) => toService(s, of(s.id))) };
+    });
   }
 
   @RequirePermission('admin.org.manage')
@@ -216,7 +268,7 @@ export class OrgController {
     @Body() raw: unknown,
   ): Promise<ServiceDto> {
     assertOrgParam(hub, id);
-    const input = body(ServiceCreate, raw);
+    const { locationIds, ...input } = body(ServiceCreate, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const exists = await tx.serviceType.findUnique({
         where: { organisationId_code: { organisationId: id, code: input.code } },
@@ -226,12 +278,14 @@ export class OrgController {
       const s = await tx.serviceType.create({
         data: { organisationId: id, ...input, createdBy: hub.user.id, updatedBy: hub.user.id },
       });
+      const ids = await this.setServiceLocations(tx, hub, s.id, locationIds);
       await audit(this.db, tx, hub, {
         action: 'org.service.create',
         entity: 'service_type',
         entityId: s.id,
+        summary: { locations: ids.length },
       });
-      return toService(s);
+      return toService(s, ids);
     });
   }
 
@@ -245,7 +299,7 @@ export class OrgController {
     @Body() raw: unknown,
   ): Promise<ServiceDto> {
     assertOrgParam(hub, id);
-    const { archived, ...rest } = body(ServicePatch, raw);
+    const { archived, locationIds, ...rest } = body(ServicePatch, raw);
     const version = ifMatchVersion(req);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const data: Json = { ...rest, updatedBy: hub.user.id };
@@ -256,12 +310,22 @@ export class OrgController {
           (await tx.serviceType.findUnique({ where: { id: serviceId } })) !== null,
         );
       const s = await tx.serviceType.findUniqueOrThrow({ where: { id: serviceId } });
+      const ids =
+        locationIds !== undefined
+          ? await this.setServiceLocations(tx, hub, serviceId, locationIds)
+          : (
+              await tx.serviceLocation.findMany({
+                where: { serviceId },
+                select: { locationId: true },
+              })
+            ).map((l) => l.locationId);
       await audit(this.db, tx, hub, {
         action: 'org.service.update',
         entity: 'service_type',
         entityId: serviceId,
+        summary: { locationsChanged: locationIds !== undefined, locations: ids.length },
       });
-      return toService(s);
+      return toService(s, ids);
     });
   }
 
@@ -337,5 +401,102 @@ export class OrgController {
       });
       return toActivity(a);
     });
+  }
+
+  // ---- helpers -------------------------------------------------------------
+  /** A2: two locations cannot share a name (case and spacing ignored). */
+  private async assertUniqueName(tx: TenantTx, name: string, exceptId?: string): Promise<void> {
+    const clash = await tx.location.findFirst({
+      where: {
+        name: { equals: name.trim(), mode: 'insensitive' },
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (clash)
+      throw new HubError('CONFLICT', 409, `There is already a location called "${name.trim()}"`);
+  }
+
+  /**
+   * A2: refuse archiving the last active location, or one where staff are based or vehicles are
+   * kept, and say why.
+   */
+  private async assertArchivable(tx: TenantTx, loc: { id: string; name: string }): Promise<void> {
+    const others = await tx.location.count({ where: { archivedAt: null, id: { not: loc.id } } });
+    if (others === 0)
+      throw new HubError(
+        'CONFLICT',
+        409,
+        `${loc.name} is the only active location. Add another location before archiving it.`,
+      );
+    const [staff, vehicles] = await Promise.all([
+      tx.staff.count({ where: { primaryLocationId: loc.id, lifecycleState: { not: 'LEAVER' } } }),
+      tx.vehicle.count({ where: { baseLocationId: loc.id } }),
+    ]);
+    const why = [
+      staff ? `${staff} active staff member${staff === 1 ? ' is' : 's are'} based there` : '',
+      vehicles ? `${vehicles} vehicle${vehicles === 1 ? ' is' : 's are'} kept there` : '',
+    ].filter(Boolean);
+    if (why.length)
+      throw new HubError(
+        'CONFLICT',
+        409,
+        `${loc.name} cannot be archived: ${why.join(' and ')}. Move them first.`,
+      );
+  }
+
+  /** A2: a sector pack cannot be switched off while records that only it uses still exist. */
+  private async assertPackUnused(tx: TenantTx, orgId: string, pack: string): Promise<void> {
+    const prefix = PACK_PREFIX[pack];
+    const templates = prefix
+      ? await tx.requirementTemplate.findMany({
+          where: { organisationId: orgId, pack: { startsWith: prefix } },
+          select: { code: true, title: true },
+          orderBy: { code: 'asc' },
+        })
+      : [];
+    const vehicles = pack === 'ambulance' ? await tx.vehicle.count() : 0;
+    const items = [
+      ...templates.map((t) => `${t.code} ${t.title}`),
+      ...(vehicles ? [`${vehicles} vehicle${vehicles === 1 ? '' : 's'}`] : []),
+    ];
+    if (items.length === 0) return;
+    const shown = items.slice(0, 10);
+    const more = items.length > shown.length ? `, and ${items.length - shown.length} more` : '';
+    throw new HubError(
+      'CONFLICT',
+      409,
+      `The ${SECTOR_PACKS[pack] ?? pack} pack cannot be switched off while these records use ` +
+        `it: ${shown.join('; ')}${more}.`,
+      items.map((title) => ({ title })),
+    );
+  }
+
+  private async setServiceLocations(
+    tx: TenantTx,
+    hub: HubRequestContext,
+    serviceId: string,
+    locationIds: readonly string[],
+  ): Promise<string[]> {
+    const ids = [...new Set(locationIds)];
+    if (ids.length) {
+      const found = await tx.location.count({ where: { id: { in: ids } } });
+      if (found !== ids.length)
+        throw new HubError('NOT_FOUND', 404, 'One or more locations were not found');
+    }
+    await tx.serviceLocation.deleteMany({ where: { serviceId, locationId: { notIn: ids } } });
+    const have = (
+      await tx.serviceLocation.findMany({ where: { serviceId }, select: { locationId: true } })
+    ).map((l) => l.locationId);
+    for (const locationId of ids.filter((l) => !have.includes(l)))
+      await tx.serviceLocation.create({
+        data: {
+          organisationId: hub.orgId as string,
+          serviceId,
+          locationId,
+          createdBy: hub.user.id,
+        },
+      });
+    return ids;
   }
 }

@@ -18,33 +18,52 @@ import {
   recordOdometer,
   refreshVehicleStatus,
   recomputeInstance,
+  releaseAllocationsForVehicle,
   vehicleCapability,
   vehicleReadinessFor,
 } from '@hub/domain';
-import { londonDate } from '@hub/rules';
+import { drivingCategoryFor, londonDate, moveDateProblem, vehicleHeadline } from '@hub/rules';
 import {
   EquipmentCreate,
   EquipmentPatch,
+  EquipmentReleaseInput,
   FlagInput,
   MaintenanceDoneInput,
   MaintenancePlanInput,
   MoveInput,
   NeedsQuery,
   OdometerInput,
+  OdometerReviewInput,
   RegimeInput,
   VehicleCreate,
   VehiclePatch,
   type EquipmentDto,
   type VehicleDetailDto,
   type VehicleDto,
+  type VehicleStatusChangeDto,
 } from '@hub/contracts';
 import { RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
 import { audit, body, ifMatchVersion, staleOrNotFound } from '../../common/http.js';
+import { userNames } from '../evidence/evidence.mapper.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
-import { day, toEquipmentDto, toPlanDto, toVehicleDto } from './fleet.mapper.js';
+import {
+  day,
+  toEquipmentDto,
+  toPlanDto,
+  toVehicleDto,
+  type LatestReading,
+} from './fleet.mapper.js';
 
+const OFF_ROAD_WORDS: Record<string, string> = {
+  ACCIDENT: 'Accident',
+  AWAITING_PARTS: 'Awaiting parts',
+  REPAIR: 'Under repair',
+  SERVICE: 'In for service',
+  SOLD: 'Sold',
+  OTHER: 'Other',
+};
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
 const VIEW = 'fleet.vehicle.view';
 const MANAGE = 'fleet.vehicle.manage';
@@ -53,6 +72,13 @@ const ListQuery = z.object({
   locationId: z.string().uuid().optional(),
   q: z.string().trim().max(30).optional(),
 });
+
+async function assertServices(tx: TenantTx, ids: string[] | null | undefined): Promise<void> {
+  if (!ids || ids.length === 0) return;
+  const found = await tx.serviceType.count({ where: { id: { in: ids } } });
+  if (found !== new Set(ids).size)
+    throw new HubError('VALIDATION_FAILED', 400, 'Choose services from the list');
+}
 
 /** Vehicle register, odometer, maintenance and capability (FLT-01..03, FLT-08). */
 @Controller('vehicles')
@@ -80,11 +106,15 @@ export class VehiclesController {
         orderBy: { callsign: 'asc' },
         take: 500,
       });
-      const counts = await openDefectCounts(
-        tx,
-        rows.map((r) => r.id),
-      );
-      return { data: rows.map((v) => toVehicleDto(v, counts.get(v.id) ?? 0)), nextCursor: null };
+      const ids = rows.map((r) => r.id);
+      const [counts, latest] = await Promise.all([
+        openDefectCounts(tx, ids),
+        latestReadings(tx, ids),
+      ]);
+      return {
+        data: rows.map((v) => toVehicleDto(v, counts.get(v.id) ?? 0, latest.get(v.id) ?? null)),
+        nextCursor: null,
+      };
     });
   }
 
@@ -96,13 +126,25 @@ export class VehiclesController {
       await assertLocation(tx, hub, input.baseLocationId);
       const clash = await tx.vehicle.findFirst({
         where: { OR: [{ registration: input.registration }, { callsign: input.callsign }] },
-        select: { id: true },
+        select: { registration: true },
       });
       if (clash)
-        throw new HubError('CONFLICT', 409, 'That registration or callsign is already in use');
+        throw new HubError(
+          'CONFLICT',
+          409,
+          clash.registration === input.registration
+            ? 'Another vehicle already has that registration'
+            : 'Another vehicle already uses that callsign',
+        );
+      await assertServices(tx, input.serviceIds);
+      const { firstRegisteredOn, ownershipEndsOn, ...rest } = input;
       const v = await tx.vehicle.create({
         data: {
-          ...input,
+          ...rest,
+          // D1: the licence category follows the gross weight (over 3,500 kg needs C1).
+          licenceCategory: drivingCategoryFor(input.licenceCategory, input.grossWeightKg ?? null),
+          firstRegisteredOn: firstRegisteredOn ? day(firstRegisteredOn) : null,
+          ownershipEndsOn: ownershipEndsOn ? day(ownershipEndsOn) : null,
           organisationId: hub.orgId as string,
           createdBy: hub.user.id,
           updatedBy: hub.user.id,
@@ -115,8 +157,11 @@ export class VehiclesController {
           locationId: v.baseLocationId,
           reason: 'Vehicle added',
           movedBy: hub.user.id,
+          effectiveOn: day(londonDate(new Date())),
         },
       });
+      // D1: library requirements (insurance, tax, conversion certificate, service, and MOT once
+      // three years old) start grey until verified evidence is added.
       const auto = await applyAutoRequirements(
         tx,
         {
@@ -125,6 +170,7 @@ export class VehiclesController {
           kind: v.type,
           locationId: v.baseLocationId,
           organisationId: v.organisationId,
+          age: { firstRegisteredOn: firstRegisteredOn ?? null, year: input.year ?? null },
         },
         hub.user.id,
         new Date(),
@@ -157,23 +203,109 @@ export class VehiclesController {
       if (!v) throw notFound();
       const now = new Date();
       const counts = await openDefectCounts(tx, [id]);
+      const latest = (await latestReadings(tx, [id])).get(id) ?? null;
+      const reviews = await tx.odometerReview.findMany({
+        where: { readingId: { in: v.readings.map((r) => r.id) } },
+      });
+      const names = await userNames(
+        tx,
+        reviews.map((r) => r.reviewedBy),
+      );
+      const recent = v.readings
+        .filter((r) => !r.flags.length || reviews.some((x) => x.readingId === r.id))
+        .map((r) => ({ reading: r.reading, on: r.readOn.toISOString().slice(0, 10) }))
+        .reverse();
+      const readiness = await vehicleReadinessFor(tx, {
+        vehicleId: id,
+        window: { start: now, end: new Date(now.getTime() + 60_000) },
+        now,
+      });
+      const headline = vehicleHeadline({
+        offRoad: v.offRoad,
+        quarantined: v.quarantined,
+        statusReason: v.offRoad ? v.offRoadReason : v.quarantined ? v.quarantineReason : null,
+        expectedReturnOn: v.expectedReturnOn?.toISOString().slice(0, 10) ?? null,
+        failing: readiness.checks.filter((c) => c.result === 'FAIL').map((c) => c.reasonText),
+      });
       return {
-        ...toVehicleDto(v, counts.get(id) ?? 0),
-        maintenance: v.plans.map((p) => toPlanDto(p, v.currentOdometer, now)),
-        readings: v.readings.map((r) => ({
-          id: r.id,
-          reading: r.reading,
-          readOn: r.readOn.toISOString().slice(0, 10),
-          source: r.source,
-          flags: r.flags,
-        })),
+        ...toVehicleDto(v, counts.get(id) ?? 0, latest),
+        headline,
+        maintenance: v.plans.map((p) => toPlanDto(p, v.currentOdometer, now, recent)),
+        readings: v.readings.map((r) => {
+          const rv = reviews.find((x) => x.readingId === r.id);
+          return {
+            id: r.id,
+            reading: r.reading,
+            readOn: r.readOn.toISOString().slice(0, 10),
+            source: r.source,
+            flags: r.flags,
+            review: rv
+              ? {
+                  decision: rv.decision as 'CONFIRMED' | 'CORRECTED',
+                  correctedReading: rv.correctedReading,
+                  reason: rv.reason,
+                  reviewedByName: names.get(rv.reviewedBy) ?? null,
+                  at: rv.reviewedAt.toISOString(),
+                }
+              : null,
+          };
+        }),
         locations: v.locations.map((l) => ({
           locationId: l.locationId,
           reason: l.reason,
           at: l.at.toISOString(),
+          effectiveOn: l.effectiveOn?.toISOString().slice(0, 10) ?? null,
         })),
         capability: await vehicleCapability(tx, id),
       };
+    });
+  }
+
+  /** D2: the Fleet lead confirms a flagged reading as right, or corrects it, with a reason. */
+  @RequirePermission(MANAGE)
+  @Post(':id/odometer/:readingId/review')
+  async reviewReading(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Param('readingId', idPipe) readingId: string,
+    @Body() raw: unknown,
+  ) {
+    const input = body(OdometerReviewInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const r = await tx.odometerReading.findFirst({ where: { id: readingId, vehicleId: id } });
+      if (!r) throw notFound();
+      if (r.flags.length === 0)
+        throw new HubError('CONFLICT', 409, 'Only a flagged reading needs a review');
+      if (await tx.odometerReview.count({ where: { readingId } }))
+        throw new HubError('CONFLICT', 409, 'This reading has already been reviewed');
+      const value = input.decision === 'CORRECTED' ? (input.correctedReading as number) : r.reading;
+      await tx.odometerReview.create({
+        data: {
+          organisationId: r.organisationId,
+          readingId,
+          vehicleId: id,
+          decision: input.decision,
+          correctedReading: input.decision === 'CORRECTED' ? value : null,
+          reason: input.reason,
+          reviewedBy: hub.user.id,
+        },
+      });
+      // The reviewed figure becomes the vehicle's current odometer if it is the latest reading.
+      const newer = await tx.odometerReading.count({
+        where: { vehicleId: id, readOn: { gt: r.readOn } },
+      });
+      if (newer === 0)
+        await tx.vehicle.update({
+          where: { id },
+          data: { currentOdometer: value, updatedBy: hub.user.id },
+        });
+      await audit(this.db, tx, hub, {
+        action: 'fleet.odometer.review',
+        entity: 'vehicle',
+        entityId: id,
+        summary: { readingId, decision: input.decision, reading: value },
+      });
+      return { readingId, decision: input.decision, reading: value };
     });
   }
 
@@ -188,9 +320,24 @@ export class VehiclesController {
     const expected = ifMatchVersion(req);
     const input = body(VehiclePatch, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const cur = await tx.vehicle.findUnique({ where: { id } });
+      if (!cur) throw notFound();
+      await assertServices(tx, input.serviceIds);
+      const { firstRegisteredOn, ownershipEndsOn, ...rest } = input;
+      const weight = input.grossWeightKg !== undefined ? input.grossWeightKg : cur.grossWeightKg;
       const r = await tx.vehicle.updateMany({
         where: { id, version: expected },
-        data: { ...input, updatedBy: hub.user.id },
+        data: {
+          ...rest,
+          licenceCategory: drivingCategoryFor(input.licenceCategory ?? cur.licenceCategory, weight),
+          ...(firstRegisteredOn !== undefined
+            ? { firstRegisteredOn: firstRegisteredOn ? day(firstRegisteredOn) : null }
+            : {}),
+          ...(ownershipEndsOn !== undefined
+            ? { ownershipEndsOn: ownershipEndsOn ? day(ownershipEndsOn) : null }
+            : {}),
+          updatedBy: hub.user.id,
+        },
       });
       if (r.count === 0) throw staleOrNotFound((await tx.vehicle.count({ where: { id } })) > 0);
       await audit(this.db, tx, hub, {
@@ -326,6 +473,11 @@ export class VehiclesController {
         include: { vehicle: true },
       });
       if (!p) throw notFound();
+      if (
+        input.jobSheetEvidenceItemId &&
+        !(await tx.evidenceItem.count({ where: { id: input.jobSheetEvidenceItemId } }))
+      )
+        throw new HubError('VALIDATION_FAILED', 400, 'Upload the job sheet first');
       await tx.maintenanceEvent.create({
         data: {
           organisationId: p.organisationId,
@@ -333,6 +485,8 @@ export class VehiclesController {
           doneOn: day(input.doneOn),
           odometer: input.odometer ?? null,
           notes: input.notes ?? null,
+          garage: input.garage ?? null,
+          jobSheetEvidenceItemId: input.jobSheetEvidenceItemId ?? null,
           recordedBy: hub.user.id,
         },
       });
@@ -358,7 +512,7 @@ export class VehiclesController {
         action: 'fleet.maintenance.done',
         entity: 'maintenance_plan',
         entityId: planId,
-        summary: { vehicleId: id },
+        summary: { vehicleId: id, garage: input.garage ?? null },
       });
       return toPlanDto(u, v.currentOdometer, new Date());
     });
@@ -372,6 +526,10 @@ export class VehiclesController {
     @Body() raw: unknown,
   ): Promise<VehicleDto> {
     const input = body(MoveInput, raw);
+    const now = new Date();
+    const effectiveOn = input.effectiveOn ?? londonDate(now);
+    const problem = moveDateProblem(effectiveOn, now);
+    if (problem) throw new HubError('VALIDATION_FAILED', 400, problem);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const v = await tx.vehicle.findUnique({ where: { id } });
       if (!v) throw notFound();
@@ -385,6 +543,7 @@ export class VehiclesController {
           locationId: input.locationId,
           reason: input.reason,
           movedBy: hub.user.id,
+          effectiveOn: day(effectiveOn),
         },
       });
       await tx.vehicle.update({
@@ -399,7 +558,7 @@ export class VehiclesController {
         action: 'fleet.vehicle.move',
         entity: 'vehicle',
         entityId: id,
-        summary: { locationId: input.locationId },
+        summary: { locationId: input.locationId, effectiveOn },
       });
       return this.dto(tx, id);
     });
@@ -424,29 +583,127 @@ export class VehiclesController {
     field: 'quarantined' | 'offRoad',
   ): Promise<VehicleDto> {
     const input = body(FlagInput, raw);
+    // Putting a vehicle back into service is a return-to-service decision.
+    if (!input.on && !hub.permissions.has('fleet.return_to_service'))
+      throw new HubError('FORBIDDEN', 403, 'Returning a vehicle to service needs that permission');
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const v = await tx.vehicle.findUnique({ where: { id } });
       if (!v) throw notFound();
       if (v[field] === input.on) throw new HubError('CONFLICT', 409, 'No change');
+      if (input.expectedReturnOn && input.expectedReturnOn < londonDate(new Date()))
+        throw new HubError('VALIDATION_FAILED', 400, 'The expected return date has passed');
+      const text = input.reasonCode
+        ? `${OFF_ROAD_WORDS[input.reasonCode]}: ${input.reason}`
+        : input.reason;
+      const reasonField = field === 'offRoad' ? 'offRoadReason' : 'quarantineReason';
       await tx.vehicle.update({
         where: { id },
-        data: { [field]: input.on, updatedBy: hub.user.id },
+        data: {
+          [field]: input.on,
+          [reasonField]: input.on ? text : null,
+          ...(field === 'offRoad'
+            ? {
+                expectedReturnOn:
+                  input.on && input.expectedReturnOn ? day(input.expectedReturnOn) : null,
+              }
+            : {}),
+          updatedBy: hub.user.id,
+        },
       });
       await refreshVehicleStatus(tx, id);
+      const flag = field === 'offRoad' ? 'OFF_ROAD' : 'QUARANTINE';
+      // Jobs not yet started move off an unusable vehicle; control is alerted with codes only.
+      const released = input.on
+        ? await releaseAllocationsForVehicle(
+            tx,
+            id,
+            new Date(),
+            flag === 'OFF_ROAD' ? 'Vehicle taken off the road' : 'Vehicle quarantined',
+            hub.user.id,
+          )
+        : [];
+      await tx.vehicleStatusChange.create({
+        data: {
+          organisationId: v.organisationId,
+          vehicleId: id,
+          flag,
+          setOn: input.on,
+          reason: input.reason,
+          reasonCode: input.reasonCode ?? null,
+          expectedReturnOn: input.expectedReturnOn ? day(input.expectedReturnOn) : null,
+          jobsReleased: released.length,
+          changedBy: hub.user.id,
+        },
+      });
       await audit(this.db, tx, hub, {
         action: `fleet.vehicle.${field === 'offRoad' ? 'off_road' : 'quarantine'}`,
         entity: 'vehicle',
         entityId: id,
-        summary: { on: input.on },
+        summary: { on: input.on, jobsReleased: released.length },
       });
       return this.dto(tx, id);
     });
   }
 
+  @RequirePermission(VIEW)
+  @Get(':id/status-history')
+  async statusHistory(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+  ): Promise<{ data: VehicleStatusChangeDto[] }> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.vehicle.count({ where: { id } }))) throw notFound();
+      const rows = await tx.vehicleStatusChange.findMany({
+        where: { vehicleId: id },
+        orderBy: { changedAt: 'desc' },
+        take: 100,
+      });
+      const names = await userNames(
+        tx,
+        rows.map((r) => r.changedBy),
+      );
+      return {
+        data: rows.map((r) => ({
+          id: r.id,
+          flag: r.flag as VehicleStatusChangeDto['flag'],
+          on: r.setOn,
+          reason: r.reason,
+          reasonCode: r.reasonCode as VehicleStatusChangeDto['reasonCode'],
+          expectedReturnOn: r.expectedReturnOn?.toISOString().slice(0, 10) ?? null,
+          jobsReleased: r.jobsReleased,
+          changedBy: r.changedBy,
+          changedByName: names.get(r.changedBy) ?? null,
+          changedAt: r.changedAt.toISOString(),
+        })),
+      };
+    });
+  }
+
   private async dto(tx: TenantTx, id: string): Promise<VehicleDto> {
     const v = await tx.vehicle.findUniqueOrThrow({ where: { id } });
-    return toVehicleDto(v, (await openDefectCounts(tx, [id])).get(id) ?? 0);
+    return toVehicleDto(
+      v,
+      (await openDefectCounts(tx, [id])).get(id) ?? 0,
+      (await latestReadings(tx, [id])).get(id) ?? null,
+    );
   }
+}
+
+/** Latest recorded reading per vehicle, so lists never show a mileage without one behind it. */
+async function latestReadings(tx: TenantTx, ids: string[]): Promise<Map<string, LatestReading>> {
+  if (ids.length === 0) return new Map();
+  const rows = await tx.odometerReading.findMany({
+    where: { vehicleId: { in: ids } },
+    distinct: ['vehicleId'],
+    orderBy: [{ vehicleId: 'asc' }, { readOn: 'desc' }, { createdAt: 'desc' }],
+    select: { vehicleId: true, reading: true, readOn: true },
+  });
+  return new Map(
+    rows.map((r) => [
+      r.vehicleId,
+      { reading: r.reading, readOn: r.readOn.toISOString().slice(0, 10) },
+    ]),
+  );
 }
 
 async function openDefectCounts(tx: TenantTx, ids: string[]): Promise<Map<string, number>> {
@@ -598,7 +855,21 @@ export class EquipmentController {
         throw new HubError('CONFLICT', 409, 'The asset is not in service');
       await tx.equipmentAsset.update({
         where: { id },
-        data: { status: 'QUARANTINED', quarantineReason: input.reason, updatedBy: hub.user.id },
+        data: {
+          status: 'QUARANTINED',
+          quarantineReason: input.reason,
+          quarantinedBy: hub.user.id,
+          updatedBy: hub.user.id,
+        },
+      });
+      await tx.equipmentStatusChange.create({
+        data: {
+          organisationId: a.organisationId,
+          assetId: id,
+          action: 'QUARANTINE',
+          reason: input.reason,
+          changedBy: hub.user.id,
+        },
       });
       await audit(this.db, tx, hub, {
         action: 'fleet.equipment.quarantine',
@@ -618,12 +889,21 @@ export class EquipmentController {
     @Param('id', idPipe) id: string,
     @Body() raw: unknown,
   ): Promise<EquipmentDto> {
-    const input = body(QuarantineInput, raw);
+    const input = body(EquipmentReleaseInput, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const a = await tx.equipmentAsset.findUnique({ where: { id } });
       if (!a) throw notFound();
       if (a.status !== 'QUARANTINED')
         throw new HubError('CONFLICT', 409, 'The asset is not quarantined');
+      // D3: release is by a different person from the one who quarantined it, with evidence.
+      if (a.quarantinedBy === hub.user.id)
+        throw new HubError(
+          'SELF_APPROVAL',
+          403,
+          'Someone other than the person who quarantined it must release it',
+        );
+      if (!(await tx.evidenceItem.count({ where: { id: input.evidenceItemId } })))
+        throw new HubError('VALIDATION_FAILED', 400, 'Upload the repair or inspection evidence');
       const open = await tx.defect.count({
         where: { assetId: id, stopUse: true, status: { not: 'RELEASED' } },
       });
@@ -635,13 +915,28 @@ export class EquipmentController {
         );
       await tx.equipmentAsset.update({
         where: { id },
-        data: { status: 'AVAILABLE', quarantineReason: null, updatedBy: hub.user.id },
+        data: {
+          status: 'AVAILABLE',
+          quarantineReason: null,
+          quarantinedBy: null,
+          updatedBy: hub.user.id,
+        },
+      });
+      await tx.equipmentStatusChange.create({
+        data: {
+          organisationId: a.organisationId,
+          assetId: id,
+          action: 'RELEASE',
+          reason: input.reason,
+          evidenceItemId: input.evidenceItemId,
+          changedBy: hub.user.id,
+        },
       });
       await audit(this.db, tx, hub, {
         action: 'fleet.equipment.release',
         entity: 'equipment_asset',
         entityId: id,
-        summary: { reason: input.reason.slice(0, 120) },
+        summary: { reason: input.reason.slice(0, 120), evidenceItemId: input.evidenceItemId },
       });
       return this.dto(tx, id);
     });

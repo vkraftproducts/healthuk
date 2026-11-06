@@ -38,6 +38,8 @@ export const PERMISSIONS = {
   'compliance.action.manage': 'Create and update audit actions',
   'compliance.action.verify': 'Verify action closure',
   'compliance.policy.manage': 'Manage policies and SOPs',
+  'compliance.policy.approve': 'Approve a policy version (registered manager or director)',
+  'inspection.view': 'Open the read-only inspection view (every view is logged)',
   'compliance.policy.acknowledge': 'Acknowledge policies',
   'compliance.risk.manage': 'Manage the risk register',
   'compliance.registration.manage': 'Manage the registration record and correspondence',
@@ -46,6 +48,8 @@ export const PERMISSIONS = {
   'export.evidence_pack': 'Generate inspection evidence packs',
   // events
   'events.event.view': 'View incidents, complaints and events',
+  'events.event.report':
+    'Report an incident, concern or complaint and see your own reports (every staff member)',
   'events.event.manage': 'Create and manage events and reporting obligations',
   'events.candour.decide': 'Record duty of candour decisions',
   'events.safeguarding.view': 'View safeguarding cases',
@@ -75,6 +79,13 @@ export const PERMISSIONS = {
   'privacy.manage':
     'Manage retention rules, legal holds, subject requests, disclosures and breaches',
   'support.access.read': 'Break-glass read access for platform support',
+  // speaking up and harassment prevention
+  'speakup.raise': 'Raise a speak-up concern, named or anonymous',
+  'speakup.manage': 'Handle speak-up concerns, including who raised them (audited)',
+  'harassment.manage': 'Manage the sexual harassment risk assessment and prevention steps',
+  // governance records
+  'governance.meeting.manage': 'Record governance meetings, minutes and decisions',
+  'governance.fit_proper.manage': "Record directors' fit and proper person checks (sensitive)",
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -96,6 +107,8 @@ export const SELF_SERVICE_PERMISSIONS: readonly string[] = [
   'fleet.expense.submit',
   'compliance.policy.acknowledge',
   'compliance.evidence.upload',
+  'speakup.raise',
+  'events.event.report',
 ];
 
 export const RESTRICTED_FOR_DISPATCH_AND_CREW: readonly PermissionKey[] = [
@@ -111,6 +124,8 @@ export const RESTRICTED_FOR_DISPATCH_AND_CREW: readonly PermissionKey[] = [
   'allocation.exception.approve',
   'admin.audit.view',
   'admin.audit.verify',
+  'speakup.manage',
+  'governance.fit_proper.manage',
 ];
 
 export interface SystemRole {
@@ -152,10 +167,13 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'admin.roles.manage',
       'admin.settings.manage',
       'admin.audit.view',
+      'admin.audit.verify',
       'admin.support.approve',
       'admin.support.view',
       'admin.import.manage',
       'reports.view',
+      'speakup.raise',
+      'events.event.report',
     ],
   },
   {
@@ -179,6 +197,10 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'staff.self.view',
       'staff.self.update',
       'events.event.view',
+      'speakup.raise',
+      'speakup.manage',
+      'harassment.manage',
+      'events.event.report',
     ],
   },
   {
@@ -196,6 +218,8 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'compliance.policy.acknowledge',
       'staff.self.view',
       'reports.view',
+      'speakup.raise',
+      'events.event.report',
     ],
   },
   {
@@ -218,6 +242,8 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'compliance.policy.acknowledge',
       'staff.self.view',
       'jobs.job.view',
+      'speakup.raise',
+      'events.event.report',
     ],
   },
   {
@@ -233,6 +259,8 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'compliance.evidence.upload',
       'compliance.policy.acknowledge',
       'staff.self.view',
+      'speakup.raise',
+      'events.event.report',
     ],
   },
   {
@@ -259,7 +287,7 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'export.evidence_pack',
       'events.event.view',
       'events.event.manage',
-      'events.candour.decide',
+      'events.event.report',
       'events.safeguarding.view',
       'admin.requirements.publish',
       'premises.item.view',
@@ -267,7 +295,12 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'fleet.vdi.view',
       'staff.self.view',
       'admin.audit.view',
+      'admin.audit.verify',
       'privacy.manage',
+      'speakup.raise',
+      'governance.meeting.manage',
+      'governance.fit_proper.manage',
+      'inspection.view',
     ],
   },
   {
@@ -283,6 +316,8 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'fleet.expense.submit',
       'compliance.policy.acknowledge',
       'compliance.evidence.upload',
+      'speakup.raise',
+      'events.event.report',
     ],
   },
   {
@@ -298,6 +333,9 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'premises.item.view',
       'staff.profile.view_basic',
       'reports.view',
+      'admin.audit.view',
+      'admin.audit.verify',
+      'inspection.view',
     ],
   },
   {

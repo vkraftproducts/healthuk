@@ -87,7 +87,25 @@ DECISIONS.md updated. Do not start a milestone until the previous one is green.
 - [x] Compliance artefacts (SECURITY_COMPLIANCE §9); admin & user guides in `docs/guides/` _(drafts in docs/compliance – the organisation completes and signs the DPIA, ROPA, retention basis and statements.)_
 - [x] All UAT-01..08 green; no open critical safety/isolation defects _(docs/compliance/uat-report.md; traceability guard in apps/api/test/uat-trace.test.ts.)_
 
+## Spec gap closure (4 Nov 2026)
+
+Closes the gaps found when comparing the build with the Development spec v0.1.
+
+- [x] DASH-01 filters: location, service, owner and deadline date range, as well as module (`GET /dashboard/summary|actions` accept `locationId`, `serviceId`, `ownerUserId`, `dateFrom`, `dateTo`). Tiles still equal their drill-down under every filter. _(The service filter uses `applicabilityRule.services` (service codes) on a requirement template; a template that names none applies to every service. An owner filter hides vehicles, which have no named owner. A date range never hides a record that has no deadline, such as a blocked vehicle or a critical finding.)_
+- [x] Group dashboard: `GET /dashboard/group` gives counts per organisation the user holds `dashboard.view` in, computed inside each organisation's own tenant context. Counts only; an organisation that cannot be read is shown as unavailable, never as zero. Shown on the home page when the user belongs to more than one organisation.
+- [x] HSE-01 premises: create form on the Premises page; contractor, assessment reference/date, action owner, evidence count; infection-control items at an administration-only location need an explicit confirmation (migration 0014).
+- [x] EVT-04 feedback: compliments, staff feedback and patient surveys with themes, actions (`source_type` FEEDBACK) and a themes report that counts complaints and feedback together (migration 0015, Compliance → Feedback).
+
+Dental and care-home packs and integrations now exist as clearly labelled **draft / mock** builds (see "Later" below). Real content validation and live connections remain open.
+
 ## Later (separately approved): Phase 4 sector packs
 
 Dental pack, care-home pack (content requires specialist validation), integrations
 (FleetX, payroll, telematics, calendars) via adapters in `apps/api/src/integrations/*`.
+
+### Draft build with mock data (done)
+
+- **Dental (`DENTAL_V1`, 20 templates) and care-home (`CARE_HOME_V1`, 28 templates) packs** - migration `0016`. Synthetic starting content: every template's regulation reference starts "[Draft pack - specialist validation required before use]". Adopting one needs the pack enabled on the organisation and a named specialist (`specialistValidatedBy`), which is audited. Nothing is active until a second person publishes it.
+- **Mock organisations** - `pnpm db:seed:sectors` adds "Mock Dental Practice (synthetic)" and "Mock Care Home (synthetic)" with a manager, an administrator, three staff each and INACTIVE draft audit templates carrying a proposed cadence. Users: `dev|dental-manager`, `dev|dental-admin`, `dev|carehome-manager`, `dev|carehome-admin`.
+- **Integrations (INT-01), mock adapters only** - migration `0017`, `/integrations`, Settings -> Integrations. Telematics (odometer readings, flagged by the normal plausibility rules), FleetX (submitted fuel expenses, duplicates marked), training (unverified staff records, never linked to a requirement), payroll hours CSV and an iCalendar shift feed. Syncs are idempotent; a "faults" scenario shows flagged and skipped records. Connecting in LIVE mode is refused.
+- **Still needs the customer**: specialist validation of both packs, confirmed API access and credentials for each real system, and a decision on payroll format.

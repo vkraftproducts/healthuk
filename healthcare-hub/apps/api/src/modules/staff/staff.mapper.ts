@@ -9,10 +9,16 @@ type StaffRow = Prisma.StaffGetPayload<object>;
 export interface Summary {
   counts: { red: number; amber: number; grey: number; green: number };
   overall: StaffDto['overallStatus'];
+  setUp: boolean;
   roles: string[];
 }
 
-export function toStaffDto(s: StaffRow, sum: Summary, restrictions: string[]): StaffDto {
+export function toStaffDto(
+  s: StaffRow,
+  sum: Summary,
+  restrictions: string[],
+  names?: { location: string | null; manager: string | null },
+): StaffDto {
   return {
     id: s.id,
     staffNo: s.staffNo,
@@ -23,9 +29,14 @@ export function toStaffDto(s: StaffRow, sum: Summary, restrictions: string[]): S
     managerStaffId: s.managerStaffId,
     jobTitle: s.jobTitle,
     workingPattern: s.workingPattern,
+    workEmail: s.workEmail,
+    startDate: iso(s.startDate),
+    contractType: s.contractType as StaffDto['contractType'],
+    ...(names ? { locationName: names.location, managerName: names.manager } : {}),
     roles: sum.roles as StaffDto['roles'],
     activeRestrictions: restrictions as StaffDto['activeRestrictions'],
     overallStatus: sum.overall,
+    checksSetUp: sum.setUp,
     counts: sum.counts,
     version: s.version,
   };
@@ -51,21 +62,13 @@ type RecordRow = Prisma.StaffRecordGetPayload<{
   include: { supersededBy: { select: { id: true } } };
 }>;
 
-/** User ids the record names (checker, assessor, supervisor, ...): their fields end in UserId. */
-export function userIdsIn(data: unknown): string[] {
-  return Object.entries((data ?? {}) as Record<string, unknown>)
-    .filter(([k, v]) => k.endsWith('UserId') && typeof v === 'string')
-    .map(([, v]) => v as string);
-}
-
-export function toRecordDto(
-  r: RecordRow,
-  key: Buffer,
-  names: ReadonlyMap<string, string> = new Map(),
-): StaffRecordDto {
+export function toRecordDto(r: RecordRow, key: Buffer): StaffRecordDto {
   const data = { ...(r.data as Record<string, unknown>) };
   if (r.kind === 'DBS' && typeof data.certificateNumber === 'string') {
     data.certificateNumber = decryptField(data.certificateNumber, key) ?? '[unreadable]';
+  }
+  if (r.kind === 'LICENCE' && typeof data.licenceNumber === 'string') {
+    data.licenceNumber = decryptField(data.licenceNumber, key) ?? '[unreadable]';
   }
   return {
     id: r.id,
@@ -80,9 +83,6 @@ export function toRecordDto(
     current: !r.supersededBy,
     createdAt: r.createdAt.toISOString(),
     createdBy: r.createdBy,
-    people: Object.fromEntries(
-      userIdsIn(r.data).flatMap((id) => (names.has(id) ? [[id, names.get(id)!]] : [])),
-    ),
   };
 }
 
@@ -149,6 +149,8 @@ export function derivedValidity(
       return { validFrom: s('assessedOn'), validTo: s('reviewOn') };
     case 'DBS':
       return { validFrom: s('issueDate'), validTo: null };
+    case 'IDENTITY':
+      return { validFrom: s('checkedOn'), validTo: s('documentExpiry') };
     default:
       return { validFrom: null, validTo: null };
   }

@@ -105,6 +105,18 @@ export function riskRating(
   return { score, rating };
 }
 
+const RATING_WORD: Record<RiskRating, string> = {
+  LOW: 'Low',
+  MEDIUM: 'Medium',
+  HIGH: 'High',
+  EXTREME: 'Extreme',
+};
+/** Band text with the score, for example "High 16" (WORKFLOWS H4). */
+export function riskBandText(likelihood: number, impact: number): string {
+  const r = riskRating(likelihood, impact);
+  return `${RATING_WORD[r.rating]} ${r.score}`;
+}
+
 // ---- Policies (COMP-04) ---------------------------------------------------------------
 export type AckState = 'CURRENT' | 'CARRIED_FORWARD' | 'REQUIRED' | 'NO_PUBLISHED_VERSION';
 /**
@@ -148,9 +160,19 @@ export const EVENT_FLOW: readonly EventStatus[] = [
 ];
 
 export type EventRefusal =
-  'NOT_ALLOWED' | 'OBLIGATIONS_UNDECIDED' | 'CANDOUR_UNDECIDED' | 'ACTIONS_OPEN';
+  | 'NOT_ALLOWED'
+  | 'OBLIGATIONS_UNDECIDED'
+  | 'CANDOUR_UNDECIDED'
+  | 'ACTIONS_OPEN'
+  | 'NOT_TRIAGED'
+  | 'CANDOUR_INCOMPLETE'
+  | 'LEARNING_RESPONSE_MISSING';
 
-/** Forward one step at a time (or back one step to reopen), with gates on reporting duties, candour and actions. */
+/**
+ * Forward one step at a time (or back one step to reopen), with gates on reporting duties, candour
+ * and actions. The optional gates (triage, candour steps, PSIRF learning response) apply when the
+ * caller passes them (WORKFLOWS H1).
+ */
 export function checkEventTransition(i: {
   from: EventStatus;
   to: EventStatus;
@@ -158,15 +180,22 @@ export function checkEventTransition(i: {
   candourFlagged: boolean;
   candourDecided: boolean;
   openActions: number;
+  triaged?: boolean;
+  candourStepsOutstanding?: number;
+  learningResponseMissing?: boolean;
 }): EventRefusal | null {
   const a = EVENT_FLOW.indexOf(i.from);
   const b = EVENT_FLOW.indexOf(i.to);
   if (i.from === 'CLOSED' || !(b === a + 1 || b === a - 1)) return 'NOT_ALLOWED';
   if (b < a) return null;
+  if (i.from === 'TRIAGE' && i.triaged === false) return 'NOT_TRIAGED';
   // Leaving ASSESS means every reporting duty has a recorded decision (no assumption either way).
   if (i.from === 'ASSESS' && i.pendingObligations > 0) return 'OBLIGATIONS_UNDECIDED';
   if (i.from === 'ASSESS' && i.candourFlagged && !i.candourDecided) return 'CANDOUR_UNDECIDED';
+  if (i.from === 'INVESTIGATE' && i.learningResponseMissing) return 'LEARNING_RESPONSE_MISSING';
   if (i.to === 'LEARNING_VERIFIED' && i.openActions > 0) return 'ACTIONS_OPEN';
+  if (i.to === 'CLOSED' && (i.candourStepsOutstanding ?? 0) > 0) return 'CANDOUR_INCOMPLETE';
+  if (i.to === 'CLOSED' && i.pendingObligations > 0) return 'OBLIGATIONS_UNDECIDED';
   return null;
 }
 

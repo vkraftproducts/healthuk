@@ -2,7 +2,16 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import pg from 'pg';
 import type { Db } from '@hub/db';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  completeChecks,
+  ensureRoleRequirement,
+  makeApp,
+  recordSchedule3,
+  sign,
+  uploadAndVerify,
+} from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -65,54 +74,14 @@ const approve = (id: string, role: string, sub = 'dev|hr') =>
 
 async function activeStaff(roles: string[] = ['DRIVER']): Promise<J> {
   const s = await newStaff();
-  for (const to of ['CHECKS_IN_PROGRESS', 'READY_FOR_REVIEW'])
-    expect((await move(s.id, to)).status).toBe(201);
-  for (const r of roles) expect((await approve(s.id, r)).status).toBe(201);
-  expect((await move(s.id, 'APPROVED_FOR_ROLE')).status).toBe(201);
-  expect((await move(s.id, 'ACTIVE')).status).toBe(201);
+  expect((await move(s.id, 'CHECKS_IN_PROGRESS')).status).toBe(201);
+  await activateStaff(app, ORG, s.id, roles);
   return s;
 }
 async function userId(email: string): Promise<string> {
   const { body } = await call('GET', '/api/v1/admin/users');
   return (body.data as J[]).find((u) => u.email === email)!.id as string;
 }
-/** Uploads a document for the requirement as `uploader` and has `verifier` accept it. */
-async function verified(instanceId: string, uploader: string, verifier: string): Promise<void> {
-  const bytes = Buffer.from('%PDF-1.4\n% test\n%%EOF\n');
-  const validTo = new Date(Date.now() + 400 * 86_400_000).toISOString().slice(0, 10);
-  const up = await call('POST', '/api/v1/evidence/uploads', {
-    sub: uploader,
-    body: {
-      title: 'Licence check',
-      mime: 'application/pdf',
-      sizeBytes: bytes.length,
-      requirementInstanceIds: [instanceId],
-      validTo,
-    },
-  });
-  expect(up.status).toBe(201);
-  const put = await app.inject({
-    method: 'PUT',
-    url: new URL(up.body.uploadUrl as string).pathname,
-    headers: { 'content-type': 'application/pdf' },
-    payload: bytes,
-  });
-  expect(put.statusCode).toBe(200);
-  expect(
-    (
-      await call('POST', `/api/v1/evidence/${up.body.evidenceVersionId}/complete`, {
-        sub: uploader,
-      })
-    ).status,
-  ).toBe(201);
-  const ok = await call('POST', `/api/v1/evidence/${up.body.evidenceVersionId}/verify`, {
-    sub: verifier,
-    body: { decision: 'ACCEPTED', confirmedValidTo: validTo },
-  });
-  expect(ok.status).toBe(201);
-}
-const startChecks = (id: string, role: string) =>
-  call('POST', `/api/v1/staff/${id}/role-checks`, { sub: 'dev|hr', body: { role } });
 let tseq = 0;
 async function staffTemplate(code: string, o: Record<string, unknown> = {}) {
   const c = await call('POST', '/api/v1/requirements/templates', {
@@ -197,7 +166,8 @@ describe('staff register and views [HR-01]', () => {
     const s = await newStaff({ jobTitle: 'Driver' });
     expect(s).toMatchObject({
       lifecycleState: 'CANDIDATE',
-      overallStatus: 'NOT_APPLICABLE',
+      overallStatus: 'GREY',
+      checksSetUp: false,
       version: 1,
     });
     const dup = await call('POST', '/api/v1/staff', {
@@ -277,12 +247,54 @@ describe('lifecycle [HR-01]', () => {
     const s = await newStaff();
     expect((await move(s.id, 'ACTIVE')).body.code).toBe('TRANSITION_NOT_ALLOWED');
     await move(s.id, 'CHECKS_IN_PROGRESS');
-    await move(s.id, 'READY_FOR_REVIEW');
+    // Nothing started yet: cannot be ready for review.
+    const early = await move(s.id, 'READY_FOR_REVIEW');
+    expect([early.status, early.body.detail]).toEqual([
+      422,
+      'Start checks for at least one role before moving to Ready for review.',
+    ]);
+    // Reg 19 gate: a role's checks must be verified before approval (finding 46).
+    await ensureRoleRequirement(app, ORG, 'CARE_ASSISTANT');
+    const started = await call('POST', `/api/v1/staff/${s.id}/role-checks`, {
+      sub: 'dev|hr',
+      body: { role: 'CARE_ASSISTANT' },
+    });
+    expect(started.status).toBe(201);
+    expect(started.body.blockers.length).toBeGreaterThan(0);
+    const unverified = await approve(s.id, 'CARE_ASSISTANT');
+    expect([unverified.status, unverified.body.code]).toEqual([422, 'TRANSITION_NOT_ALLOWED']);
+    expect(unverified.body.checks.length).toBe(started.body.blockers.length);
+    expect((await move(s.id, 'READY_FOR_REVIEW')).status).toBe(422);
+    await uploadAndVerify(
+      app,
+      ORG,
+      (started.body.blockers as J[]).map((b) => b.instanceId),
+    ); // HR uploads, manager verifies
+    expect((await move(s.id, 'READY_FOR_REVIEW')).status).toBe(201);
     const noRole = await move(s.id, 'APPROVED_FOR_ROLE');
     expect([noRole.status, noRole.body.code]).toEqual([422, 'TRANSITION_NOT_ALLOWED']);
     expect((await approve(s.id, 'CARE_ASSISTANT', 'dev|dispatcher')).status).toBe(403);
+    // Two-person rule: the manager verified everything, so cannot also approve.
+    expect((await approve(s.id, 'CARE_ASSISTANT', 'dev|manager')).body.code).toBe(
+      'FOUR_EYES_REQUIRED',
+    );
+    // Schedule 3: a regulated role also needs the full staff file before approval (task 18).
+    const noFile = await approve(s.id, 'CARE_ASSISTANT');
+    expect([noFile.status, noFile.body.code, noFile.body.detail]).toEqual([
+      422,
+      'TRANSITION_NOT_ALLOWED',
+      expect.stringMatching(/Schedule 3 staff file is incomplete/),
+    ]);
+    expect(noFile.body.checks.map((c: J) => c.code)).toContain('SCHEDULE3_DBS');
+    await recordSchedule3(app, ORG, s.id);
     expect((await approve(s.id, 'CARE_ASSISTANT')).status).toBe(201);
     expect((await approve(s.id, 'CARE_ASSISTANT')).status).toBe(409);
+    // A role with nothing set up can never be approved (nothing could be checked).
+    const unset = await approve(s.id, 'PARAMEDIC');
+    expect([unset.status, unset.body.detail]).toEqual([
+      422,
+      expect.stringMatching(/no requirements set up/),
+    ]);
     expect((await move(s.id, 'APPROVED_FOR_ROLE')).status).toBe(201);
     const active = await move(s.id, 'ACTIVE');
     expect(active.body.lifecycleState).toBe('ACTIVE');
@@ -418,26 +430,17 @@ describe('role requirements and recalculation [HR-03]', () => {
     const item = crew.requirements.find((r: J) => r.templateId === tid);
     expect(item).toMatchObject({ status: 'GREY', required: true, subjectId: SEED_IDS.staffCrew });
 
-    // A care assistant does not need it. To become a driver, checks start first and approval waits
-    // until every item for the role is verified (B1).
+    // A care assistant does not need it; starting driver checks adds it (role change, HR-03).
     const s = await activeStaff(['CARE_ASSISTANT']);
-    expect((await call('GET', `/api/v1/staff/${s.id}`)).body.requirements).toHaveLength(0);
-    const refused = await approve(s.id, 'DRIVER');
-    expect([refused.status, refused.body.code]).toEqual([422, 'VALIDATION_FAILED']);
-    expect(refused.body.detail).toContain('DRIVING-LICENCE');
-    expect((await startChecks(s.id, 'DRIVER')).status).toBe(201);
-    const checking = (await call('GET', `/api/v1/staff/${s.id}`)).body;
-    const pending = checking.requirements.find((r: J) => r.templateId === tid);
-    expect(pending).toMatchObject({ status: 'GREY', required: true });
-    expect(checking.overallStatus).toBe('GREY');
-    expect((await approve(s.id, 'DRIVER')).status).toBe(422);
-
-    // Fleet verifies the licence HR uploaded; HR can then approve.
-    await verified(pending.id, 'dev|hr', 'dev|fleet');
+    const before = (await call('GET', `/api/v1/staff/${s.id}`)).body;
+    expect(before.requirements.some((r: J) => r.templateId === tid)).toBe(false);
+    await completeChecks(app, ORG, s.id, ['DRIVER']);
     expect((await approve(s.id, 'DRIVER')).status).toBe(201);
     const after = (await call('GET', `/api/v1/staff/${s.id}`)).body;
-    expect(after.requirements.map((r: J) => r.templateId)).toEqual([tid]);
-    expect(after.overallStatus).toBe('GREEN');
+    expect(after.requirements.find((r: J) => r.templateId === tid)).toMatchObject({
+      required: true,
+      status: 'GREEN',
+    });
 
     const m = (await call('GET', '/api/v1/staff/training-matrix?role=DRIVER')).body;
     expect(m.columns.some((c: J) => c.templateId === tid)).toBe(true);
@@ -455,8 +458,10 @@ describe('role requirements and recalculation [HR-03]', () => {
     });
     expect(rev.body).toMatchObject({ active: false, revokeReason: 'Stepped back from driving' });
     const revoked = (await call('GET', `/api/v1/staff/${s.id}`)).body;
-    expect(revoked.requirements[0]).toMatchObject({ templateId: tid, required: false });
-    expect(revoked.overallStatus).toBe('NOT_APPLICABLE');
+    expect(revoked.requirements.find((r: J) => r.templateId === tid)).toMatchObject({
+      required: false,
+    });
+    expect(revoked.checksSetUp).toBe(true); // still has care assistant checks
 
     const list = (await call('GET', '/api/v1/staff/role-requirements')).body.data as J[];
     const mapping = list.find((r) => r.templateId === tid)!;
@@ -466,24 +471,6 @@ describe('role requirements and recalculation [HR-03]', () => {
     expect((await call('DELETE', `/api/v1/staff/role-requirements/${mapping.id}`)).status).toBe(
       404,
     );
-  });
-
-  it('nobody approves a role when they verified every item themselves (two-person rule)', async () => {
-    const tid = await staffTemplate('BLS');
-    const map = await call('POST', '/api/v1/staff/role-requirements', {
-      body: { role: 'TECHNICIAN', templateId: tid },
-    });
-    expect(map.status).toBe(201);
-    const s = await activeStaff(['CARE_ASSISTANT']);
-    expect((await startChecks(s.id, 'TECHNICIAN')).status).toBe(201);
-    const item = (await call('GET', `/api/v1/staff/${s.id}`)).body.requirements.find(
-      (r: J) => r.templateId === tid,
-    );
-    await verified(item.id, 'dev|fleet', 'dev|hr'); // HR verified the only item
-    const own = await approve(s.id, 'TECHNICIAN', 'dev|hr');
-    expect([own.status, own.body.code]).toEqual([422, 'FOUR_EYES_REQUIRED']);
-    expect((await approve(s.id, 'TECHNICIAN', 'dev|manager')).status).toBe(201);
-    await call('DELETE', `/api/v1/staff/role-requirements/${map.body.id}`);
   });
 
   it('rejects mapping a non-staff template', async () => {
@@ -522,6 +509,7 @@ describe('readiness for a job window [RULES_ENGINE §3]', () => {
       ).result,
     ).toBe('FAIL');
 
+    // A typed licence record alone is not proof (finding 66): blocked until verified.
     await call('POST', `/api/v1/staff/${s.id}/licences`, {
       body: {
         data: {
@@ -532,6 +520,20 @@ describe('readiness for a job window [RULES_ENGINE §3]', () => {
         },
       },
     });
+    const unverified = (await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body;
+    expect(unverified.state).toBe('BLOCKED');
+    expect(unverified.checks.find((c: J) => c.code === 'LICENCE_NOT_VERIFIED')).toMatchObject({
+      result: 'FAIL',
+      overridable: false,
+    });
+    const lic = await call('POST', '/api/v1/requirements/instances', {
+      body: {
+        templateId: await staffTemplate('DRIVING-LICENCE'),
+        subjectType: 'STAFF',
+        subjectId: s.id,
+      },
+    });
+    await uploadAndVerify(app, ORG, [lic.body.id]);
     expect((await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body.state).toBe('READY');
     const c1 = (await call('GET', `${base}&role=DRIVER&licenceCategory=C1`)).body;
     expect(c1.state).toBe('BLOCKED');
@@ -799,22 +801,5 @@ describe('self-service [PRD §4.3]', () => {
         })
       ).status,
     ).toBe(404);
-  });
-});
-
-describe('names in staff records', () => {
-  it('returns the names of colleagues a record mentions, not just their ids', async () => {
-    const hr = (await call('GET', '/api/v1/admin/users')).body.data.find(
-      (u: J) => u.email === 'hr@example.test',
-    ).id as string;
-    const added = await call('POST', `/api/v1/staff/${SEED_IDS.staffCrew}/induction`, {
-      body: { data: { completedOn: '2026-01-05', signedOffByUserId: hr } },
-    });
-    expect(added.status).toBe(201);
-    expect(added.body.people).toEqual({ [hr]: 'Hana Rowe' });
-    const list = await call('GET', `/api/v1/staff/${SEED_IDS.staffCrew}/induction`);
-    const mine = (list.body.data as J[]).find((r) => r.id === added.body.id)!;
-    expect(mine.people).toEqual({ [hr]: 'Hana Rowe' });
-    expect(JSON.stringify(mine.people)).not.toContain('@'); // names only, never emails
   });
 });

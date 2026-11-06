@@ -1,8 +1,8 @@
 import pg from 'pg';
-import { DEV_DEFAULT_PASSWORD, ensureDevAuth, seedDevCredentials } from './dev-auth.js';
+import { seedLocalCredentials } from './seed-credentials.js';
 
-// Synthetic data only (CLAUDE.md #10). Matches the wireframes: "Exora / Watford"
-// plus a second organisation used by isolation tests. Fixed IDs make the seed idempotent.
+// Synthetic data only (CLAUDE.md #10). Demo organisation "Exora International Ltd" (trading as
+// Exora Medical), a private ambulance service in London, plus a second organisation used by isolation tests. Fixed IDs make the seed idempotent.
 // Runs as the migrator role; sets the org context itself because RLS is FORCEd.
 // Requires migrations (which sync the system roles) to have run first.
 
@@ -72,7 +72,7 @@ export const STARTER_CONTROLS: [string, string, string, string, string][] = [
   ],
   [
     'AC-07',
-    'Premises and equipment',
+    'Premises, vehicles and equipment',
     'SAFE',
     'Certificates, risk assessments, check logs, defects, emergency contacts and maintenance evidence.',
     'Competent-person review and stop-use controls where unsafe.',
@@ -182,6 +182,31 @@ export const SEED_USERS: Record<string, SeedUser> = {
     org: SEED_IDS.orgExample,
     role: 'AUDITOR',
   },
+  director: {
+    id: u(11),
+    subject: 'dev|director',
+    email: 'director@example.test',
+    name: 'Dee Rector',
+    org: SEED_IDS.orgExample,
+    role: 'DIRECTOR',
+  },
+  premises: {
+    id: u(12),
+    subject: 'dev|premises',
+    email: 'premises@example.test',
+    name: 'Priya Mason',
+    org: SEED_IDS.orgExample,
+    role: 'PREMISES_LEAD',
+  },
+  // Not 'dev|admin': the API test setup creates that subject itself.
+  orgAdmin: {
+    id: u(13),
+    subject: 'dev|orgadmin',
+    email: 'orgadmin@example.test',
+    name: 'Olu Adeyemi',
+    org: SEED_IDS.orgExample,
+    role: 'ORG_ADMIN',
+  },
   otherManager: {
     id: u(21),
     subject: 'dev|other-manager',
@@ -207,35 +232,52 @@ export const SEED_SUPPORT = {
   name: 'Platform Support',
 } as const;
 
-/**
- * `singleOrganisation` is what `pnpm db:seed` uses. Tests leave it off: they need the second
- * organisation to prove that tenants stay separate.
- */
-export async function seed(
-  adminUrl: string,
-  { singleOrganisation = false }: { singleOrganisation?: boolean } = {},
-): Promise<void> {
+export async function seed(adminUrl: string): Promise<void> {
   const c = new pg.Client({ connectionString: adminUrl });
   await c.connect();
   try {
     await c.query('BEGIN');
     const ctx = (org: string) => c.query(`SELECT set_config('app.org_id', $1, true)`, [org]);
     const orgs: [string, string, string[], string, string, boolean][] = [
-      [SEED_IDS.orgExample, 'Exora', ['ambulance'], SEED_IDS.locWatford, 'Watford', true],
+      [
+        SEED_IDS.orgExample,
+        'Exora International Ltd',
+        ['ambulance'],
+        SEED_IDS.locWatford,
+        'London',
+        true,
+      ],
       [SEED_IDS.orgOther, 'Other organisation', [], SEED_IDS.locOther, 'Elsewhere', false],
     ];
-    for (const [id, name, packs, loc, locName, registered] of singleOrganisation
-      ? orgs.slice(0, 1)
-      : orgs) {
+    for (const [id, name, packs, loc, locName, registered] of orgs) {
+      const isDemo = id === SEED_IDS.orgExample;
       await ctx(id);
       await c.query(
         `INSERT INTO organisation (id, name, sector_packs) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`,
         [id, name, packs],
       );
+      // Databases seeded before the demo organisation was named keep the old placeholder.
+      await c.query(
+        `UPDATE organisation SET name = $2
+          WHERE id = $1 AND name IN ('Example organisation', 'Meadowbank Patient Transport')`,
+        [id, name],
+      );
+      if (isDemo) {
+        await c.query(
+          `UPDATE organisation SET legal_name = coalesce(legal_name, $2),
+                  trading_name = coalesce(trading_name, $3)
+            WHERE id = $1`,
+          [id, 'Exora International Ltd', 'Exora Medical'],
+        );
+      }
       await c.query(
         `INSERT INTO location (id, organisation_id, name, registered) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
         [loc, id, locName, registered],
       );
+      await c.query(`UPDATE location SET name = $2 WHERE id = $1 AND name = 'Watford'`, [
+        loc,
+        locName,
+      ]);
       for (const user of Object.values(SEED_USERS).filter((x) => x.org === id)) {
         await c.query(
           `INSERT INTO app_user (id, idp_subject, email, display_name, status) VALUES ($1, $2, $3, $4, 'ACTIVE')
@@ -310,32 +352,52 @@ export async function seed(
       if (!ins.rowCount) continue;
       await c.query(
         `INSERT INTO staff_lifecycle_event (organisation_id, staff_id, from_state, to_state, reason, actor_user_id)
-         VALUES ($1, $2, NULL, $3, 'Added to the staff register', $4)`,
+         VALUES ($1, $2, NULL, $3, 'Seeded synthetic record', $4)`,
         [SEED_IDS.orgExample, id, state, SEED_USERS.manager!.id],
       );
       for (const role of roles)
         await c.query(
           `INSERT INTO staff_role_approval (organisation_id, staff_id, role, reason, approved_by)
-           VALUES ($1, $2, $3, 'Approved for the role at onboarding', $4)`,
+           VALUES ($1, $2, $3, 'Seeded synthetic approval', $4)`,
           [SEED_IDS.orgExample, id, role, SEED_USERS.manager!.id],
         );
     }
     // Synthetic fleet (wireframes 04/05): three vehicles, a fitted stretcher, a daily checklist.
-    const vehicles: [string, string, string, string, number, number, boolean][] = [
-      [SEED_IDS.vehicleAmb1, 'AMB-01', 'SY21ABC', 'AMBULANCE', 4, 1, true],
-      [SEED_IDS.vehicleAmb2, 'AMB-02', 'SY21ABD', 'PTS_VEHICLE', 6, 2, false],
-      [SEED_IDS.vehicleAmb3, 'AMB-03', 'SY22XYZ', 'WAV', 4, 1, true],
+    // An ambulance over 3,500 kg maximum authorised mass needs a C1 licence; the vans stay at B.
+    type SeedVehicle = [string, string, string, string, number, number, boolean, string, number];
+    const vehicles: SeedVehicle[] = [
+      [SEED_IDS.vehicleAmb1, 'AMB-01', 'SY21ABC', 'AMBULANCE', 4, 1, true, 'C1', 4250],
+      [SEED_IDS.vehicleAmb2, 'AMB-02', 'SY21ABD', 'PTS_VEHICLE', 6, 2, false, 'B', 3500],
+      [SEED_IDS.vehicleAmb3, 'AMB-03', 'SY22XYZ', 'WAV', 4, 1, true, 'B', 3500],
     ];
-    for (const [id, callsign, reg, type, seats, wc, stretcher] of vehicles) {
+    for (const [id, callsign, reg, type, seats, wc, stretcher, cat, kg] of vehicles) {
       const ins = await c.query(
-        `INSERT INTO vehicle (id, organisation_id, registration, callsign, type, base_location_id, seats, wheelchair_capacity, stretcher, licence_category, current_odometer)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'B', 42000) ON CONFLICT (id) DO NOTHING`,
-        [id, SEED_IDS.orgExample, reg, callsign, type, SEED_IDS.locWatford, seats, wc, stretcher],
+        `INSERT INTO vehicle (id, organisation_id, registration, callsign, type, base_location_id, seats, wheelchair_capacity, stretcher, licence_category, gross_weight_kg, current_odometer)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 42000) ON CONFLICT (id) DO NOTHING`,
+        [
+          id,
+          SEED_IDS.orgExample,
+          reg,
+          callsign,
+          type,
+          SEED_IDS.locWatford,
+          seats,
+          wc,
+          stretcher,
+          cat,
+          kg,
+        ],
+      );
+      // Vehicles seeded before weights were recorded (finding 89).
+      await c.query(
+        `UPDATE vehicle SET gross_weight_kg = $2, licence_category = $3
+          WHERE id = $1 AND gross_weight_kg IS NULL`,
+        [id, kg, cat],
       );
       if (ins.rowCount)
         await c.query(
           `INSERT INTO vehicle_location_history (organisation_id, vehicle_id, location_id, reason, moved_by)
-           VALUES ($1, $2, $3, 'Added to the fleet at its base', $4)`,
+           VALUES ($1, $2, $3, 'Seeded synthetic vehicle', $4)`,
           [SEED_IDS.orgExample, id, SEED_IDS.locWatford, SEED_USERS.manager!.id],
         );
     }
@@ -381,7 +443,16 @@ export async function seed(
           ac07,
         ],
       );
-      if (!t.rowCount) continue;
+      if (!t.rowCount) {
+        // Databases seeded before AC-07 was renamed (it is also the vehicle cleaning audit).
+        if (ac07)
+          await c.query(
+            `UPDATE audit_template SET title = $2
+              WHERE organisation_id = $1 AND code = 'AC-07' AND title = 'Premises and equipment'`,
+            [SEED_IDS.orgExample, title],
+          );
+        continue;
+      }
       await c.query(
         `INSERT INTO audit_template_version (organisation_id, template_id, version, status, controls, sample_method, sample_size, methods, approved_by, approved_at)
          VALUES ($1, $2, 1, $3, $4, $5, $6, '{RECORDS,OBSERVATION,INTERVIEW}', $7, $8)`,
@@ -519,16 +590,8 @@ export async function seed(
        VALUES ($1, $2, $3, $4, 'ACTIVE', true) ON CONFLICT (id) DO NOTHING`,
       [SEED_SUPPORT.id, SEED_SUPPORT.subject, SEED_SUPPORT.email, SEED_SUPPORT.name],
     );
-    // Development sign-in: every seeded account gets the development password.
-    await ensureDevAuth(c);
-    const accounts = await c.query<{ idp_subject: string }>(
-      `SELECT idp_subject FROM app_user WHERE idp_subject LIKE 'dev|%'`,
-    );
-    await seedDevCredentials(
-      c,
-      accounts.rows.map((a) => ({ username: a.idp_subject.slice(4), subject: a.idp_subject })),
-      process.env.DEV_PASSWORD ?? DEV_DEFAULT_PASSWORD,
-    );
+    // Local username + password sign-in (AUTH_MODE=local); skipped when NODE_ENV=production.
+    await seedLocalCredentials(c, Object.values(SEED_USERS));
     await c.query('COMMIT');
   } catch (e) {
     await c.query('ROLLBACK');

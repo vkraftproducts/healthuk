@@ -60,7 +60,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     devAuth: profile === 'development' && env.HUB_DEV_AUTH !== '0',
     devUser: env.HUB_DEV_USER ?? 'crew',
-    devPassword: env.HUB_DEV_PASSWORD ?? 'Exora-dev-2026',
     // Synthetic default (Ofcom drama range); real number set per customer in the build profile.
     controlPhone: env.HUB_CONTROL_PHONE ?? '01632960000',
     easProjectId: env.EAS_PROJECT_ID,

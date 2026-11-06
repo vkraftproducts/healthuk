@@ -9,6 +9,18 @@ export const ROLE_LABEL: Record<string, string> = {
   CONTROL_ROOM: 'Control room',
   MANAGER: 'Manager',
   OTHER: 'Other',
+  DENTIST: 'Dentist',
+  DENTAL_NURSE: 'Dental nurse',
+  RECEPTIONIST: 'Receptionist',
+  SENIOR_CARER: 'Senior carer',
+  ACTIVITIES_COORDINATOR: 'Activities coordinator',
+};
+export const CONTRACT_LABEL: Record<string, string> = {
+  PERMANENT: 'Permanent',
+  FIXED_TERM: 'Fixed term',
+  BANK: 'Bank',
+  AGENCY: 'Agency',
+  VOLUNTEER: 'Volunteer',
 };
 export const LIFECYCLE_LABEL: Record<string, string> = {
   CANDIDATE: 'Candidate',

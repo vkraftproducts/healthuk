@@ -19,7 +19,11 @@ export interface AllocationCheck {
   /** An approved, unexpired exception covers this failure. */
   excepted: boolean;
   details: string[];
+  /** E3: how to put a failing check right, and which screen does it. */
+  fix?: { text: string; action: FixAction } | null;
 }
+
+export type FixAction = 'SHIFT_ACTIONS' | 'STAFF' | 'VEHICLE' | 'EXCEPTION';
 
 export interface PolicyException {
   code: AllocationCode;
@@ -33,6 +37,10 @@ export interface Capacity {
   wheelchairs: number;
   stretchers: number;
   maxLoadKg: number;
+  /** D1: false refuses blue-light jobs; undefined leaves them unchecked. */
+  blueLightAuthorised?: boolean;
+  /** E1: the vehicle's recorded bariatric limit; bariatric jobs need one. */
+  bariatricLimitKg?: number | null;
 }
 
 export interface AllocationInput {
@@ -44,8 +52,11 @@ export interface AllocationInput {
     stretchersNeeded: number;
     loadKg: number;
     requiredEquipment: string[];
+    blueLights?: boolean;
+    bariatric?: boolean;
   };
-  staff: { id: string; readiness: Readiness }[];
+  /** `name` labels the person in check details; without it the details carry the reason only. */
+  staff: { id: string; name?: string; readiness: Readiness }[];
   vehicle: {
     id: string;
     readiness: Readiness;
@@ -54,12 +65,22 @@ export interface AllocationInput {
     quarantinedEquipment: string[];
     expiredEquipment: string[];
   };
-  /** Overlaps already computed by the data layer (incl. travel buffer and breaks). */
-  conflicts: { resourceType: 'STAFF' | 'VEHICLE'; resourceId: string; otherJobId: string }[];
+  /**
+   * Overlaps already computed by the data layer (incl. travel buffer and breaks). `text` is the
+   * plain sentence naming the person or vehicle and the times, shown in place of the ids.
+   */
+  conflicts: {
+    resourceType: 'STAFF' | 'VEHICLE';
+    resourceId: string;
+    otherJobId: string;
+    text?: string;
+  }[];
   shiftGate: {
     vdi: 'PASS' | 'FAIL' | 'PENDING';
     cleaning: 'CONFIRMED' | 'NOT_CONFIRMED';
     shiftStart: Date;
+    /** False while the crew have not started the shift: the gate is checked at start. */
+    started?: boolean;
   } | null;
   exceptions?: PolicyException[];
 }
@@ -73,10 +94,12 @@ export interface AllocationResult {
   exceptable: AllocationCode[];
 }
 
+type LabelledCheck = Check & { who?: string };
+
 function fromGroup(
   code: AllocationCode,
   group: CheckGroup,
-  checks: readonly Check[],
+  checks: readonly LabelledCheck[],
   okText: string,
 ): {
   code: AllocationCode;
@@ -95,13 +118,14 @@ function fromGroup(
     reasonText: failing[0]!.reasonText,
     // Overridable only if EVERY failing check is policy-level.
     overridable: failing.every((c) => c.overridable),
-    details: failing.map((c) => `${c.code}: ${c.reasonText}`),
+    // Plain words only: a person's name where known, never internal ids or check codes.
+    details: failing.map((c) => (c.who ? `${c.who}: ${c.reasonText}` : c.reasonText)),
   };
 }
 
 export function validateAllocation(i: AllocationInput): AllocationResult {
-  const staffChecks = i.staff.flatMap((s) =>
-    s.readiness.checks.map((c) => ({ ...c, code: `${s.id}:${c.code}` })),
+  const staffChecks: LabelledCheck[] = i.staff.flatMap((s) =>
+    s.readiness.checks.map((c) => ({ ...c, code: `${s.id}:${c.code}`, who: s.name })),
   );
   const vehicleChecks = i.vehicle.readiness.checks;
   const raw: ReturnType<typeof fromGroup>[] = [];
@@ -143,12 +167,24 @@ export function validateAllocation(i: AllocationInput): AllocationResult {
     unsuitable.push(
       `needs ${i.job.wheelchairsNeeded} wheelchair places, vehicle has ${cap.wheelchairs}`,
     );
-  if (i.job.stretchersNeeded > cap.stretchers)
+  // D3: capability counts only in-date, non-quarantined equipment, so say so plainly.
+  const plain: string[] = [];
+  if (i.job.stretchersNeeded > cap.stretchers) {
+    if (cap.stretchers === 0) plain.push('No in-date stretcher on this vehicle');
     unsuitable.push(
       `needs ${i.job.stretchersNeeded} stretcher places, vehicle has ${cap.stretchers}`,
     );
+  }
+  if (i.job.bariatric && !cap.bariatricLimitKg) {
+    plain.push('Vehicle has no bariatric limit recorded');
+    unsuitable.push('not set up for bariatric patients');
+  }
   if (i.job.loadKg > cap.maxLoadKg)
     unsuitable.push(`load ${i.job.loadKg} kg exceeds permitted ${cap.maxLoadKg} kg`);
+  if (i.job.blueLights && cap.blueLightAuthorised === false) {
+    plain.push('Vehicle is not authorised for blue-light driving');
+    unsuitable.push('not authorised for blue-light driving');
+  }
   raw.push(
     unsuitable.length === 0
       ? {
@@ -161,7 +197,7 @@ export function validateAllocation(i: AllocationInput): AllocationResult {
       : {
           code: 'VEHICLE_SUITABILITY',
           result: 'FAIL',
-          reasonText: `Vehicle unsuitable: ${unsuitable[0]}`,
+          reasonText: plain[0] ?? `Vehicle unsuitable: ${unsuitable[0]}`,
           overridable: false,
           details: unsuitable,
         },
@@ -213,10 +249,10 @@ export function validateAllocation(i: AllocationInput): AllocationResult {
       : {
           code: 'TIME_CONFLICT',
           result: 'FAIL',
-          reasonText: 'Overlaps another booking',
+          reasonText: i.conflicts[0]!.text ?? 'Overlaps another booking',
           overridable: false,
           details: i.conflicts.map(
-            (c) => `${c.resourceType} ${c.resourceId} already on job ${c.otherJobId}`,
+            (c) => c.text ?? `${c.resourceType} ${c.resourceId} already on job ${c.otherJobId}`,
           ),
         },
   );
@@ -254,6 +290,16 @@ export function validateAllocation(i: AllocationInput): AllocationResult {
       overridable: false,
       details: [],
     });
+  } else if (i.shiftGate.started === false) {
+    // Finding 71 (6 Nov 2026, pending product owner sign-off): past the start time a shift the
+    // crew have not started fails the gate; it is only pending before the start time.
+    raw.push({
+      code: 'SHIFT_GATE',
+      result: 'FAIL',
+      reasonText: 'Shift has not been started',
+      overridable: false,
+      details: [],
+    });
   } else {
     raw.push({
       code: 'SHIFT_GATE',
@@ -272,7 +318,12 @@ export function validateAllocation(i: AllocationInput): AllocationResult {
         e.reason !== '' &&
         e.expiresAt.getTime() > i.now.getTime(),
     );
-    return { ...c, excepted: c.result === 'FAIL' && c.overridable && !!ex };
+    const excepted = c.result === 'FAIL' && c.overridable && !!ex;
+    return {
+      ...c,
+      excepted,
+      fix: c.result === 'FAIL' && !excepted ? fixFor(c.code, c.overridable, staffChecks) : null,
+    };
   });
 
   const blockers = checks.filter((c) => c.result === 'FAIL' && !c.overridable).map((c) => c.code);
@@ -285,6 +336,52 @@ export function validateAllocation(i: AllocationInput): AllocationResult {
     blockers,
     exceptable,
   };
+}
+
+/** E3: the next step for a failing check, in words, with the screen that does it. */
+function fixFor(
+  code: AllocationCode,
+  overridable: boolean,
+  staffChecks: readonly LabelledCheck[],
+): { text: string; action: FixAction } {
+  const failing = (suffix: string) =>
+    staffChecks.some((c) => c.result === 'FAIL' && c.code.endsWith(`:${suffix}`));
+  switch (code) {
+    case 'STAFF_CLEARANCE':
+      if (failing('CREW_SIZE'))
+        return { text: 'Add a second crew member to this shift', action: 'SHIFT_ACTIONS' };
+      if (failing('NO_DRIVER'))
+        return { text: 'Add an approved driver to this shift', action: 'SHIFT_ACTIONS' };
+      return {
+        text: 'Clear the person on their staff record, or swap them off this shift',
+        action: 'STAFF',
+      };
+    case 'LICENCE':
+      return {
+        text: 'Verify the driver’s licence, or put a driver with the right licence on this shift',
+        action: 'SHIFT_ACTIONS',
+      };
+    case 'COMPETENCE':
+      return overridable
+        ? { text: 'Add a crew member who holds it, or request an exception', action: 'EXCEPTION' }
+        : { text: 'Add a crew member who holds the competence', action: 'SHIFT_ACTIONS' };
+    case 'VEHICLE_ROADWORTHY':
+      return { text: 'Put the vehicle right, or change the shift’s vehicle', action: 'VEHICLE' };
+    case 'VEHICLE_SUITABILITY':
+      return {
+        text: 'Change the shift’s vehicle to one that fits this job',
+        action: 'SHIFT_ACTIONS',
+      };
+    case 'EQUIPMENT':
+      return { text: 'Fit in-date equipment, or change the shift’s vehicle', action: 'VEHICLE' };
+    case 'TIME_CONFLICT':
+      return { text: 'Choose another shift, or move the other job', action: 'SHIFT_ACTIONS' };
+    case 'SHIFT_GATE':
+      return {
+        text: 'The crew must pass the vehicle check, confirm cleaning and start the shift',
+        action: 'SHIFT_ACTIONS',
+      };
+  }
 }
 
 /** Can anyone be offered an exception for this check at all? (JOB-03: never for statutory/safety-critical.) */

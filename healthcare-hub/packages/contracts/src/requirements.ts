@@ -99,6 +99,25 @@ export const TemplateVersionDto = TemplateVersionInput.extend({
   .extend({ applicabilityRule: z.record(z.string(), z.unknown()) });
 export type TemplateVersionDto = z.infer<typeof TemplateVersionDto>;
 
+/**
+ * Draft sector packs (dental, care home) are synthetic starting content. Adopting from one needs the
+ * organisation to have the pack enabled and a named specialist who has validated the content (spec
+ * section 7, Phase 4). The ambulance pack and organisation templates need no confirmation.
+ */
+export const SPECIALIST_VALIDATED_PACKS: Record<string, string> = {
+  DENTAL_V1: 'dental',
+  CARE_HOME_V1: 'care_home',
+};
+export const AdoptTemplateInput = z
+  .object({
+    /** Dental and care-home content: the specialist who validated it, and their organisation. */
+    specialistValidatedBy: z.string().trim().min(3).max(200).optional(),
+    specialistOrganisation: z.string().trim().min(2).max(200).optional(),
+  })
+  .strict();
+/** A5: requirements are retired with a reason, never deleted. */
+export const RetireTemplateInput = z.strictObject({ reason: z.string().trim().min(10).max(500) });
+
 export const TemplateDto = z.object({
   id: uuid,
   code: z.string(),
@@ -107,6 +126,11 @@ export const TemplateDto = z.object({
   /** Library templates are read-only; adopt one to get an editable organisation copy. */
   isLibrary: z.boolean(),
   versions: z.array(TemplateVersionDto),
+  /** Set once retired: no new versions, adoption or requirements are created from it. */
+  retired: z
+    .object({ reason: z.string(), retiredBy: uuid, retiredAt: isoDateTime })
+    .nullable()
+    .optional(),
 });
 export type TemplateDto = z.infer<typeof TemplateDto>;
 
@@ -289,8 +313,28 @@ export const EvidenceVersionDto = z.object({
   reviewerId: uuid.nullable(),
   decidedAt: isoDateTime.nullable(),
   linkedInstanceIds: z.array(uuid),
+  /** Display names (B4: who uploaded and who decided, shown beside the document). */
+  uploadedByName: z.string().nullable().optional(),
+  reviewerName: z.string().nullable().optional(),
 });
 export type EvidenceVersionDto = z.infer<typeof EvidenceVersionDto>;
+
+/** B4: one document waiting for a decision, with what it is evidence for. */
+export const ReviewQueueItemDto = EvidenceVersionDto.extend({
+  /** True when the caller uploaded it: they cannot verify it (two-person rule). */
+  mine: z.boolean(),
+  requirements: z.array(
+    z.object({
+      instanceId: uuid,
+      templateTitle: z.string(),
+      deadlineKind: z.string(),
+      subjectType: z.string(),
+      subjectId: uuid,
+      subjectLabel: z.string(),
+    }),
+  ),
+});
+export type ReviewQueueItemDto = z.infer<typeof ReviewQueueItemDto>;
 
 export const VerifyInput = z
   .object({
@@ -322,8 +366,90 @@ export const AlertDto = z.object({
   ownerUserId: uuid.nullable(),
   state: z.enum(['OPEN', 'ACKNOWLEDGED', 'RESOLVED']),
   snoozedUntil: isoDateTime.nullable(),
+  /** L2: why notifications were paused (shown beside the snooze). */
+  snoozeReason: z.string().nullable().optional(),
   raisedAt: isoDateTime,
   version,
 });
 export type AlertDto = z.infer<typeof AlertDto>;
-export const SnoozeInput = z.object({ until: isoDateTime }).strict();
+/**
+ * L2: snooze needs a reason. A plain date means "until the end of that UK day"; a date-time is
+ * kept as sent.
+ */
+export const SnoozeInput = z
+  .object({
+    until: z.union([isoDateTime, isoDate]),
+    reason: z.string().trim().min(3, 'Say why the alert is being snoozed').max(500),
+  })
+  .strict();
+export type SnoozeInput = z.infer<typeof SnoozeInput>;
+/** L2: the bell count in the header. */
+export const AlertCountDto = z.object({
+  open: z.number().int().min(0),
+  critical: z.number().int().min(0),
+});
+export type AlertCountDto = z.infer<typeof AlertCountDto>;
+
+// ---- alerts centre (task 24) -------------------------------------------------
+
+export const AlertCentreEvent = z.enum([
+  'EXPIRY_WARNING',
+  'ACTION_OVERDUE',
+  'INCIDENT_REPORTED',
+  'BREACH_RECORDED',
+  'POLICY_PUBLISHED',
+  'AUDIT_OVERDUE',
+  'OPERATIONS',
+]);
+export type AlertCentreEvent = z.infer<typeof AlertCentreEvent>;
+/** Why this person sees the item. */
+export const AlertCentreReason = z.enum([
+  'OWNER',
+  'DEPUTY',
+  'ESCALATED',
+  'RULE',
+  'NOTIFIED',
+  'ROLE',
+]);
+export type AlertCentreReason = z.infer<typeof AlertCentreReason>;
+
+export const AlertCentreItemDto = z.object({
+  /** Stable key: `${sourceType}:${sourceId}`. */
+  key: z.string(),
+  event: AlertCentreEvent,
+  sourceType: z.string(),
+  sourceId: uuid,
+  /** Set for stored alerts, which can be acknowledged or snoozed; null for derived items. */
+  alertId: uuid.nullable(),
+  alertVersion: version.nullable(),
+  severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
+  /** Record code or short label only: never personal or patient data. */
+  title: z.string(),
+  reasonText: z.string(),
+  raisedAt: isoDateTime,
+  dueOn: isoDate.nullable(),
+  state: z.enum(['OPEN', 'ACKNOWLEDGED']),
+  snoozedUntil: isoDateTime.nullable(),
+  snoozeReason: z.string().nullable().optional(),
+  why: AlertCentreReason,
+  /** Web path to open the record. */
+  link: z.string(),
+});
+export type AlertCentreItemDto = z.infer<typeof AlertCentreItemDto>;
+
+export const AlertCentreDto = z.object({
+  items: z.array(AlertCentreItemDto),
+  /** The rules that reach this person, so the page can say why they are told. */
+  rules: z.array(
+    z.object({ event: AlertCentreEvent, email: z.boolean(), roleNames: z.array(z.string()) }),
+  ),
+  emailReminders: z.boolean(),
+});
+export type AlertCentreDto = z.infer<typeof AlertCentreDto>;
+export const AlertCentreQuery = z.strictObject({
+  event: AlertCentreEvent.optional(),
+  includeAcknowledged: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
+});

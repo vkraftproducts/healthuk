@@ -58,7 +58,15 @@ export class ProblemFilter implements ExceptionFilter {
     const problem = this.toProblem(exception, req);
     if (problem.status >= 500) {
       this.log.error(
-        { err: exception instanceof Error ? exception.name : 'unknown', reqId: req.id },
+        {
+          err:
+            exception instanceof Error
+              ? exception.name
+              : exception && typeof exception === 'object'
+                ? (exception.constructor?.name ?? 'object')
+                : typeof exception,
+          reqId: req.id,
+        },
         'unhandled error',
       );
     }
@@ -106,6 +114,15 @@ export class ProblemFilter implements ExceptionFilter {
                   ? 'INTERNAL'
                   : 'VALIDATION_FAILED';
       return { type: problemType(code), title: TITLES[code], status, code, instance };
+    }
+    if (e && typeof e === 'object' && (e as { status?: unknown }).status === 429) {
+      return {
+        type: problemType('RATE_LIMITED'),
+        title: TITLES.RATE_LIMITED,
+        status: 429,
+        code: 'RATE_LIMITED',
+        instance,
+      };
     }
     return {
       type: problemType('INTERNAL'),

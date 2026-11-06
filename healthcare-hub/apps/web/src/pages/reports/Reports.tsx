@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import {
   button,
   Field,
+  fmtDateTime,
   input,
   saveBlob,
   Section,
@@ -27,18 +28,31 @@ export function Reports() {
   const catalogue = useOne<{ data: Row[] }>('/api/v1/reports');
   const locations = useList(`/api/v1/organisations/${orgId}/locations`, !!orgId);
   const today = londonToday();
-  const [q, setQ] = useState({
-    id: 'WORKFORCE_READINESS',
+  const [q, setQ] = useState<{ id: string | null; from: string; to: string; locationId: string }>({
+    id: null,
     from: `${today.slice(0, 7)}-01`,
     to: today,
     locationId: '',
   });
+  // The server lists only the reports this role may run here (about areas it can see).
+  const available = catalogue.data?.data ?? [];
+  const id = q.id ?? (available[0]?.id as string | undefined) ?? null;
   const qs = `from=${q.from}&to=${q.to}${q.locationId ? `&locationId=${q.locationId}` : ''}`;
-  const report = useOne<Row>(orgId ? `/api/v1/reports/${q.id}?${qs}` : null);
+  const report = useOne<Row>(orgId && id ? `/api/v1/reports/${id}?${qs}` : null);
   const { run, msg } = useRun();
 
   if (!can('reports.view'))
     return <p role="alert">You do not have permission to view reports for this organisation.</p>;
+  if (catalogue.data && available.length === 0)
+    return (
+      <div className="space-y-3">
+        <h1 className="text-2xl font-bold">Reports</h1>
+        <p role="status">
+          Your role has no reports in this organisation. Reports cover staff, vehicles, audits,
+          events, policies, premises or journeys, and each needs access to that area.
+        </p>
+      </div>
+    );
 
   function apply(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -61,8 +75,8 @@ export function Reports() {
       </div>
       <form onSubmit={apply} className="flex flex-wrap items-end gap-3" aria-label="Report options">
         <Field label="Report">
-          <select name="id" defaultValue={q.id} className={input}>
-            {(catalogue.data?.data ?? []).map((c) => (
+          <select name="id" key={id ?? ''} defaultValue={id ?? ''} className={input}>
+            {available.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.title}
               </option>
@@ -86,7 +100,7 @@ export function Reports() {
           </select>
         </Field>
         <button className={button}>Run report</button>
-        {can('reports.export') && (
+        {can('reports.export') && id && (
           <button
             type="button"
             className={smallButton}
@@ -94,8 +108,8 @@ export function Reports() {
               void run(
                 async () =>
                   saveBlob(
-                    await api.download!(`/api/v1/reports/${q.id}/export?${qs}`, orgId),
-                    `${q.id.toLowerCase()}.csv`,
+                    await api.download!(`/api/v1/reports/${id}/export?${qs}`, orgId),
+                    `${id.toLowerCase()}.csv`,
                   ),
                 'CSV downloaded (logged).',
               )
@@ -105,6 +119,13 @@ export function Reports() {
           </button>
         )}
       </form>
+      {!can('reports.export') && (
+        <p role="note" className="text-sm text-slate-700">
+          You can run and read these reports. Exporting to CSV and requesting the monthly management
+          pack need the export permission, which your role does not have: ask your registered
+          manager or governance lead for a copy.
+        </p>
+      )}
       {msg}
       {report.isLoading && <p role="status">Running the report…</p>}
       {report.isError && (
@@ -228,8 +249,7 @@ function ManagementPack() {
           {
             key: 'c',
             header: 'Requested',
-            cell: (x) =>
-              new Date(x.createdAt).toLocaleString('en-GB', { timeZone: 'Europe/London' }),
+            cell: (x) => fmtDateTime(x.createdAt),
           },
           { key: 's', header: 'Status', cell: (x) => words(x.status) },
           {

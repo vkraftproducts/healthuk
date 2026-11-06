@@ -14,10 +14,10 @@
 
 ## 1. Seed data
 
-`pnpm db:seed` creates "Exora" with Watford location matching wireframes:
+`pnpm db:seed` creates "Exora International Ltd" (trading as Exora Medical) with a London location matching wireframes:
 staff Alex Morgan (ST-0042, licence due 12 Nov 2026), Sam Taylor, Jordan, Lee; vehicles
 AMB-01..03 (AMB-03 critical ramp defect); jobs J-104, J-105, J-108, J-112, J-117; audit
-AUD-102 with AC-07, ACT-218, ACT-219; the test suite adds a second org "Other organisation" for isolation
+AUD-102 with AC-07, ACT-218, ACT-219; plus a second org "Other organisation" for isolation
 tests. All synthetic. Fixed clock via `TEST_NOW=2026-10-22T09:42:00+01:00`.
 
 ## 2. UAT scenarios (automate each as named Playwright/API test)

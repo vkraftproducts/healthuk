@@ -1,0 +1,13 @@
+---
+description: Healthcare Hub project rules and current handover state
+alwaysApply: true
+---
+Before any change, read `CLAUDE.md` (non-negotiables, document map) and `docs/HANDOVER.md`
+(status of the 28-task workflow fix programme and what to do next).
+
+- Packages resolve to `dist`: rebuild with `pnpm --filter @hub/contracts --filter @hub/rules --filter @hub/domain build` after editing them.
+- New API routes: zod contract + `@RequirePermission` + audit event + entry in `packages/contracts/src/routes.ts`.
+- Web UI: no window.prompt/confirm/alert (use `ActionDialog` from `apps/web/src/components.tsx`); status = words + icon + colour; UK dates via `fmtDate`/`fmtDateTime`; no raw codes.
+- Upload never makes anything green; a different person verifies.
+- Run eslint per package directory; run vitest per app.
+- Do not run browser or UI checks until the owner asks; verify with tests only.

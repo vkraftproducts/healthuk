@@ -1,9 +1,9 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import type { Db } from '@hub/db';
-import type { InboxItemDto, MeResponse } from '@hub/contracts';
-import { AuthenticatedOnly, OrgMember } from '../../common/decorators.js';
+import type { MeResponse } from '@hub/contracts';
+import { AuthenticatedOnly } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
-import { dbNow } from '../../common/http.js';
+import { audit, dbNow } from '../../common/http.js';
 import { DB } from '../../db.provider.js';
 
 @Controller('me')
@@ -22,12 +22,13 @@ export class MeController {
           OR: [{ validTo: null }, { validTo: { gt: now } }],
         },
         include: {
-          organisation: { select: { name: true } },
+          organisation: { select: { name: true, sectorPacks: true } },
           role: { select: { key: true, name: true } },
         },
         orderBy: { createdAt: 'asc' },
       });
     });
+    if (hub.orgId && !hub.support) await this.recordSignIn(hub);
     return {
       user: { id: hub.user.id, email: hub.user.email, displayName: hub.user.displayName },
       memberships: memberships.map((m) => ({
@@ -36,80 +37,33 @@ export class MeController {
         locationId: m.locationId,
         roleKey: m.role.key,
         roleName: m.role.name,
+        sectorPacks: m.organisation.sectorPacks,
       })),
       permissions: [...hub.permissions].sort(),
       activeOrganisationId: hub.orgId,
       mfa: { required: hub.mfaRequired, satisfied: hub.mfaSatisfied },
+      support: hub.supportEndsAt ? { endsAt: hub.supportEndsAt.toISOString() } : null,
     };
   }
 
-  /**
-   * Work sent back to me with a reason, and decisions only I can make. Built from my open alerts
-   * of those kinds; each links to the record to act on. Names and dates only, never patient data.
-   */
-  @OrgMember()
-  @Get('inbox')
-  async inbox(@Hub() hub: HubRequestContext): Promise<{ data: InboxItemDto[] }> {
-    return this.db.withTenant(tenantOf(hub), async (tx) => {
-      const alerts = await tx.alert.findMany({
-        where: {
-          ownerUserId: hub.user.id,
-          state: { not: 'RESOLVED' },
-          sourceType: { in: ['EVIDENCE_RETURNED', 'EXCEPTION_REQUEST', 'EXCEPTION_DECLINED'] },
-        },
-        orderBy: { raisedAt: 'desc' },
-        take: 50,
+  /** A1: a sign-in is audited and shown as "Last signed in"; once per window, not per call. */
+  private async recordSignIn(hub: HubRequestContext): Promise<void> {
+    await this.db.withTenant(tenantOf(hub), async (tx) => {
+      const me = await tx.membership.findFirst({
+        where: { userId: hub.user.id },
+        select: { user: { select: { lastLoginAt: true } } },
       });
-      const data: InboxItemDto[] = [];
-      for (const a of alerts) {
-        const base = { id: a.id, reasonText: a.reasonText, raisedAt: a.raisedAt.toISOString() };
-        if (a.sourceType === 'EVIDENCE_RETURNED') {
-          const v = await tx.evidenceVersion.findUnique({
-            where: { id: a.sourceId },
-            select: { item: { select: { title: true, links: { select: { instanceId: true } } } } },
-          });
-          const instanceId = v?.item.links[0]?.instanceId;
-          const i = instanceId
-            ? await tx.requirementInstance.findUnique({
-                where: { id: instanceId },
-                select: {
-                  id: true,
-                  subjectType: true,
-                  subjectId: true,
-                  template: { select: { title: true } },
-                },
-              })
-            : null;
-          if (!v || !i) continue;
-          data.push({
-            ...base,
-            kind: 'SENT_BACK',
-            title: `${i.template.title}: ${v.item.title}`,
-            link: {
-              type: 'REQUIREMENT',
-              id: i.id,
-              subjectType: i.subjectType,
-              subjectId: i.subjectId,
-            },
-          });
-        } else {
-          const r = await tx.allocationExceptionRequest.findUnique({ where: { id: a.sourceId } });
-          const job = r
-            ? await tx.job.findUnique({
-                where: { id: r.jobId },
-                select: { id: true, code: true, plannedStart: true },
-              })
-            : null;
-          if (!r || !job) continue;
-          data.push({
-            ...base,
-            kind: a.sourceType === 'EXCEPTION_REQUEST' ? 'EXCEPTION_REQUEST' : 'EXCEPTION_DECLINED',
-            title: `${a.sourceType === 'EXCEPTION_REQUEST' ? 'Exception to decide' : 'Exception declined'}: ${job.code}`,
-            link: { type: 'JOB', id: job.id, date: job.plannedStart.toISOString().slice(0, 10) },
-          });
-        }
-      }
-      return { data };
+      const last = me?.user.lastLoginAt?.getTime() ?? 0;
+      if (Date.now() - last < SIGN_IN_WINDOW_MS) return;
+      await tx.$executeRaw`SELECT record_sign_in()`;
+      await audit(this.db, tx, hub, {
+        action: 'auth.sign_in',
+        entity: 'app_user',
+        entityId: hub.user.id,
+        summary: { mfa: hub.mfaSatisfied },
+      });
     });
   }
 }
+
+const SIGN_IN_WINDOW_MS = 8 * 3_600_000;

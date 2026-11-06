@@ -1,14 +1,19 @@
 import type { TenantTx } from '@hub/db';
 import {
   MAX_DELIVERY_ATTEMPTS,
+  alertLink,
   currentWarningWindow,
   dedupeKey,
   daysUntil,
+  emailRolesForEvent,
   escalationTarget,
   londonDate,
   notificationsPaused,
+  readNotificationRules,
   retryDelayMinutes,
+  rolesForEvent,
   type ISODate,
+  type NotificationEvent,
 } from '@hub/rules';
 
 export interface PlanOutcome {
@@ -35,6 +40,7 @@ export async function planNotifications(
   const settings = (org.settings ?? {}) as { emailReminders?: boolean; deputyEscalation?: boolean };
   const email = settings.emailReminders !== false;
   const deputyOn = settings.deputyEscalation !== false;
+  const rules = readNotificationRules(org.settings);
   const alerts = await tx.alert.findMany({ where: { state: 'OPEN', sourceType: 'REQUIREMENT' } });
   const managers = await tx.membership.findMany({
     where: {
@@ -48,6 +54,54 @@ export async function planNotifications(
   const today = londonDate(now);
   let created = 0;
   let escalated = 0;
+
+  const deliver = async (
+    alertId: string,
+    userId: string,
+    channels: readonly ('IN_APP' | 'EMAIL')[],
+    windowKey: string,
+    escalatedTo: string | null,
+  ) => {
+    for (const channel of channels) {
+      const r = await tx.notificationDelivery.createMany({
+        data: [
+          {
+            organisationId: orgId,
+            alertId,
+            channel,
+            recipientUserId: userId,
+            dedupeKey: `${dedupeKey(alertId, channel, windowKey)}|${userId}`,
+            escalatedTo,
+          },
+        ],
+        skipDuplicates: true,
+      });
+      created += r.count;
+    }
+  };
+  // Notification rules tell extra roles, in addition to the owner chain (OrgSettings).
+  const ruleMembers = async (event: NotificationEvent) => {
+    const roleKeys = rolesForEvent(rules, event);
+    if (roleKeys.length === 0) return [];
+    const emailRoles = emailRolesForEvent(rules, event);
+    const rows = await tx.membership.findMany({
+      where: {
+        organisationId: orgId,
+        validTo: null,
+        role: { key: { in: roleKeys } },
+        user: { status: 'ACTIVE' },
+      },
+      select: { userId: true, role: { select: { key: true } } },
+    });
+    const byUser = new Map<string, boolean>();
+    for (const m of rows)
+      byUser.set(m.userId, (byUser.get(m.userId) ?? false) || emailRoles.includes(m.role.key));
+    return [...byUser].map(([userId, wantsEmail]) => ({
+      userId,
+      channels: email && wantsEmail ? (['IN_APP', 'EMAIL'] as const) : (['IN_APP'] as const),
+    }));
+  };
+  const expiryRule = await ruleMembers('EXPIRY_WARNING');
 
   for (const a of alerts) {
     if (notificationsPaused(a.snoozedUntil, now)) continue;
@@ -96,24 +150,26 @@ export async function planNotifications(
           : managers.map((m) => m.userId);
     if (target !== 'OWNER' && recipients.length > 0) escalated += 1;
 
-    for (const userId of recipients) {
-      for (const channel of email ? (['IN_APP', 'EMAIL'] as const) : (['IN_APP'] as const)) {
-        const key = `${dedupeKey(a.id, channel, windowKey)}|${userId}`;
-        const r = await tx.notificationDelivery.createMany({
-          data: [
-            {
-              organisationId: orgId,
-              alertId: a.id,
-              channel,
-              recipientUserId: userId,
-              dedupeKey: key,
-              escalatedTo: target === 'OWNER' ? null : target,
-            },
-          ],
-          skipDuplicates: true,
-        });
-        created += r.count;
-      }
+    for (const userId of recipients)
+      await deliver(
+        a.id,
+        userId,
+        email ? ['IN_APP', 'EMAIL'] : ['IN_APP'],
+        windowKey,
+        target === 'OWNER' ? null : target,
+      );
+    for (const m of expiryRule)
+      if (!recipients.includes(m.userId))
+        await deliver(a.id, m.userId, m.channels, windowKey, 'RULE');
+  }
+
+  // Breach alerts reach only the roles a rule names; the breach itself is run from Settings.
+  const breachRule = await ruleMembers('BREACH_RECORDED');
+  if (breachRule.length > 0) {
+    const breaches = await tx.alert.findMany({ where: { state: 'OPEN', sourceType: 'BREACH' } });
+    for (const a of breaches) {
+      if (notificationsPaused(a.snoozedUntil, now)) continue;
+      for (const m of breachRule) await deliver(a.id, m.userId, m.channels, today, 'RULE');
     }
   }
   return { created, escalated };
@@ -160,10 +216,17 @@ export async function dispatchNotifications(
     try {
       if (!user || user.status !== 'ACTIVE') throw new Error('RECIPIENT_UNAVAILABLE');
       // No patient or staff names: the code and a link only (non-negotiable 7).
+      const breach = n.alert.sourceType === 'BREACH';
+      const what = breach ? 'A data protection breach' : 'A compliance item';
+      const heading = breach ? 'Data protection breach' : 'Compliance item';
+      const link =
+        n.alert.sourceType === 'REQUIREMENT'
+          ? `${appUrl}/compliance/requirements/${n.alert.sourceId}`
+          : `${appUrl}${alertLink(n.alert.sourceType, n.alert.sourceId)}`;
       await mailer.send({
         to: user.email,
-        subject: `Compliance item needs attention (${n.alert.severity.toLowerCase()})`,
-        text: `A compliance item needs attention: ${n.alert.reasonCode}.\nOpen it here: ${appUrl}/compliance/requirements/${n.alert.sourceId}\n`,
+        subject: `${heading} needs attention (${n.alert.severity.toLowerCase()})`,
+        text: `${what} needs attention: ${n.alert.reasonCode}.\nOpen it here: ${link}\n`,
       });
       await tx.notificationDelivery.update({
         where: { id: n.id },

@@ -203,6 +203,7 @@ describe('live changes stream', () => {
       'audit_log',
       'idempotency_key',
       'notification_delivery',
+      'notification_outbox',
       'org_counter',
       'push_message',
       'retention_log',

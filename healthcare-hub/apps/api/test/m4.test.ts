@@ -82,7 +82,12 @@ async function vdiTemplate(): Promise<J> {
     },
   });
   expect(r.status).toBe(201);
-  template = r.body;
+  // D6: a draft is published by someone other than the person who drafted it.
+  const p = await call('POST', `/api/v1/vdi-templates/${r.body.id}/publish`, {
+    sub: 'dev|manager',
+  });
+  expect(p.status).toBe(201);
+  template = p.body;
   return template;
 }
 async function submitVdi(
@@ -403,6 +408,13 @@ describe('VDI and cleaning [FLT-04, FLT-05, UAT-03, UAT-06]', () => {
     const v1 = await call('POST', '/api/v1/vdi-templates', {
       body: { name, items: [{ code: 'A1', label: 'Lights' }] },
     });
+    expect(v1.body).toMatchObject({ status: 'DRAFT', active: false });
+    // D6: the drafter cannot publish their own checklist.
+    const self = await call('POST', `/api/v1/vdi-templates/${v1.body.id}/publish`);
+    expect([self.status, self.body.code]).toEqual([403, 'SELF_APPROVAL']);
+    const publish = (id: string) =>
+      call('POST', `/api/v1/vdi-templates/${id}/publish`, { sub: 'dev|manager' });
+    expect((await publish(v1.body.id)).body).toMatchObject({ status: 'PUBLISHED', active: true });
     const v2 = await call('POST', '/api/v1/vdi-templates', {
       body: {
         name,
@@ -413,9 +425,20 @@ describe('VDI and cleaning [FLT-04, FLT-05, UAT-03, UAT-06]', () => {
       },
     });
     expect([v1.body.version, v2.body.version]).toEqual([1, 2]);
+    // Crews see only published versions: the draft v2 is not offered yet.
+    const before = (await call('GET', '/api/v1/vdi-templates', { sub: 'dev|crew' })).body
+      .data as J[];
+    expect(before.filter((t) => t.name === name).map((t) => t.version)).toEqual([1]);
+    const published = await publish(v2.body.id);
+    expect(published.body.publishedByName).toBeTruthy();
     const active = (await call('GET', '/api/v1/vdi-templates', { sub: 'dev|crew' })).body
       .data as J[];
     expect(active.filter((t) => t.name === name).map((t) => t.version)).toEqual([2]);
+    const all = (await call('GET', '/api/v1/vdi-templates?all=true')).body.data as J[];
+    expect(all.filter((t) => t.name === name).map((t) => [t.version, t.status])).toEqual([
+      [2, 'PUBLISHED'],
+      [1, 'RETIRED'],
+    ]);
     const v = await vehicle();
     const stale = await call('POST', '/api/v1/vdis', {
       sub: 'dev|crew',
@@ -507,7 +530,7 @@ describe('defects and return to service [FLT-06, UAT-02c]', () => {
       body: { vehicleId: v.id, severity: 'CRITICAL', description: 'Seat belt anchor loose' },
     });
     await call('PATCH', `/api/v1/defects/${one.body.id}`, {
-      body: { status: 'REPAIRED' },
+      body: { status: 'REPAIRED', repairNotes: 'Brake sensor replaced' },
       ifMatch: one.body.version,
     });
     await call('POST', `/api/v1/defects/${one.body.id}/release`, {
@@ -518,6 +541,113 @@ describe('defects and return to service [FLT-06, UAT-02c]', () => {
       status: 'BLOCKED',
       statusReason: '1 open stop-use defect',
     });
+  });
+
+  it('sign-off needs repair notes, locks the record, and a checker can send it back [task 7]', async () => {
+    const v = await vehicle();
+    const d = await call('POST', '/api/v1/defects', {
+      sub: 'dev|crew',
+      body: { vehicleId: v.id, severity: 'CRITICAL', description: 'Rear step loose' },
+    });
+    expect(d.body).toMatchObject({
+      subjectLabel: v.callsign,
+      reportedByName: expect.any(String),
+      repairDue: 'NONE',
+      repairedBy: null,
+    });
+
+    const noNotes = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { status: 'REPAIRED' },
+      ifMatch: d.body.version,
+    });
+    expect([noNotes.status, noNotes.body.code]).toEqual([400, 'VALIDATION_FAILED']);
+
+    const started = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { status: 'REPAIRING', repairNotes: 'Booked in with workshop' },
+      ifMatch: d.body.version,
+    });
+    expect(started.body.status).toBe('REPAIRING');
+    const signed = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { status: 'REPAIRED', repairNotes: 'Step bolts replaced and torqued' },
+      ifMatch: started.body.version,
+    });
+    expect(signed.body).toMatchObject({
+      status: 'REPAIRED',
+      repairedBy: expect.any(String),
+      repairedByName: expect.any(String),
+      repairDue: 'DONE',
+    });
+    expect(signed.body.repairNotes).toContain('Booked in with workshop');
+    expect(signed.body.repairNotes).toContain('Step bolts replaced and torqued');
+
+    const edit = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { repairNotes: 'Changed my mind' },
+      ifMatch: signed.body.version,
+    });
+    expect(edit.status).toBe(409);
+
+    expect(
+      (
+        await call('POST', `/api/v1/defects/${d.body.id}/reopen`, {
+          sub: 'dev|crew',
+          body: { reason: 'Not fixed' },
+        })
+      ).status,
+    ).toBe(403);
+    const back = await call('POST', `/api/v1/defects/${d.body.id}/reopen`, {
+      sub: 'dev|manager',
+      body: { reason: 'Step still moves under load' },
+    });
+    expect(back.status).toBe(201);
+    expect(back.body).toMatchObject({ status: 'REPAIRING', repairedBy: null, repairedAt: null });
+    expect(back.body.repairNotes).toContain('Step bolts replaced and torqued');
+    expect(back.body.repairNotes).toContain('Sent back for repair');
+    expect((await call('GET', `/api/v1/vehicles/${v.id}`)).body.status).toBe('BLOCKED');
+    expect(
+      (
+        await call('POST', `/api/v1/defects/${d.body.id}/reopen`, {
+          sub: 'dev|manager',
+          body: { reason: 'Again' },
+        })
+      ).status,
+    ).toBe(409);
+
+    const again = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { status: 'REPAIRED', repairNotes: 'Bracket welded' },
+      ifMatch: back.body.version,
+    });
+    const rel = await call('POST', `/api/v1/defects/${d.body.id}/release`, {
+      sub: 'dev|manager',
+      body: { reason: 'Load-tested the step' },
+    });
+    expect(again.body.status).toBe('REPAIRED');
+    expect(rel.body.release).toMatchObject({
+      releasedByName: expect.any(String),
+      evidenceItemId: null,
+    });
+    const released = (await call('GET', `/api/v1/defects?status=RELEASED&vehicleId=${v.id}`)).body
+      .data as J[];
+    expect(released.map((x) => x.id)).toEqual([d.body.id]);
+    const active = (await call('GET', `/api/v1/defects?vehicleId=${v.id}`)).body.data as J[];
+    expect(active).toEqual([]);
+  });
+
+  it('a minor defect shows where it stands against its repair deadline', async () => {
+    const v = await vehicle();
+    const d = await call('POST', '/api/v1/defects', {
+      sub: 'dev|crew',
+      body: { vehicleId: v.id, severity: 'MINOR', description: 'Glove box catch broken' },
+    });
+    const late = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { severity: 'MINOR', repairDeadline: addDays(today(), -1) },
+      ifMatch: d.body.version,
+    });
+    expect(late.body).toMatchObject({ repairDue: 'OVERDUE', classifiedByName: expect.any(String) });
+    const soon = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
+      body: { repairDeadline: addDays(today(), 3) },
+      ifMatch: late.body.version,
+    });
+    expect(soon.body.repairDue).toBe('DUE_SOON');
   });
 
   it('crew can report but only see their own reports; minor defects need a repair deadline when classified', async () => {
@@ -587,26 +717,48 @@ describe('equipment, regimes and capability [FLT-03, FLT-08]', () => {
     expect(r.state).toBe('BLOCKED');
     expect(r.checks.find((c: J) => c.code === 'STRETCHER')).toMatchObject({
       result: 'FAIL',
-      reasonText: expect.stringContaining('unavailable'),
+      reasonText: expect.stringContaining('quarantined'),
     });
     expect((await call('GET', `/api/v1/vehicles/${v.id}/readiness?${window()}`)).body.state).toBe(
       'READY',
     ); // job not needing a stretcher
+    // D3: release needs evidence and someone other than the person who quarantined it.
+    const upload = await call('POST', '/api/v1/evidence/uploads', {
+      sub: 'dev|manager',
+      body: {
+        title: 'Stretcher re-test record',
+        mime: 'application/pdf',
+        sizeBytes: 1000,
+        requirementInstanceIds: [],
+      },
+    });
+    const evidenceItemId = upload.body.evidenceItemId as string;
     expect(
       (
         await call('POST', `/api/v1/equipment/${a.body.id}/release`, {
           sub: 'dev|hr',
-          body: { reason: 'Fixed' },
+          body: { reason: 'Fixed', evidenceItemId },
         })
       ).status,
     ).toBe(403);
     expect(
       (
         await call('POST', `/api/v1/equipment/${a.body.id}/release`, {
+          sub: 'dev|manager',
           body: { reason: 'Re-tested and passed' },
         })
-      ).body.status,
-    ).toBe('AVAILABLE');
+      ).status,
+    ).toBe(400);
+    const self = await call('POST', `/api/v1/equipment/${a.body.id}/release`, {
+      body: { reason: 'Re-tested and passed', evidenceItemId },
+    });
+    expect([self.status, self.body.code]).toEqual([403, 'SELF_APPROVAL']);
+    const released = await call('POST', `/api/v1/equipment/${a.body.id}/release`, {
+      sub: 'dev|manager',
+      body: { reason: 'Re-tested and passed', evidenceItemId },
+    });
+    expect(released.body.status).toBe('AVAILABLE');
+    expect(released.body.quarantinedBy).toBeNull();
   });
 
   it('LOLER and servicing are separate schedules on one asset', async () => {
@@ -699,10 +851,24 @@ describe('fuel and expenses [FLT-07]', () => {
     expect(
       (
         await call('POST', `/api/v1/fuel-expenses/${a.body.id}/approve`, {
-          body: { decision: 'REJECTED' },
+          body: { decision: 'REJECTED', note: 'Duplicate claim' },
         })
       ).status,
     ).toBe(409);
+    // A rejection needs a reason; the register carries names [task 15]
+    expect(
+      (
+        await call('POST', `/api/v1/fuel-expenses/${b.body.id}/approve`, {
+          body: { decision: 'REJECTED' },
+        })
+      ).status,
+    ).toBe(400);
+    const listed = (await call('GET', '/api/v1/fuel-expenses')).body.data.find(
+      (x: J) => x.id === a.body.id,
+    );
+    expect(listed.submittedByName).toBe('Alex Morgan');
+    expect(listed.decidedByName).toBe('Finn Lee'); // approved as dev|fleet (the default caller)
+    expect(listed.vehicleLabel).toContain(v.callsign);
     expect((await call('GET', `/api/v1/vehicles/${v.id}`)).body.currentOdometer).toBe(30_000);
     const csv = await call('GET', `/api/v1/fuel-expenses/export?vehicleId=${v.id}`);
     expect(csv.status).toBe(200);

@@ -9,19 +9,23 @@ import {
   Query,
   StreamableFile,
 } from '@nestjs/common';
-import type { Db, Prisma } from '@hub/db';
+import type { Db, Prisma, TenantTx } from '@hub/db';
 import { dashboardRows, dashboardSummary, type BlobStore } from '@hub/domain';
+import { visibleDashboardModules, visibleDashboardTiles } from '@hub/rules';
 import {
   ActionRowsQuery,
   DashboardQuery,
   EvidencePackInput,
+  GroupDashboardQuery,
   type DashboardSummary,
+  type GroupDashboardSummary,
   type ExportDto,
 } from '@hub/contracts';
 import { CONFIG, type AppConfig } from '../../config.js';
-import { Public, RequirePermission } from '../../common/decorators.js';
+import { AuthenticatedOnly, Public, RequirePermission } from '../../common/decorators.js';
+import { mfaRequiredFor } from '../../auth/mfa.js';
 import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
-import { audit, body } from '../../common/http.js';
+import { audit, body, dbNow } from '../../common/http.js';
 import { toCsv } from '../../common/csv.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
@@ -40,6 +44,18 @@ const LINK_TTL_S = 5 * 60;
 const inTile = (r: { status: string; tiles: string[] }, tile: string): boolean =>
   tile === 'all' ? r.status !== 'GREEN' : r.tiles.includes(tile);
 
+/**
+ * Dashboard modules the caller may see: a role only gets rows and figures for areas it can open
+ * (an HR lead sees no vehicles), and ambulance modules only where the ambulance pack is on.
+ */
+async function modulesFor(tx: TenantTx, orgId: string, permissions: Iterable<string>) {
+  const org = await tx.organisation.findUnique({
+    where: { id: orgId },
+    select: { sectorPacks: true },
+  });
+  return visibleDashboardModules(permissions, org?.sectorPacks ?? null);
+}
+
 @Controller()
 export class DashboardController {
   constructor(
@@ -48,14 +64,126 @@ export class DashboardController {
     @Inject(BLOB_STORE) private readonly store: BlobStore,
   ) {}
 
+  /**
+   * Group dashboard: for every organisation where the caller holds `dashboard.view`, the same tile
+   * counts as that organisation's own dashboard, computed under that organisation's tenant context
+   * with the caller's permissions and location scope there. Counts only; a failing organisation is
+   * shown as unavailable, never as zero.
+   */
+  @AuthenticatedOnly()
+  @Get('dashboard/group')
+  async group(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<GroupDashboardSummary> {
+    const f = body(GroupDashboardQuery, q);
+    if (f.dateFrom && f.dateTo && f.dateTo < f.dateFrom)
+      throw new HubError('VALIDATION_FAILED', 400, 'dateTo must not be before dateFrom');
+    const memberships = await this.db.withIdentity(hub.user.id, async (tx) => {
+      const t = await dbNow(tx);
+      return tx.membership.findMany({
+        where: {
+          userId: hub.user.id,
+          validFrom: { lte: t },
+          OR: [{ validTo: null }, { validTo: { gt: t } }],
+        },
+        include: {
+          organisation: { select: { name: true } },
+          role: { select: { key: true, rolePermissions: true } },
+        },
+      });
+    });
+    const orgIds = [...new Set(memberships.map((m) => m.organisationId))];
+    const now = new Date();
+    const organisations: GroupDashboardSummary['organisations'][number][] = [];
+    for (const orgId of orgIds) {
+      const mine = memberships.filter((m) => m.organisationId === orgId);
+      const permissions = [
+        ...new Set(mine.flatMap((m) => m.role.rolePermissions.map((p) => p.permissionKey))),
+      ];
+      if (!permissions.includes('dashboard.view')) continue;
+      const base = { organisationId: orgId, organisationName: mine[0]!.organisation.name };
+      if (mfaRequiredFor(mine.map((m) => m.role.key)) && !hub.mfaSatisfied) {
+        organisations.push({
+          ...base,
+          ok: false,
+          unavailableReason: 'MFA required',
+          tiles: null,
+          criticalOpen: null,
+          worstStatus: null,
+        });
+        continue;
+      }
+      const locationIds = mine.some((m) => m.locationId === null)
+        ? null
+        : [...new Set(mine.map((m) => m.locationId as string))];
+      try {
+        const s = await this.db.withTenant(
+          { orgId, userId: hub.user.id, permissions, locationIds },
+          async (tx) => {
+            const modules = await modulesFor(tx, orgId, permissions);
+            return dashboardSummary(tx, { ...f, modules }, now);
+          },
+        );
+        const rank = { RED: 0, AMBER: 1, GREY: 2, GREEN: 3, NOT_APPLICABLE: 4 } as const;
+        const worst = s.modules.reduce<(typeof s.modules)[number]['status'] | null>(
+          (w, m) => (w === null || rank[m.status] < rank[w] ? m.status : w),
+          null,
+        );
+        organisations.push({
+          ...base,
+          ok: true,
+          unavailableReason: null,
+          tiles: s.tiles,
+          criticalOpen: s.criticalOpen,
+          worstStatus: s.criticalOpen > 0 ? 'RED' : worst,
+        });
+      } catch {
+        organisations.push({
+          ...base,
+          ok: false,
+          unavailableReason: 'Source unavailable',
+          tiles: null,
+          criticalOpen: null,
+          worstStatus: null,
+        });
+      }
+    }
+    const sum = (k: 'overdue' | 'dueSoon' | 'blockedVehicles' | 'jobsToday' | 'unverified') =>
+      organisations.reduce((n, o) => n + (o.tiles?.[k] ?? 0), 0);
+    return {
+      organisations,
+      totals: {
+        overdue: sum('overdue'),
+        dueSoon: sum('dueSoon'),
+        blockedVehicles: sum('blockedVehicles'),
+        jobsToday: sum('jobsToday'),
+        unverified: sum('unverified'),
+        criticalOpen: organisations.reduce((n, o) => n + (o.criticalOpen ?? 0), 0),
+      },
+      lastRefreshedAt: now.toISOString(),
+    };
+  }
+
   @RequirePermission('dashboard.view')
   @Get('dashboard/summary')
   async summary(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<DashboardSummary> {
     const f = body(DashboardQuery, q);
+    if (f.dateFrom && f.dateTo && f.dateTo < f.dateFrom)
+      throw new HubError('VALIDATION_FAILED', 400, 'dateTo must not be before dateFrom');
     const now = new Date();
-    const s = await this.db.withTenant(tenantOf(hub), (tx) => dashboardSummary(tx, f, now));
+    const { s, modules, packs } = await this.db.withTenant(tenantOf(hub), async (tx) => {
+      const modules = await modulesFor(tx, hub.orgId as string, hub.permissions);
+      const org = await tx.organisation.findUnique({
+        where: { id: hub.orgId as string },
+        select: { sectorPacks: true },
+      });
+      return {
+        s: await dashboardSummary(tx, { ...f, modules }, now),
+        modules,
+        packs: org?.sectorPacks ?? null,
+      };
+    });
     return {
       tiles: s.tiles,
+      notSetUp: s.notSetUp,
       modules: s.modules,
       operations: s.operations,
       criticalOpen: s.criticalOpen,
@@ -63,9 +191,11 @@ export class DashboardController {
       lastRefreshedAt: now.toISOString(),
       sources: [
         { name: 'requirements', ok: true },
-        { name: 'fleet', ok: true },
-        { name: 'jobs', ok: true },
+        ...(modules.includes('FLEET') ? [{ name: 'fleet', ok: true }] : []),
+        ...(modules.includes('JOBS') ? [{ name: 'jobs', ok: true }] : []),
       ],
+      visibleModules: modules,
+      visibleTiles: visibleDashboardTiles(modules, packs),
     };
   }
 
@@ -73,9 +203,12 @@ export class DashboardController {
   @Get('dashboard/actions')
   async actions(@Hub() hub: HubRequestContext, @Query() q: unknown) {
     const f = body(ActionRowsQuery, q);
-    const { rows } = await this.db.withTenant(tenantOf(hub), (tx) =>
-      dashboardRows(tx, f, new Date()),
-    );
+    if (f.dateFrom && f.dateTo && f.dateTo < f.dateFrom)
+      throw new HubError('VALIDATION_FAILED', 400, 'dateTo must not be before dateFrom');
+    const { rows } = await this.db.withTenant(tenantOf(hub), async (tx) => {
+      const modules = await modulesFor(tx, hub.orgId as string, hub.permissions);
+      return dashboardRows(tx, { ...f, modules }, new Date());
+    });
     return { data: rows.filter((r) => inTile(r, f.tile)) };
   }
 
@@ -84,7 +217,10 @@ export class DashboardController {
   async export(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<StreamableFile> {
     const f = body(ActionRowsQuery, q);
     const rows = await this.db.withTenant(tenantOf(hub), async (tx) => {
-      const r = (await dashboardRows(tx, f, new Date())).rows.filter((x) => inTile(x, f.tile));
+      const modules = await modulesFor(tx, hub.orgId as string, hub.permissions);
+      const r = (await dashboardRows(tx, { ...f, modules }, new Date())).rows.filter((x) =>
+        inTile(x, f.tile),
+      );
       await audit(this.db, tx, hub, {
         action: 'reports.dashboard.export',
         entity: 'organisation',
@@ -94,10 +230,11 @@ export class DashboardController {
       return r;
     });
     const csv = toCsv(
-      ['Module', 'Item', 'Owner id', 'Deadline', 'State', 'Reason'],
+      ['Module', 'Item', 'Owner', 'Owner id', 'Deadline', 'State', 'Reason'],
       rows.map((r) => [
         r.module,
         r.item,
+        r.ownerName ?? (r.ownerUserId ? 'Not a current member' : 'Unassigned'),
         r.ownerUserId ?? '',
         r.deadline ?? '',
         r.status,
@@ -118,6 +255,8 @@ export class DashboardController {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       if (input.locationId && !(await tx.location.findUnique({ where: { id: input.locationId } })))
         throw notFound();
+      if (input.serviceId && !(await tx.serviceType.findUnique({ where: { id: input.serviceId } })))
+        throw new HubError('VALIDATION_FAILED', 400, 'Unknown service');
       const pending = await tx.exportJob.count({
         where: { requestedBy: hub.user.id, status: { in: ['QUEUED', 'RUNNING'] } },
       });
@@ -136,7 +275,14 @@ export class DashboardController {
         action: 'reports.evidence_pack.request',
         entity: 'export_job',
         entityId: j.id,
-        summary: { from: input.from, to: input.to },
+        summary: {
+          from: input.from,
+          to: input.to,
+          purpose: input.purpose,
+          sections: input.sections.join(','),
+          includeFiles: input.includeFiles,
+          gapsOnly: input.gapsOnly,
+        },
       });
       return this.dto(j, null);
     });

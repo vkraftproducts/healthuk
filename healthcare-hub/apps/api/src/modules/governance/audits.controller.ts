@@ -1,20 +1,47 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import type { Db, Prisma, TenantTx } from '@hub/db';
 import { createAction, nextCode, refreshAuditOutcome } from '@hub/domain';
 import {
+  auditOverallResult,
+  auditProgress,
+  autoActionDeadline,
   isOverdue,
   londonDate,
+  needsSpecialist,
+  nextRecurrence,
+  reauditDueDate,
   repeatedSelections,
+  SECTOR_TEMPLATE_NOTE,
   summariseControl,
+  templateState,
+  unansweredControls,
   type AuditResult,
+  type Severity,
 } from '@hub/rules';
 import type { FindingDto } from '@hub/contracts';
 import {
+  ActionCreateInput,
   ActionEvidenceInput,
   ActionListQuery,
+  ActionPatch,
   ActionVerifyInput,
+  AuditPublishInput,
+  AuditReviewInput,
   AuditRunCreate,
+  AuditTemplateClone,
   AuditTemplateCreate,
+  AuditTemplateRetire,
   AuditVersionInput,
   FindingActionInput,
   ResponseInput,
@@ -26,10 +53,11 @@ import {
 } from '@hub/contracts';
 import { z } from 'zod';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
-import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
-import { audit, body, requireAny } from '../../common/http.js';
+import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
+import { audit, body, ifMatchVersion, requireAny, staleOrNotFound } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
+import { userNames } from '../evidence/evidence.mapper.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
@@ -73,6 +101,19 @@ export function toActionDto(a: ActionRow, now = new Date()): ActionDto {
   };
 }
 
+/** Adds owner and history names to action DTOs for screens. */
+export async function withActionNames(tx: TenantTx, dtos: ActionDto[]): Promise<ActionDto[]> {
+  const names = await userNames(
+    tx,
+    dtos.flatMap((a) => [a.ownerUserId, ...a.history.map((h) => h.byUserId)]),
+  );
+  return dtos.map((a) => ({
+    ...a,
+    ownerName: names.get(a.ownerUserId) ?? null,
+    history: a.history.map((h) => ({ ...h, byName: names.get(h.byUserId) ?? null })),
+  }));
+}
+
 async function assertMember(tx: TenantTx, userId: string): Promise<void> {
   if (
     !(await tx.membership.count({ where: { userId, validTo: null, user: { status: 'ACTIVE' } } }))
@@ -89,13 +130,16 @@ export class AuditsController {
   @RequirePermission('compliance.audit.view')
   @Get('audit-templates')
   async templates(@Hub() hub: HubRequestContext): Promise<{ data: AuditTemplateDto[] }> {
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.auditTemplate.findMany({
-        include: { versions: { orderBy: { version: 'desc' } } },
-        orderBy: { code: 'asc' },
-      }),
+    const data = await this.db.withTenant(tenantOf(hub), async (tx) =>
+      tplDtos(
+        tx,
+        await tx.auditTemplate.findMany({
+          include: { versions: { orderBy: { version: 'desc' } } },
+          orderBy: { code: 'asc' },
+        }),
+      ),
     );
-    return { data: rows.map(tplDto) };
+    return { data };
   }
 
   @RequirePermission('compliance.audit.run')
@@ -163,18 +207,28 @@ export class AuditsController {
     @Hub() hub: HubRequestContext,
     @Param('id', idPipe) id: string,
     @Param('versionId', idPipe) versionId: string,
+    @Body() raw: unknown,
   ): Promise<AuditTemplateDto> {
+    const input = body(AuditPublishInput, raw ?? {});
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const v = await tx.auditTemplateVersion.findFirst({
         where: { id: versionId, templateId: id },
+        include: { template: true },
       });
       if (!v) throw notFound();
       if (v.status !== 'DRAFT') throw new HubError('CONFLICT', 409, 'Already published');
+      if (v.template.retiredAt) throw new HubError('CONFLICT', 409, 'The template is retired');
       if (v.createdBy === hub.user.id)
         throw new HubError(
           'FOUR_EYES_REQUIRED',
           422,
           'A second person must publish the version they did not write',
+        );
+      if (needsSpecialist(v.template.sectorPack) && !(input.specialistName && input.specialistRole))
+        throw new HubError(
+          'VALIDATION_FAILED',
+          422,
+          'Dental and care home content needs the validating specialist’s name and role',
         );
       await tx.auditTemplateVersion.updateMany({
         where: { templateId: id, status: 'PUBLISHED' },
@@ -182,7 +236,13 @@ export class AuditsController {
       });
       await tx.auditTemplateVersion.update({
         where: { id: versionId },
-        data: { status: 'PUBLISHED', approvedBy: hub.user.id, approvedAt: new Date() },
+        data: {
+          status: 'PUBLISHED',
+          approvedBy: hub.user.id,
+          approvedAt: new Date(),
+          specialistName: input.specialistName ?? null,
+          specialistRole: input.specialistRole ?? null,
+        },
       });
       await audit(this.db, tx, hub, {
         action: 'compliance.audit_template.publish',
@@ -204,11 +264,105 @@ export class AuditsController {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const t = await tx.auditTemplate.findUnique({ where: { id }, include: { versions: true } });
       if (!t) throw notFound();
-      if (!t.versions.some((v) => v.status === 'PUBLISHED'))
-        throw new HubError('TEMPLATE_NOT_PUBLISHED', 422, 'Publish a version first');
+      const published = t.versions.find((v) => v.status === 'PUBLISHED');
+      if (!published) throw new HubError('TEMPLATE_NOT_PUBLISHED', 422, 'Publish a version first');
+      if (t.active) throw new HubError('CONFLICT', 409, 'The template is already active');
+      // Management approval is a separate person from whoever wrote the questions.
+      if (published.createdBy === hub.user.id)
+        throw new HubError(
+          'FOUR_EYES_REQUIRED',
+          422,
+          'Someone other than the author of the published version must activate it',
+        );
+      if (t.retiredAt) throw new HubError('CONFLICT', 409, 'The template is retired');
       await tx.auditTemplate.update({ where: { id }, data: { active: true } });
       await audit(this.db, tx, hub, {
         action: 'compliance.audit_template.activate',
+        entity: 'audit_template',
+        entityId: id,
+      });
+      return this.tpl(tx, id);
+    });
+  }
+
+  /** A new template starting from this one's latest version, as a draft (G1). */
+  @RequirePermission('compliance.audit.run')
+  @Post('audit-templates/:id/clone')
+  async clone(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<AuditTemplateDto> {
+    const input = body(AuditTemplateClone, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const src = await tx.auditTemplate.findUnique({
+        where: { id },
+        include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
+      });
+      if (!src || !src.versions[0]) throw notFound();
+      if (await tx.auditTemplate.findFirst({ where: { code: input.code } }))
+        throw new HubError('CONFLICT', 409, 'That code is already used');
+      const v = src.versions[0];
+      const t = await tx.auditTemplate.create({
+        data: {
+          organisationId: hub.orgId as string,
+          code: input.code,
+          title: input.title,
+          domain: src.domain,
+          sourceRef: src.sourceRef,
+          sectorPack: src.sectorPack,
+          proposedCadence: src.proposedCadence,
+          clonedFrom: src.id,
+          createdBy: hub.user.id,
+        },
+      });
+      await tx.auditTemplateVersion.create({
+        data: {
+          organisationId: t.organisationId,
+          templateId: t.id,
+          version: 1,
+          controls: v.controls as Prisma.InputJsonArray,
+          sampleMethod: v.sampleMethod,
+          sampleSize: v.sampleSize,
+          methods: v.methods,
+          frequency: v.frequency,
+          createdBy: hub.user.id,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'compliance.audit_template.clone',
+        entity: 'audit_template',
+        entityId: t.id,
+        summary: { from: src.code },
+      });
+      return this.tpl(tx, t.id);
+    });
+  }
+
+  /** Retired templates cannot be scheduled; past runs and results stay unchanged. */
+  @RequirePermission('compliance.requirement.manage')
+  @Post('audit-templates/:id/retire')
+  async retire(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<AuditTemplateDto> {
+    const input = body(AuditTemplateRetire, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const t = await tx.auditTemplate.findUnique({ where: { id } });
+      if (!t) throw notFound();
+      if (t.retiredAt) throw new HubError('CONFLICT', 409, 'The template is already retired');
+      await tx.auditTemplate.update({
+        where: { id },
+        data: {
+          active: false,
+          retiredAt: new Date(),
+          retiredBy: hub.user.id,
+          retiredReason: input.reason,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'compliance.audit_template.retire',
         entity: 'audit_template',
         entityId: id,
       });
@@ -220,14 +374,17 @@ export class AuditsController {
   @RequirePermission('compliance.audit.view')
   @Get('audit-runs')
   async runs(@Hub() hub: HubRequestContext): Promise<{ data: AuditRunDto[] }> {
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.auditRun.findMany({
-        include: { templateVersion: { include: { template: true } } },
-        orderBy: [{ dueDate: 'asc' }, { code: 'asc' }],
-        take: 500,
-      }),
+    const data = await this.db.withTenant(tenantOf(hub), async (tx) =>
+      runDtos(
+        tx,
+        await tx.auditRun.findMany({
+          include: { templateVersion: { include: { template: true } } },
+          orderBy: [{ dueDate: 'asc' }, { code: 'asc' }],
+          take: 500,
+        }),
+      ),
     );
-    return { data: rows.map(runDto) };
+    return { data };
   }
 
   @RequirePermission('compliance.audit.run')
@@ -248,14 +405,23 @@ export class AuditsController {
         throw new HubError(
           'TEMPLATE_NOT_PUBLISHED',
           422,
-          'The template is not active yet (management approval needed)',
+          v.template.retiredAt
+            ? 'The template is retired'
+            : 'The template is not active yet (management approval needed)',
         );
       if (input.locationId && !(await tx.location.findUnique({ where: { id: input.locationId } })))
         throw notFound();
+      if (input.serviceId && !(await tx.serviceType.findUnique({ where: { id: input.serviceId } })))
+        throw notFound();
       await assertMember(tx, input.auditorUserId);
       await assertMember(tx, input.ownerUserId);
+      if (input.reviewerUserId) {
+        if (input.reviewerUserId === input.auditorUserId)
+          throw new HubError('SELF_APPROVAL', 422, 'The reviewer must not be the auditor');
+        await assertMember(tx, input.reviewerUserId);
+      }
       const r = await this.newRun(tx, hub, { ...input, templateVersionId: v.id });
-      return runDto({ ...r, templateVersion: v });
+      return (await runDtos(tx, [{ ...r, templateVersion: v }]))[0]!;
     });
   }
 
@@ -342,11 +508,14 @@ export class AuditsController {
       for (const r of input.responses) {
         if (!controls.some((c) => c.code === r.controlCode))
           throw new HubError('VALIDATION_FAILED', 400, `Unknown control ${r.controlCode}`);
-        if (['PARTIAL', 'NON_COMPLIANT', 'NOT_APPLICABLE'].includes(r.result) && !r.note)
+        if (
+          ['PARTIAL', 'NON_COMPLIANT', 'NOT_APPLICABLE', 'NOT_ASSESSED'].includes(r.result) &&
+          !r.note
+        )
           throw new HubError(
             'VALIDATION_FAILED',
             400,
-            'Partial, non-compliant and not-applicable answers need a note',
+            'Partial, failed, N/A and not-assessed answers need a note giving the reason',
           );
         if (!run.templateVersion.methods.includes(r.method))
           throw new HubError('VALIDATION_FAILED', 400, 'That method is not used by this audit');
@@ -397,15 +566,29 @@ export class AuditsController {
           400,
           'Record at least one response before submitting',
         );
+      const controls = run.templateVersion.controls as Control[];
+      const missing = unansweredControls(
+        controls,
+        responses.map((r) => r.controlCode),
+      );
+      if (missing.length > 0)
+        throw new HubError(
+          'VALIDATION_FAILED',
+          400,
+          'Answer every control before submitting (use N/A or Not assessed with a reason): ' +
+            missing.join(', '),
+        );
+      const submissionNo = run.submissionNo + 1;
       // The latest answer per (control, subject) counts; earlier ones stay as history.
       const latest = new Map<string, (typeof responses)[number]>();
       for (const r of responses) latest.set(`${r.controlCode}|${r.subjectId ?? ''}`, r);
-      for (const c of run.templateVersion.controls as Control[]) {
+      const failed: { finding: string; control: Control; severity: Severity }[] = [];
+      for (const c of controls) {
         const results = [...latest.values()]
           .filter((r) => r.controlCode === c.code)
           .map((r) => r.result as AuditResult);
-        const s = summariseControl(results.length ? results : ['NOT_ASSESSED'], !!c.critical);
-        await tx.auditFinding.create({
+        const s = summariseControl(results, !!c.critical);
+        const f = await tx.auditFinding.create({
           data: {
             organisationId: run.organisationId,
             runId: id,
@@ -418,18 +601,135 @@ export class AuditsController {
             severity: s.severity,
             summary: s.text,
             createdBy: hub.user.id,
+            submissionNo,
           },
+        });
+        if (s.result === 'NON_COMPLIANT' || s.result === 'PARTIAL')
+          failed.push({ finding: f.id, control: c, severity: s.severity as Severity });
+      }
+      // Failures become draft actions owned by the audit owner (G2); a returned audit that is
+      // submitted again does not duplicate actions already raised for the same control.
+      const earlier = await tx.auditFinding.findMany({
+        where: { runId: id, submissionNo: { lt: submissionNo } },
+        select: { id: true, controlCode: true },
+      });
+      const raised = new Set(
+        (
+          await tx.action.findMany({
+            where: { sourceType: 'FINDING', sourceId: { in: earlier.map((x) => x.id) } },
+            select: { sourceId: true },
+          })
+        ).map((a) => earlier.find((x) => x.id === a.sourceId)?.controlCode),
+      );
+      const today = londonDate(new Date());
+      const deadlines: string[] = [];
+      for (const x of failed) {
+        if (raised.has(x.control.code)) continue;
+        const deadline = autoActionDeadline(x.severity, today);
+        deadlines.push(deadline);
+        await createAction(tx, {
+          organisationId: run.organisationId,
+          sourceType: 'FINDING',
+          sourceId: x.finding,
+          title: (x.control.failureAction || `Put right: ${x.control.question}`).slice(0, 300),
+          severity: x.severity,
+          ownerUserId: run.ownerUserId,
+          deadline,
+          by: hub.user.id,
         });
       }
       await tx.auditRun.update({
         where: { id },
-        data: { status: 'SUBMITTED', submittedAt: new Date() },
+        data: { status: 'SUBMITTED', submittedAt: new Date(), submissionNo, reviewState: null },
       });
+      // Re-audit after the action deadlines, on the same template version (G2).
+      const due = reauditDueDate(deadlines);
+      if (due)
+        await this.newRun(tx, hub, {
+          templateVersionId: run.templateVersionId,
+          title: `Re-audit: ${run.title}`.slice(0, 200),
+          locationId: run.locationId ?? undefined,
+          serviceId: run.serviceId ?? undefined,
+          reviewerUserId: run.reviewerUserId ?? undefined,
+          auditorUserId: run.auditorUserId,
+          ownerUserId: run.ownerUserId,
+          dueDate: due,
+          reauditOf: id,
+        });
       await refreshAuditOutcome(tx, id);
       await audit(this.db, tx, hub, {
         action: 'compliance.audit.submit',
         entity: 'audit_run',
         entityId: id,
+        summary: { submissionNo, actions: deadlines.length },
+      });
+      return this.detail(tx, id);
+    });
+  }
+
+  /**
+   * Reviewer accepts (the audit is locked; a recurring audit gets its next run) or returns it
+   * with a reason (answers can be added and it is submitted again). Never the auditor.
+   */
+  @RequirePermission('compliance.audit.run')
+  @Post('audit-runs/:id/review')
+  async review(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<AuditRunDetailDto> {
+    const input = body(AuditReviewInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const run = await tx.auditRun.findUnique({ where: { id } });
+      if (!run) throw notFound();
+      if (run.status === 'SCHEDULED' || run.status === 'IN_PROGRESS')
+        throw new HubError('CONFLICT', 409, 'The audit has not been submitted yet');
+      if (run.reviewState)
+        throw new HubError(
+          'CONFLICT',
+          409,
+          run.reviewState === 'ACCEPTED'
+            ? 'The audit has already been accepted'
+            : 'The audit was returned; it must be submitted again first',
+        );
+      if (run.auditorUserId === hub.user.id)
+        throw new HubError('SELF_APPROVAL', 422, 'The auditor cannot review their own audit');
+      if (run.reviewerUserId && run.reviewerUserId !== hub.user.id)
+        throw new HubError('FORBIDDEN', 403, 'Only the named reviewer can review this audit');
+      await tx.auditReview.create({
+        data: {
+          organisationId: run.organisationId,
+          runId: id,
+          submissionNo: run.submissionNo,
+          decision: input.decision,
+          reason: input.reason || 'Accepted',
+          reviewedBy: hub.user.id,
+        },
+      });
+      let nextRunId: string | null = run.nextRunId;
+      if (input.decision === 'ACCEPTED' && run.recurrenceMonths && !run.nextRunId) {
+        const next = await this.newRun(tx, hub, {
+          templateVersionId: run.templateVersionId,
+          title: run.title,
+          locationId: run.locationId ?? undefined,
+          serviceId: run.serviceId ?? undefined,
+          reviewerUserId: run.reviewerUserId ?? undefined,
+          recurrenceMonths: run.recurrenceMonths,
+          auditorUserId: run.auditorUserId,
+          ownerUserId: run.ownerUserId,
+          dueDate: nextRecurrence(iso(run.dueDate) as string, run.recurrenceMonths),
+        });
+        nextRunId = next.id;
+      }
+      await tx.auditRun.update({
+        where: { id },
+        data: { reviewState: input.decision, nextRunId },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'compliance.audit.review',
+        entity: 'audit_run',
+        entityId: id,
+        summary: { decision: input.decision, submissionNo: run.submissionNo },
       });
       return this.detail(tx, id);
     });
@@ -470,6 +770,7 @@ export class AuditsController {
           summary: input.summary,
           failCount: 1,
           createdBy: hub.user.id,
+          submissionNo: Math.max(1, run.submissionNo),
         },
       });
       await refreshAuditOutcome(tx, id);
@@ -559,11 +860,15 @@ export class AuditsController {
   ): Promise<{ data: ActionDto[] }> {
     requireAny(hub, 'compliance.audit.view', 'compliance.action.manage', 'events.event.view');
     const f = body(ActionListQuery, q);
+    const today = new Date(`${londonDate(new Date())}T00:00:00.000Z`);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const rows = await tx.action.findMany({
         where: {
           ...(f.status === 'ACTIVE' ? { status: { not: 'VERIFIED' } } : { status: f.status }),
           ...(f.ownerUserId ? { ownerUserId: f.ownerUserId } : {}),
+          ...(f.sourceType ? { sourceType: f.sourceType } : {}),
+          ...(f.overdue === 'true' ? { deadline: { lt: today }, NOT: { status: 'VERIFIED' } } : {}),
+          ...(f.overdue === 'false' ? { deadline: { gte: today } } : {}),
         },
         include: { history: true },
         orderBy: [{ deadline: 'asc' }, { code: 'asc' }],
@@ -577,11 +882,64 @@ export class AuditsController {
       });
       const runOf = new Map(findings.map((x) => [x.id, x.runId]));
       return {
-        data: rows.map((a) => {
-          const auditRunId = a.sourceType === 'FINDING' ? runOf.get(a.sourceId) : undefined;
-          return { ...toActionDto(a), ...(auditRunId ? { auditRunId } : {}) };
-        }),
+        data: await withActionNames(
+          tx,
+          rows.map((a) => {
+            const auditRunId = a.sourceType === 'FINDING' ? runOf.get(a.sourceId) : undefined;
+            return { ...toActionDto(a), ...(auditRunId ? { auditRunId } : {}) };
+          }),
+        ),
       };
+    });
+  }
+
+  /** Raise an action from any source with an owner picked (G3). */
+  @RequirePermission('compliance.action.manage')
+  @Post('actions')
+  async raiseAction(@Hub() hub: HubRequestContext, @Body() raw: unknown): Promise<ActionDto> {
+    const input = body(ActionCreateInput, raw);
+    if (input.deadline < londonDate(new Date()))
+      throw new HubError('VALIDATION_FAILED', 400, 'The deadline is in the past');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const id = input.sourceId;
+      const found =
+        input.sourceType === 'FINDING'
+          ? await tx.auditFinding.count({ where: { id } })
+          : input.sourceType === 'EVENT'
+            ? await tx.event.count({ where: { id } })
+            : input.sourceType === 'RISK'
+              ? await tx.risk.count({ where: { id } })
+              : input.sourceType === 'CORRESPONDENCE'
+                ? await tx.regulatoryCorrespondence.count({ where: { id } })
+                : input.sourceType === 'FEEDBACK'
+                  ? await tx.feedbackItem.count({ where: { id } })
+                  : input.sourceType === 'PREMISES'
+                    ? await tx.premisesItem.count({ where: { id } })
+                    : await tx.governanceMeeting.count({ where: { id } });
+      if (!found) throw notFound();
+      await assertMember(tx, input.ownerUserId);
+      const a = await createAction(tx, {
+        organisationId: hub.orgId as string,
+        sourceType: input.sourceType,
+        sourceId: id,
+        title: input.title,
+        severity: input.severity ?? 'MEDIUM',
+        ownerUserId: input.ownerUserId,
+        deadline: input.deadline,
+        by: hub.user.id,
+      });
+      if (input.sourceType === 'FINDING') await this.refreshSource(tx, input);
+      await audit(this.db, tx, hub, {
+        action: 'compliance.action.create',
+        entity: 'action',
+        entityId: a.id,
+        summary: { sourceType: input.sourceType },
+      });
+      const row = await tx.action.findUniqueOrThrow({
+        where: { id: a.id },
+        include: { history: true },
+      });
+      return (await withActionNames(tx, [toActionDto(row)]))[0]!;
     });
   }
 
@@ -595,7 +953,63 @@ export class AuditsController {
         hub.permissions.has('compliance.action.manage') ||
         a?.ownerUserId === hub.user.id;
       if (!a || !allowed) throw notFound();
-      return toActionDto(a);
+      return (await withActionNames(tx, [toActionDto(a)]))[0]!;
+    });
+  }
+
+  @RequirePermission('compliance.action.manage')
+  @Patch('actions/:id')
+  async patchAction(
+    @Hub() hub: HubRequestContext,
+    @Req() req: HubRequest,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<ActionDto> {
+    const expected = ifMatchVersion(req);
+    const input = body(ActionPatch, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const a = await tx.action.findUnique({ where: { id } });
+      if (!a) throw notFound();
+      if (a.status === 'VERIFIED')
+        throw new HubError('CONFLICT', 409, 'A verified action cannot be changed');
+      if (input.deadline && input.deadline < londonDate(new Date()))
+        throw new HubError('VALIDATION_FAILED', 400, 'The deadline is in the past');
+      if (input.ownerUserId) await assertMember(tx, input.ownerUserId);
+      const r = await tx.action.updateMany({
+        where: { id, version: expected },
+        data: {
+          ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
+          ...(input.deadline ? { deadline: day(input.deadline) } : {}),
+        },
+      });
+      if (r.count === 0) throw staleOrNotFound(true);
+      const changes = [
+        input.ownerUserId && input.ownerUserId !== a.ownerUserId ? 'owner changed' : null,
+        input.deadline && input.deadline !== iso(a.deadline)
+          ? `deadline moved from ${iso(a.deadline)} to ${input.deadline}`
+          : null,
+      ].filter(Boolean);
+      await tx.actionHistory.create({
+        data: {
+          organisationId: a.organisationId,
+          actionId: id,
+          fromStatus: a.status,
+          toStatus: a.status,
+          note: `${changes.join('; ') || 'No change'}: ${input.reason}`.slice(0, 2000),
+          byUserId: hub.user.id,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'compliance.action.update',
+        entity: 'action',
+        entityId: id,
+        summary: { owner: !!input.ownerUserId, deadline: !!input.deadline },
+      });
+      const updated = await tx.action.findUniqueOrThrow({
+        where: { id },
+        include: { history: true },
+      });
+      return (await withActionNames(tx, [toActionDto(updated)]))[0]!;
     });
   }
 
@@ -738,6 +1152,9 @@ export class AuditsController {
       ownerUserId: string;
       dueDate: string;
       reauditOf?: string;
+      serviceId?: string;
+      reviewerUserId?: string;
+      recurrenceMonths?: number;
     },
   ) {
     const code = await nextCode(tx, hub.orgId as string, 'AUD');
@@ -748,6 +1165,9 @@ export class AuditsController {
         templateVersionId: i.templateVersionId,
         title: i.title,
         locationId: i.locationId ?? null,
+        serviceId: i.serviceId ?? null,
+        reviewerUserId: i.reviewerUserId ?? null,
+        recurrenceMonths: i.recurrenceMonths ?? null,
         periodFrom: i.periodFrom ? day(i.periodFrom) : null,
         periodTo: i.periodTo ? day(i.periodTo) : null,
         auditorUserId: i.auditorUserId,
@@ -766,10 +1186,12 @@ export class AuditsController {
     return r;
   }
 
+  /** Open for answers while scheduled or in progress, or after a reviewer returned it. */
   private async openRun(tx: TenantTx, id: string) {
     const run = await tx.auditRun.findUnique({ where: { id }, include: { templateVersion: true } });
     if (!run) throw notFound();
-    if (run.status !== 'SCHEDULED' && run.status !== 'IN_PROGRESS')
+    const open = run.status === 'SCHEDULED' || run.status === 'IN_PROGRESS';
+    if (!open && run.reviewState !== 'RETURNED')
       throw new HubError(
         'CONFLICT',
         409,
@@ -779,24 +1201,34 @@ export class AuditsController {
   }
 
   private async tpl(tx: TenantTx, id: string): Promise<AuditTemplateDto> {
-    return tplDto(
-      await tx.auditTemplate.findUniqueOrThrow({
-        where: { id },
-        include: { versions: { orderBy: { version: 'desc' } } },
-      }),
-    );
+    const t = await tx.auditTemplate.findUniqueOrThrow({
+      where: { id },
+      include: { versions: { orderBy: { version: 'desc' } } },
+    });
+    return (await tplDtos(tx, [t]))[0]!;
   }
 
   private async detail(tx: TenantTx, id: string): Promise<AuditRunDetailDto> {
-    const r = await tx.auditRun.findUniqueOrThrow({
+    const r0 = await tx.auditRun.findUniqueOrThrow({
       where: { id },
       include: {
         templateVersion: { include: { template: true } },
         samples: { orderBy: { createdAt: 'asc' } },
         responses: { orderBy: { recordedAt: 'asc' } },
         findings: { orderBy: { controlCode: 'asc' } },
+        reviews: { orderBy: { reviewedAt: 'asc' } },
       },
     });
+    // Findings of the latest submission; earlier ones (before a return) stay in the database.
+    const r = {
+      ...r0,
+      findings: r0.findings.filter((f) => f.submissionNo === Math.max(1, r0.submissionNo)),
+    };
+    const controlList = r.templateVersion.controls as Control[];
+    const reviewers = await userNames(
+      tx,
+      r.reviews.map((x) => x.reviewedBy),
+    );
     const actions = await tx.action.findMany({
       where: { sourceType: 'FINDING', sourceId: { in: r.findings.map((f) => f.id) } },
       include: { history: true },
@@ -810,13 +1242,39 @@ export class AuditsController {
       orderBy: { createdAt: 'desc' },
       take: 3,
     });
+    const recorders = await userNames(
+      tx,
+      r.responses.map((x) => x.recordedBy),
+    );
     return {
-      ...runDto(r),
-      controls: (r.templateVersion.controls as Control[]).map((c) => ({
+      ...(await runDtos(tx, [r]))[0]!,
+      controls: controlList.map((c) => ({
         code: c.code,
         question: c.question,
         critical: !!c.critical,
+        ...(c.guidance ? { guidance: c.guidance } : {}),
+        ...(c.failureAction ? { failureAction: c.failureAction } : {}),
       })),
+      progress: auditProgress(
+        controlList,
+        r.responses.map((x) => x.controlCode),
+      ),
+      overall:
+        r.findings.length > 0
+          ? auditOverallResult(
+              r.findings.map((f) => ({
+                result: f.result as AuditResult,
+                critical: !!controlList.find((c) => c.code === f.controlCode)?.critical,
+              })),
+            )
+          : { result: null, text: 'Not submitted yet' },
+      reviews: r.reviews.map((x) => ({
+        decision: x.decision as 'ACCEPTED' | 'RETURNED',
+        reason: x.reason,
+        byName: reviewers.get(x.reviewedBy) ?? null,
+        at: x.reviewedAt.toISOString(),
+      })),
+      methods: r.templateVersion.methods as AuditRunDetailDto['methods'],
       samples: r.samples.map((s) => ({
         id: s.id,
         populationDesc: s.populationDesc,
@@ -838,6 +1296,7 @@ export class AuditsController {
         method: x.method,
         note: x.note,
         recordedBy: x.recordedBy,
+        recordedByName: recorders.get(x.recordedBy) ?? null,
         recordedAt: x.recordedAt.toISOString(),
       })),
       findings: r.findings.map((f) => ({
@@ -851,7 +1310,10 @@ export class AuditsController {
         severity: f.severity,
         summary: f.summary,
       })),
-      actions: actions.map((a) => toActionDto(a)),
+      actions: await withActionNames(
+        tx,
+        actions.map((a) => toActionDto(a)),
+      ),
     };
   }
 }
@@ -875,9 +1337,17 @@ function versionData(
   };
 }
 
-function tplDto(
-  t: Prisma.AuditTemplateGetPayload<{ include: { versions: true } }>,
-): AuditTemplateDto {
+type TemplateRow = Prisma.AuditTemplateGetPayload<{ include: { versions: true } }>;
+async function tplDtos(tx: TenantTx, rows: TemplateRow[]): Promise<AuditTemplateDto[]> {
+  const names = await userNames(
+    tx,
+    rows.flatMap((t) => t.versions.flatMap((v) => [v.createdBy, v.approvedBy])),
+  );
+  return rows.map((t) => tplDto(t, names));
+}
+
+function tplDto(t: TemplateRow, names: Map<string, string>): AuditTemplateDto {
+  const name = (id: string | null) => (id ? (names.get(id) ?? null) : null);
   return {
     id: t.id,
     code: t.code,
@@ -893,16 +1363,42 @@ function tplDto(
       sampleMethod: v.sampleMethod,
       sampleSize: v.sampleSize,
       methods: v.methods,
+      createdBy: v.createdBy,
+      createdByName: name(v.createdBy),
       approvedBy: v.approvedBy,
+      approvedByName: name(v.approvedBy),
+      approvedAt: v.approvedAt?.toISOString() ?? null,
+      frequency: v.frequency,
+      specialistName: v.specialistName,
+      specialistRole: v.specialistRole,
     })),
+    sectorPack: t.sectorPack,
+    proposedCadence: t.proposedCadence,
+    state: templateState({ active: t.active, retired: !!t.retiredAt, versions: t.versions }),
+    validationNote:
+      needsSpecialist(t.sectorPack) && !t.versions.some((v) => v.specialistName)
+        ? SECTOR_TEMPLATE_NOTE
+        : null,
+    retiredAt: t.retiredAt?.toISOString() ?? null,
+    retiredReason: t.retiredReason,
+    clonedFrom: t.clonedFrom,
   };
 }
 
-function runDto(
-  r: Prisma.AuditRunGetPayload<object> & {
-    templateVersion: { template: { code: string; domain: AuditRunDto['domain'] } };
-  },
-): AuditRunDto {
+type RunRow = Prisma.AuditRunGetPayload<object> & {
+  templateVersion: { template: { code: string; domain: AuditRunDto['domain'] } };
+};
+async function runDtos(tx: TenantTx, rows: RunRow[]): Promise<AuditRunDto[]> {
+  const names = await userNames(
+    tx,
+    rows.flatMap((r) => [r.auditorUserId, r.ownerUserId, r.reviewerUserId]),
+  );
+  const now = new Date();
+  return rows.map((r) => runDto(r, names, now));
+}
+
+function runDto(r: RunRow, names: Map<string, string>, now: Date): AuditRunDto {
+  const due = iso(r.dueDate) as string;
   return {
     id: r.id,
     code: r.code,
@@ -914,13 +1410,22 @@ function runDto(
     periodFrom: iso(r.periodFrom),
     periodTo: iso(r.periodTo),
     auditorUserId: r.auditorUserId,
+    auditorName: names.get(r.auditorUserId) ?? null,
     ownerUserId: r.ownerUserId,
-    dueDate: iso(r.dueDate) as string,
+    ownerName: names.get(r.ownerUserId) ?? null,
+    dueDate: due,
+    overdue: (r.status === 'SCHEDULED' || r.status === 'IN_PROGRESS') && isOverdue(due, now),
     status: r.status,
     outcome: r.outcome,
     outcomeReason: r.outcomeReason,
     submittedAt: r.submittedAt?.toISOString() ?? null,
     reauditOf: r.reauditOf,
+    serviceId: r.serviceId,
+    reviewerUserId: r.reviewerUserId,
+    reviewerName: r.reviewerUserId ? (names.get(r.reviewerUserId) ?? null) : null,
+    recurrenceMonths: r.recurrenceMonths,
+    reviewState: r.reviewState as AuditRunDto['reviewState'],
+    submissionNo: r.submissionNo,
     version: r.version,
   };
 }

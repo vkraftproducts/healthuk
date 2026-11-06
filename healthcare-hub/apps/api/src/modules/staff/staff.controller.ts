@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   Req,
+  StreamableFile,
 } from '@nestjs/common';
 import type { Db, Prisma, TenantTx } from '@hub/db';
 import {
@@ -21,16 +22,41 @@ import {
   staffStatusSummary,
   syncRole,
   syncStaffRequirements,
-  checkingRoles,
-  startRoleChecks,
+  evaluateInstanceDetail,
+  roleChecks,
+  type RoleCheckResult,
 } from '@hub/domain';
-import { allowedTransitions, checkStaffTransition, type StaffLifecycle } from '@hub/rules';
+import {
+  allowedTransitions,
+  addDays,
+  checkStaffTransition,
+  driverEligibility,
+  endOfLondonDay,
+  londonDate,
+  matrixCellState,
+  matrixCellText,
+  matrixRowHasGap,
+  startOfLondonDay,
+  unexplainedGaps,
+  type EmploymentEntry,
+  needsSchedule3,
+  schedule3Blockers,
+  schedule3Checks,
+  schedule3ItemsFor,
+  summariseMatrixColumn,
+  type Schedule3Item,
+  type StaffLifecycle,
+} from '@hub/rules';
 import {
   CloseInput,
   CorrectionDecision,
   CorrectionInput,
+  DriverEligibilityQuery,
+  MatrixQuery,
   RECORD_SLUGS,
   ReadinessQuery,
+  ReadinessWindowQuery,
+  type ReadinessWindowDto,
   RecordCreate,
   RecordPayloads,
   RestrictionInput,
@@ -39,10 +65,14 @@ import {
   SENSITIVE_RECORD_KINDS,
   StaffCreate,
   StaffListQuery,
+  StaffRole,
+  StartRoleChecksInput,
   StaffPatch,
   TransitionInput,
   type CorrectionDto,
+  type DriverEligibilityDto,
   type MatrixDto,
+  type Schedule3Dto,
   type MyStaffDto,
   type ReadinessDto,
   type RecordKind,
@@ -51,7 +81,6 @@ import {
   type StaffDetailDto,
   type StaffDto,
   type StaffRecordDto,
-  RoleCheckInput,
 } from '@hub/contracts';
 import { CONFIG, type AppConfig } from '../../config.js';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
@@ -60,7 +89,10 @@ import { audit, body, dbNow, ifMatchVersion, staleOrNotFound } from '../../commo
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { encryptField, fieldKey } from '../../common/field-crypto.js';
 import { DB } from '../../db.provider.js';
+import { UserCache } from '../../auth/user-cache.js';
+import { toCsv } from '../../common/csv.js';
 import { instanceInclude, toDate, toInstanceDto } from '../requirements/requirements.mapper.js';
+import { flagFutureShifts } from './control-flags.js';
 import {
   derivedValidity,
   restrictionDto,
@@ -69,7 +101,6 @@ import {
   toCorrectionDto,
   toRecordDto,
   toStaffDto,
-  userIdsIn,
 } from './staff.mapper.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
@@ -79,19 +110,6 @@ const SENSITIVE = 'staff.sensitive.view';
 
 function requireAny(hub: HubRequestContext, ...keys: string[]): void {
   if (!keys.some((k) => hub.permissions.has(k))) throw new HubError('FORBIDDEN', 403);
-}
-
-/**
- * Names of the colleagues records mention. Only people who are (or were) members of this
- * organisation are found (row-level security), and only their display names are returned.
- */
-async function namesOf(tx: TenantTx, ids: string[]): Promise<Map<string, string>> {
-  if (ids.length === 0) return new Map();
-  const rows = await tx.membership.findMany({
-    where: { userId: { in: [...new Set(ids)] } },
-    select: { user: { select: { id: true, displayName: true } } },
-  });
-  return new Map(rows.map((m) => [m.user.id, m.user.displayName]));
 }
 
 function kindOf(slug: string): RecordKind {
@@ -121,6 +139,7 @@ export class StaffController {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(CONFIG) config: AppConfig,
+    @Inject(UserCache) private readonly cache: UserCache,
   ) {
     this.key = fieldKey(config.FIELD_ENCRYPTION_KEY);
   }
@@ -214,6 +233,9 @@ export class StaffController {
           managerStaffId: input.managerStaffId ?? null,
           jobTitle: input.jobTitle ?? null,
           workingPattern: input.workingPattern ?? null,
+          workEmail: input.workEmail ?? null,
+          startDate: input.startDate ? toDate(input.startDate) : null,
+          contractType: input.contractType ?? null,
           createdBy: hub.user.id,
           updatedBy: hub.user.id,
         },
@@ -437,10 +459,15 @@ export class StaffController {
   @RequirePermission(BASIC)
   @Get('training-matrix')
   async matrix(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<MatrixDto> {
-    const f = body(StaffListQuery.pick({ locationId: true, role: true }), q);
+    const f = body(MatrixQuery, q);
     const now = new Date();
     return this.db.withTenant(tenantOf(hub), async (tx) => {
-      const map = await tx.roleRequirement.findMany({ where: f.role ? { role: f.role } : {} });
+      const map = await tx.roleRequirement.findMany({
+        where: {
+          ...(f.role ? { role: f.role } : {}),
+          ...(f.templateId ? { templateId: f.templateId } : {}),
+        },
+      });
       const templateIds = [...new Set(map.map((m) => m.templateId))];
       const templates = await tx.requirementTemplate.findMany({
         where: { id: { in: templateIds } },
@@ -452,8 +479,10 @@ export class StaffController {
           ...(f.locationId ? { primaryLocationId: f.locationId } : {}),
         },
         orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
-        take: 500,
+        take: 501,
       });
+      const truncated = staff.length > 500;
+      if (truncated) staff.pop();
       const instances = await tx.requirementInstance.findMany({
         where: {
           subjectType: 'STAFF',
@@ -472,30 +501,77 @@ export class StaffController {
           const required = new Set(
             map.filter((m) => roles.includes(m.role)).map((m) => m.templateId),
           );
+          const cells = templates.map((t) => {
+            const i = instances.find((x) => x.subjectId === s.id && x.templateId === t.id);
+            const next = i ? (i.dueDate ?? i.expiryDate ?? i.reviewDate) : null;
+            const status = i ? i.status : null;
+            const nextDate = next ? next.toISOString().slice(0, 10) : null;
+            const state = matrixCellState({
+              required: required.has(t.id),
+              status,
+              reasonCode: i?.reasonCode ?? null,
+            });
+            return {
+              templateId: t.id,
+              required: required.has(t.id),
+              instanceId: i?.id ?? null,
+              status,
+              state,
+              text: matrixCellText(state, nextDate),
+              reasonText: i ? i.reasonText : null,
+              nextDate,
+            };
+          });
           return {
             staffId: s.id,
             staffNo: s.staffNo,
             displayName: s.displayName,
             roles: roles as MatrixDto['rows'][number]['roles'],
-            cells: templates.map((t) => {
-              const i = instances.find((x) => x.subjectId === s.id && x.templateId === t.id);
-              const next = i ? (i.dueDate ?? i.expiryDate ?? i.reviewDate) : null;
-              return {
-                templateId: t.id,
-                required: required.has(t.id),
-                instanceId: i?.id ?? null,
-                status: i ? i.status : null,
-                reasonText: i ? i.reasonText : null,
-                nextDate: next ? next.toISOString().slice(0, 10) : null,
-              };
-            }),
+            hasGap: matrixRowHasGap(cells.map((c) => c.state)),
+            cells,
           };
         })
-        .filter((r) => !f.role || r.roles.includes(f.role));
+        .filter((r) => !f.role || r.roles.includes(f.role))
+        .filter((r) => !f.gapsOnly || r.hasGap);
       return {
-        columns: templates.map((t) => ({ templateId: t.id, code: t.code, title: t.title })),
+        columns: templates.map((t, n) => ({
+          templateId: t.id,
+          code: t.code,
+          title: t.title,
+          roles: [
+            ...new Set(map.filter((m) => m.templateId === t.id).map((m) => m.role)),
+          ].sort() as MatrixDto['rows'][number]['roles'],
+          summary: summariseMatrixColumn(rows.map((r) => r.cells[n]!.state)),
+        })),
         rows,
+        truncated,
       };
+    });
+  }
+
+  /** C1: the matrix as CSV, in words (never colours). The export is logged. */
+  @RequirePermission(BASIC)
+  @Get('training-matrix/export')
+  async exportMatrix(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<StreamableFile> {
+    const m = await this.matrix(hub, q);
+    const header = ['Staff number', 'Name', 'Roles', ...m.columns.map((c) => c.title)];
+    const rows = m.rows.map((r) => [
+      r.staffNo,
+      r.displayName,
+      r.roles.join(' '),
+      ...r.cells.map((c) => c.text ?? ''),
+    ]);
+    await this.db.withTenant(tenantOf(hub), (tx) =>
+      audit(this.db, tx, hub, {
+        action: 'staff.matrix.export',
+        entity: 'organisation',
+        entityId: hub.orgId as string,
+        summary: { rows: rows.length, columns: m.columns.length },
+      }),
+    );
+    return new StreamableFile(Buffer.from(toCsv(header, rows), 'utf8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: 'attachment; filename="training-matrix.csv"',
     });
   }
 
@@ -530,9 +606,16 @@ export class StaffController {
     const input = body(StaffPatch, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       await this.assertRefs(tx, hub, { ...input, selfId: id });
+      const { startDate, ...rest } = input;
       const r = await tx.staff.updateMany({
         where: { id, version: expected },
-        data: { ...input, updatedBy: hub.user.id },
+        data: {
+          ...rest,
+          ...(startDate !== undefined
+            ? { startDate: startDate === null ? null : toDate(startDate) }
+            : {}),
+          updatedBy: hub.user.id,
+        },
       });
       if (r.count === 0) throw staleOrNotFound((await tx.staff.count({ where: { id } })) > 0);
       if (input.primaryLocationId) {
@@ -580,8 +663,32 @@ export class StaffController {
         throw new HubError(
           'TRANSITION_NOT_ALLOWED',
           422,
-          `Cannot move from ${s.lifecycleState} to ${input.to}`,
+          `Cannot move from ${lifecycleLabel(s.lifecycleState)} to ${lifecycleLabel(input.to)}`,
         );
+      // B1 steps 5 and 7: nobody becomes ready, approved or active with unverified checks.
+      if (input.to === 'READY_FOR_REVIEW') {
+        const open = await openStaffItems(tx, id, now);
+        if (open.total === 0)
+          throw new HubError(
+            'TRANSITION_NOT_ALLOWED',
+            422,
+            'Start checks for at least one role before moving to Ready for review.',
+          );
+        if (open.blockers.length > 0)
+          throw new HubError(
+            'TRANSITION_NOT_ALLOWED',
+            422,
+            `${open.blockers.length} required check${open.blockers.length === 1 ? ' is' : 's are'} not verified yet.`,
+            open.blockers,
+          );
+      }
+      if (input.to === 'APPROVED_FOR_ROLE' || input.to === 'ACTIVE') {
+        for (const role of await activeRoles(tx, id, now)) {
+          const c = await roleChecks(tx, id, role, hub.user.id, now, { create: false });
+          if (!c.setUp) throw notSetUp(role);
+          if (c.blockers.length > 0) throw notVerified(role, c);
+        }
+      }
       await tx.staffLifecycleEvent.create({
         data: {
           organisationId: s.organisationId,
@@ -596,20 +703,49 @@ export class StaffController {
         where: { id },
         data: { lifecycleState: input.to, updatedBy: hub.user.id },
       });
-      if (input.to === 'LEAVER' && s.userId) {
-        // Leavers lose access immediately (SEC: joiner/mover/leaver).
-        await tx.membership.updateMany({
-          where: { userId: s.userId, validTo: null },
-          data: { validTo: await dbNow(tx), updatedBy: hub.user.id },
-        });
+      let flagged = 0;
+      if (input.to === 'LEAVER') {
+        if (s.userId) {
+          // B6: sign-in and mobile access end now, or at the end of a later last working day.
+          // History (authorship, records) is kept.
+          const dbTime = await dbNow(tx);
+          const endsAt =
+            input.lastWorkingDay && input.lastWorkingDay > londonDate(now)
+              ? endOfLondonDay(input.lastWorkingDay)
+              : dbTime;
+          await tx.$executeRaw`
+            UPDATE membership
+            SET valid_to = greatest(${endsAt}::timestamptz, valid_from + interval '1 millisecond'),
+                updated_by = ${hub.user.id}::uuid
+            WHERE user_id = ${s.userId}::uuid
+              AND (valid_to IS NULL OR valid_to > ${endsAt}::timestamptz)`;
+          if (endsAt.getTime() <= dbTime.getTime()) {
+            await tx.deviceSession.updateMany({
+              where: { userId: s.userId, revokedAt: null },
+              data: { revokedAt: dbTime },
+            });
+            // Local sign-in sessions end too; a later last day is caught at the next refresh.
+            await tx.$queryRaw`SELECT revoke_local_refresh_tokens(${s.userId}::uuid, 'ACCESS_ENDED')`;
+          }
+        }
+        flagged = await flagFutureShifts(tx, s.organisationId, id, 'LEFT');
       }
+      if (input.to === 'SUSPENDED')
+        flagged = await flagFutureShifts(tx, s.organisationId, id, 'SUSPENDED');
       if (input.to === 'ACTIVE') await syncStaffRequirements(tx, id, hub.user.id, now);
       await audit(this.db, tx, hub, {
         action: 'staff.lifecycle.transition',
         entity: 'staff',
         entityId: id,
-        summary: { from: s.lifecycleState, to: input.to },
+        summary: {
+          from: s.lifecycleState,
+          to: input.to,
+          reason: input.reason,
+          ...(input.lastWorkingDay ? { lastWorkingDay: input.lastWorkingDay } : {}),
+          ...(flagged ? { futureBookingsFlagged: flagged } : {}),
+        },
       });
+      if (input.to === 'LEAVER' && s.userId) this.cache.evictUser(s.userId);
       return this.dto(tx, id);
     });
   }
@@ -643,6 +779,186 @@ export class StaffController {
     });
   }
 
+  /**
+   * B9: readiness for every approved role across a period of UK dates (start of the first day to
+   * the end of the last), each check with its reason, e.g. a photocard expiring mid-period.
+   */
+  @OrgMember()
+  @Get(':id/readiness-window')
+  async readinessWindow(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Query() q: unknown,
+  ): Promise<ReadinessWindowDto> {
+    requireAny(hub, BASIC, CLEARANCE);
+    const f = body(ReadinessWindowQuery, q);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.staff.count({ where: { id } }))) throw notFound();
+      const now = new Date();
+      const roles = await activeRoles(tx, id, now);
+      const window = { start: startOfLondonDay(f.from), end: endOfLondonDay(f.to) };
+      const out: ReadinessWindowDto['roles'] = [];
+      for (const role of roles) {
+        const r = await staffReadinessFor(tx, {
+          staffId: id,
+          role: role as ReadinessDto['role'],
+          window,
+          competencies: [],
+          now,
+        });
+        out.push({ role: role as ReadinessDto['role'], state: r.state, checks: r.checks });
+      }
+      return { staffId: id, from: f.from, to: f.to, hasRoles: roles.length > 0, roles: out };
+    });
+  }
+
+  /**
+   * B1 step 2: what a role needs from this person, each item's live status, and what still blocks
+   * approval. Read-only: nothing is created.
+   */
+  @RequirePermission('staff.profile.manage')
+  @Get(':id/role-checks/:role')
+  async getRoleChecks(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Param('role') role: string,
+  ): Promise<RoleCheckResult> {
+    const r = body(StaffRole, role);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.staff.findUnique({ where: { id } }))) throw notFound();
+      return roleChecks(tx, id, r, hub.user.id, new Date(), { create: false });
+    });
+  }
+
+  /**
+   * Task 18: the Schedule 3 (reg 19) information held for this person, item by item. An item is
+   * complete only when it is recorded and a requirement covering it has evidence verified by a
+   * second person. Reads DBS details, so it needs the sensitive permission and is audited.
+   */
+  @RequirePermission('staff.profile.manage', SENSITIVE)
+  @Get(':id/schedule-3')
+  async schedule3(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+  ): Promise<Schedule3Dto> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.staff.count({ where: { id } }))) throw notFound();
+      const now = new Date();
+      const asOf = londonDate(now);
+      const items = await this.schedule3Items(tx, id, now);
+      await audit(this.db, tx, hub, {
+        action: 'staff.schedule_three.view',
+        entity: 'staff',
+        entityId: id,
+        summary: { complete: items.every((x) => x.state === 'COMPLETE') },
+      });
+      return {
+        staffId: id,
+        asOf,
+        complete: items.every((x) => x.state === 'COMPLETE'),
+        items,
+      };
+    });
+  }
+
+  /** Task 18: whether this person may drive a vehicle needing a licence category, and why. */
+  @OrgMember()
+  @Get(':id/driver-eligibility')
+  async driverEligibility(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Query() q: unknown,
+  ): Promise<DriverEligibilityDto> {
+    requireAny(hub, BASIC, CLEARANCE);
+    const f = body(DriverEligibilityQuery, q);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.staff.count({ where: { id } }))) throw notFound();
+      const now = new Date();
+      const lic = await tx.staffRecord.findFirst({
+        where: { staffId: id, kind: 'LICENCE', supersededBy: null },
+        include: { supersededBy: { select: { id: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const data = lic ? (toRecordDto(lic, this.key).data as Record<string, unknown>) : null;
+      const instances = await tx.requirementInstance.findMany({
+        where: { subjectType: 'STAFF', subjectId: id },
+        include: { template: { select: { code: true, title: true } } },
+      });
+      let licenceVerified = false;
+      for (const i of instances) {
+        const isLicence =
+          /LICEN[CS]E|DRIV/.test(i.template.code) || /driving licen[cs]e/i.test(i.template.title);
+        if (!isLicence) continue;
+        const { result } = await evaluateInstanceDetail(tx, i.id, now);
+        if (result.currentlyVerified && result.status !== 'RED') licenceVerified = true;
+      }
+      const asOf = londonDate(now);
+      const r = driverEligibility({
+        licence: data
+          ? {
+              categories: (data.categories as string[]) ?? [],
+              photocardExpiry: data.photocardExpiry as string,
+              lastCheckedOn: data.lastCheckedOn as string,
+              penaltyPoints: Number(data.penaltyPoints ?? 0),
+            }
+          : null,
+        licenceVerified,
+        roleApproved: (await activeRoles(tx, id, now)).includes('DRIVER'),
+        noDrivingRestriction: (await activeRestrictions(tx, id, now)).some(
+          (x) => x.type === 'NO_DRIVING',
+        ),
+        category: f.category,
+        asOf,
+      });
+      if (!hub.permissions.has('staff.profile.manage') && !hub.permissions.has(SENSITIVE))
+        r.checks = r.checks.filter((c) => c.code !== 'PENALTY_POINTS');
+      return { staffId: id, category: f.category, asOf, ...r };
+    });
+  }
+
+  /** B1 step 2: start checks for a role, creating the person's requirements as "awaiting evidence". */
+  @RequirePermission('staff.profile.manage')
+  @Post(':id/role-checks')
+  async startRoleChecks(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<RoleCheckResult> {
+    const input = body(StartRoleChecksInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const s = await tx.staff.findUnique({ where: { id } });
+      if (!s) throw notFound();
+      if (s.lifecycleState === 'LEAVER')
+        throw new HubError('TRANSITION_NOT_ALLOWED', 422, 'This person has left.');
+      const now = new Date();
+      const r = await roleChecks(tx, id, input.role, hub.user.id, now, { create: true });
+      if (!r.setUp) throw notSetUp(input.role);
+      if (s.lifecycleState === 'CANDIDATE') {
+        await tx.staffLifecycleEvent.create({
+          data: {
+            organisationId: s.organisationId,
+            staffId: id,
+            fromState: s.lifecycleState,
+            toState: 'CHECKS_IN_PROGRESS',
+            reason: `Checks started for ${roleLabel(input.role)}`,
+            actorUserId: hub.user.id,
+          },
+        });
+        await tx.staff.update({
+          where: { id },
+          data: { lifecycleState: 'CHECKS_IN_PROGRESS', updatedBy: hub.user.id },
+        });
+      }
+      await audit(this.db, tx, hub, {
+        action: 'staff.role.checks_started',
+        entity: 'staff',
+        entityId: id,
+        summary: { role: input.role, items: r.items.length },
+      });
+      return r;
+    });
+  }
+
   @RequirePermission('staff.approve_role')
   @Post(':id/role-approvals')
   async approveRole(
@@ -659,10 +975,47 @@ export class StaffController {
         })
       )
         throw new HubError('CONFLICT', 409, 'Already approved for this role');
-      await this.assertRoleChecksComplete(tx, hub, id, input.role);
       const now = new Date();
       if (input.validTo && new Date(input.validTo) <= now)
-        throw new HubError('VALIDATION_FAILED', 400, 'validTo must be in the future');
+        throw new HubError('VALIDATION_FAILED', 400, 'The end date must be in the future');
+      if (s.lifecycleState === 'SUSPENDED')
+        throw new HubError(
+          'TRANSITION_NOT_ALLOWED',
+          422,
+          'This person is suspended and cannot be approved for a role.',
+        );
+      // Reg 19 / Schedule 3 gate (B1 step 6): every requirement the role needs must be verified.
+      const checks = await roleChecks(tx, id, input.role, hub.user.id, now, { create: true });
+      if (!checks.setUp) throw notSetUp(input.role);
+      if (checks.blockers.length > 0) throw notVerified(input.role, checks);
+      // Two-person rule: the approver cannot be the only person who verified the evidence.
+      const verifiers = await verifiersFor(
+        tx,
+        checks.items.map((x) => x.instanceId),
+      );
+      if (verifiers.size > 0 && [...verifiers].every((v) => v === hub.user.id))
+        throw new HubError(
+          'FOUR_EYES_REQUIRED',
+          422,
+          'You verified every check for this role yourself. A different person must approve it.',
+        );
+      // Reg 19 / Schedule 3: a role carrying on the regulated activity also needs the staff file.
+      if (needsSchedule3(input.role)) {
+        const missing = schedule3Blockers(await this.schedule3Items(tx, id, now));
+        if (missing.length > 0)
+          throw new HubError(
+            'TRANSITION_NOT_ALLOWED',
+            422,
+            `${roleLabel(input.role)} cannot be approved yet: the Schedule 3 staff file is ` +
+              `incomplete (${missing.length} item${missing.length === 1 ? '' : 's'}).`,
+            missing.map((m) => ({
+              code: `SCHEDULE3_${m.item}`,
+              title: m.title,
+              status: m.status,
+              reasonText: m.reasonText,
+            })),
+          );
+      }
       const a = await tx.staffRoleApproval.create({
         data: {
           organisationId: s.organisationId,
@@ -683,98 +1036,6 @@ export class StaffController {
       });
       return roleApprovalDto(a, now);
     });
-  }
-
-  /** B1: start checks for a role. Its requirements appear, each awaiting evidence. */
-  @RequirePermission('staff.profile.manage')
-  @Post(':id/role-checks')
-  async startChecks(
-    @Hub() hub: HubRequestContext,
-    @Param('id', idPipe) id: string,
-    @Body() raw: unknown,
-  ): Promise<{ role: string; requirementsCreated: number }> {
-    const input = body(RoleCheckInput, raw);
-    return this.db.withTenant(tenantOf(hub), async (tx) => {
-      const s = await this.subjectForChange(tx, hub, id);
-      if (!(await tx.staffRoleCheck.findFirst({ where: { staffId: id, role: input.role } })))
-        await tx.staffRoleCheck.create({
-          data: {
-            organisationId: s.organisationId,
-            staffId: id,
-            role: input.role,
-            startedBy: hub.user.id,
-          },
-        });
-      const created = await startRoleChecks(tx, id, input.role, hub.user.id, new Date());
-      await audit(this.db, tx, hub, {
-        action: 'staff.role.checks_start',
-        entity: 'staff',
-        entityId: id,
-        summary: { role: input.role, requirementsCreated: created.length },
-      });
-      return { role: input.role, requirementsCreated: created.length };
-    });
-  }
-
-  /**
-   * B1: a role can be approved only when every requirement it needs is verified and in date
-   * (or approved as not applicable), and not by someone who verified every one of them alone.
-   * Roles with no requirements set up have nothing to check.
-   */
-  private async assertRoleChecksComplete(
-    tx: TenantTx,
-    hub: HubRequestContext,
-    staffId: string,
-    role: string,
-  ): Promise<void> {
-    const { required } = await requiredTemplates(tx, [role]);
-    if (required.size === 0) return;
-    const templates = await tx.requirementTemplate.findMany({
-      where: { id: { in: [...required] } },
-      select: { id: true, title: true },
-    });
-    const instances = await tx.requirementInstance.findMany({
-      where: { subjectType: 'STAFF', subjectId: staffId, templateId: { in: [...required] } },
-      select: {
-        id: true,
-        templateId: true,
-        status: true,
-        currentlyVerified: true,
-        applicability: true,
-      },
-    });
-    const done = (i: (typeof instances)[number]) =>
-      i.applicability === 'APPROVED_NOT_APPLICABLE' || (i.currentlyVerified && i.status !== 'RED');
-    const missing = templates.filter((t) => {
-      const i = instances.find((x) => x.templateId === t.id);
-      return !i || !done(i);
-    });
-    if (missing.length > 0)
-      throw new HubError(
-        'VALIDATION_FAILED',
-        422,
-        `Not every requirement for this role is verified: ${missing.map((t) => t.title).join(', ')}. Start checks for the role, then verify each item.`,
-        missing.map((t) => ({ code: t.id, result: 'FAIL', reasonText: t.title })),
-      );
-    const reviewers: string[] = [];
-    for (const i of instances) {
-      if (i.applicability === 'APPROVED_NOT_APPLICABLE') continue;
-      const v = await tx.verification.findFirst({
-        where: {
-          decision: 'ACCEPTED',
-          evidenceVersion: { item: { links: { some: { instanceId: i.id } } } },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { reviewerId: true },
-      });
-      if (v) reviewers.push(v.reviewerId);
-    }
-    if (reviewers.length > 0 && reviewers.every((r) => r === hub.user.id))
-      throw new HubError(
-        'FOUR_EYES_REQUIRED',
-        422,
-        'You verified every item for this role yourself, so someone else must approve it',
-      );
   }
 
   @RequirePermission('staff.approve_role')
@@ -832,11 +1093,13 @@ export class StaffController {
           validTo: input.validTo ? new Date(input.validTo) : null,
         },
       });
+      // B4: affected future shifts are flagged to control; the alert never says why.
+      const flagged = await flagFutureShifts(tx, s.organisationId, id, 'RESTRICTED');
       await audit(this.db, tx, hub, {
         action: 'staff.restriction.apply',
         entity: 'staff_restriction',
         entityId: r.id,
-        summary: { staffId: id, type: input.type },
+        summary: { staffId: id, type: input.type, futureBookingsFlagged: flagged },
       });
       return restrictionDto(r, now);
     });
@@ -898,11 +1161,21 @@ export class StaffController {
           entityId: id,
           summary: { kind },
         });
-      const names = await namesOf(
-        tx,
-        rows.flatMap((r) => userIdsIn(r.data)),
-      );
-      return { data: rows.map((r) => toRecordDto(r, this.key, names)) };
+      // Penalty points are HR detail: only people who manage the record or hold the sensitive
+      // permission see them, so an external auditor does not (finding 91).
+      const seesPoints =
+        hub.permissions.has('staff.profile.manage') || hub.permissions.has(SENSITIVE);
+      return {
+        data: rows.map((r) => {
+          const d = toRecordDto(r, this.key);
+          if (kind !== 'LICENCE' || seesPoints) return d;
+          const data = { ...(d.data as Record<string, unknown>) };
+          delete data.penaltyPoints;
+          if (typeof data.licenceNumber === 'string')
+            data.licenceNumber = `••••${data.licenceNumber.slice(-4)}`;
+          return { ...d, data };
+        }),
+      };
     });
   }
 
@@ -928,8 +1201,11 @@ export class StaffController {
         400,
         'A satisfactory reference needs the date it was received',
       );
+    recordRules(kind, data);
     if (kind === 'DBS')
       data.certificateNumber = encryptField(data.certificateNumber as string, this.key);
+    if (kind === 'LICENCE' && typeof data.licenceNumber === 'string')
+      data.licenceNumber = encryptField(data.licenceNumber, this.key);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const s = await this.subjectForChange(tx, hub, id);
       if (input.supersedesId) {
@@ -953,10 +1229,54 @@ export class StaffController {
         'supervisorUserId',
         'appraiserUserId',
         'signedOffByUserId',
+        'confirmedByUserId',
+        'phoneVerifiedByUserId',
+        'alternativeApprovedByUserId',
+        'riskDecisionByUserId',
       ]) {
         const uid = data[k];
         if (typeof uid === 'string' && !(await tx.membership.count({ where: { userId: uid } })))
           throw new HubError('VALIDATION_FAILED', 400, `${k} is not a member of this organisation`);
+      }
+      // Nobody approves or decides on their own record.
+      for (const k of ['alternativeApprovedByUserId', 'riskDecisionByUserId']) {
+        if (s.userId && data[k] === s.userId) throw new HubError('SELF_APPROVAL', 422);
+      }
+      // The decision on a DBS disclosure and an alternative reference is a manager's call.
+      for (const k of ['alternativeApprovedByUserId', 'riskDecisionByUserId']) {
+        const uid = data[k];
+        if (typeof uid !== 'string') continue;
+        const roles = await tx.membership.findMany({
+          where: { userId: uid, OR: [{ validTo: null }, { validTo: { gt: new Date() } }] },
+          select: { role: { select: { key: true } } },
+        });
+        if (!roles.some((m) => DECISION_ROLES.includes(m.role.key)))
+          throw new HubError(
+            'VALIDATION_FAILED',
+            400,
+            'The decision must be made by the registered manager, a director or the HR lead',
+          );
+      }
+      if (kind === 'EMPLOYMENT_HISTORY' && !data.gapExplanation) {
+        const earlier = await tx.staffRecord.findMany({
+          where: { staffId: id, kind: 'EMPLOYMENT_HISTORY', supersededBy: null },
+          select: { id: true, data: true },
+        });
+        const history = [
+          ...earlier
+            .filter((r) => r.id !== input.supersedesId)
+            .map((r) => r.data as unknown as EmploymentEntry),
+          data as unknown as EmploymentEntry,
+        ].sort((a, b) => a.from.localeCompare(b.from));
+        const before = addDays(data.from as string, -1);
+        const gap = unexplainedGaps(history).find((g) => g.to === before);
+        if (gap)
+          throw new HubError(
+            'VALIDATION_FAILED',
+            400,
+            `There is a gap of more than 3 months before this job (${gap.from} to ${gap.to}). ` +
+              'Explain the gap in writing.',
+          );
       }
       const r = await tx.staffRecord.create({
         data: {
@@ -978,7 +1298,7 @@ export class StaffController {
         entityId: r.id,
         summary: { staffId: id, kind, supersedesId: input.supersedesId ?? null },
       });
-      return toRecordDto(r, this.key, await namesOf(tx, userIdsIn(r.data)));
+      return toRecordDto(r, this.key);
     });
   }
 
@@ -1038,7 +1358,46 @@ export class StaffController {
     const now = new Date();
     const sum = (await staffStatusSummary(tx, [id], now)).get(id)!;
     const restr = (await activeRestrictions(tx, id, now)).map((r) => r.type);
-    return toStaffDto(s, sum, restr);
+    const [loc, manager] = await Promise.all([
+      tx.location.findUnique({ where: { id: s.primaryLocationId }, select: { name: true } }),
+      s.managerStaffId
+        ? tx.staff.findUnique({ where: { id: s.managerStaffId }, select: { displayName: true } })
+        : null,
+    ]);
+    return toStaffDto(s, sum, restr, {
+      location: loc?.name ?? null,
+      manager: manager?.displayName ?? null,
+    });
+  }
+
+  /**
+   * The Schedule 3 items for one person: what is recorded, and whether a requirement covering
+   * each item has evidence verified by a second person.
+   */
+  private async schedule3Items(tx: TenantTx, id: string, now: Date) {
+    const rows = await tx.staffRecord.findMany({
+      where: { staffId: id, supersededBy: null },
+      include: { supersededBy: { select: { id: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const records = rows.map((r) => toRecordDto(r, this.key));
+    const instances = await tx.requirementInstance.findMany({
+      where: { subjectType: 'STAFF', subjectId: id },
+      include: { template: { select: { code: true, title: true } } },
+    });
+    const evidence: Partial<Record<Schedule3Item, { title: string; verified: boolean }>> = {};
+    for (const i of instances) {
+      const items = schedule3ItemsFor(i.template.code, i.template.title);
+      if (items.length === 0) continue;
+      const { result } = await evaluateInstanceDetail(tx, i.id, now);
+      if (result.status === 'NOT_APPLICABLE') continue;
+      for (const item of items) {
+        const prior = evidence[item];
+        if (!prior || (!prior.verified && result.currentlyVerified))
+          evidence[item] = { title: i.template.title, verified: result.currentlyVerified };
+      }
+    }
+    return schedule3Checks({ records, asOf: londonDate(now), evidence });
   }
 
   private async detail(tx: TenantTx, id: string): Promise<StaffDetailDto> {
@@ -1061,11 +1420,130 @@ export class StaffController {
         actorUserId: e.actorUserId,
         at: e.at.toISOString(),
       })),
-      requirements: await this.requirements(tx, id, [
-        ...base.roles,
-        ...((await checkingRoles(tx, [id])).get(id) ?? []),
-      ]),
+      requirements: await this.requirements(tx, id, base.roles),
       allowedTransitions: [...allowedTransitions(base.lifecycleState as StaffLifecycle)],
     };
   }
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  DRIVER: 'Driver',
+  CARE_ASSISTANT: 'Care assistant',
+  EMERGENCY_CARE_ASSISTANT: 'Emergency care assistant',
+  TECHNICIAN: 'Technician',
+  PARAMEDIC: 'Paramedic',
+  NURSE: 'Nurse',
+  CONTROL_ROOM: 'Control room',
+  MANAGER: 'Manager',
+  OTHER: 'Other',
+  DENTIST: 'Dentist',
+  DENTAL_NURSE: 'Dental nurse',
+  RECEPTIONIST: 'Receptionist',
+  SENIOR_CARER: 'Senior carer',
+  ACTIVITIES_COORDINATOR: 'Activities coordinator',
+};
+const roleLabel = (r: string) => ROLE_LABELS[r] ?? r;
+/** Roles that may decide on a DBS disclosure or approve an alternative reference (B1). */
+const DECISION_ROLES = ['REGISTERED_MANAGER', 'DIRECTOR', 'HR_LEAD'];
+
+/**
+ * Cross-field rules for record forms (B1). Kept out of the zod payloads so the web form can still
+ * be generated from their shape.
+ */
+function recordRules(kind: RecordKind, d: Record<string, unknown>): void {
+  const fail = (m: string) => {
+    throw new HubError('VALIDATION_FAILED', 400, m);
+  };
+  if (kind === 'REFERENCE') {
+    if (d.alternativeApprovedByUserId && !d.alternativeRationale)
+      fail('Say why the alternative to a second reference was accepted');
+    if (d.coversFrom && d.coversTo && String(d.coversTo) < String(d.coversFrom))
+      fail('The dates the reference covers end before they start');
+  }
+  if (kind === 'DBS') {
+    if (d.disclosure === 'INFORMATION_DISCLOSED' && d.riskDecision === 'CLEAR')
+      fail('The certificate discloses information, so the decision cannot be "clear"');
+    if (d.disclosure === 'INFORMATION_DISCLOSED' && d.riskDecision !== 'PENDING') {
+      if (!d.riskDecisionByUserId) fail('Name the manager who made the risk decision');
+      if (!d.riskAssessmentSummary) fail('Record the risk assessment behind the decision');
+    }
+    if (d.updateServiceSubscribed && !d.updateServiceConsent)
+      fail('Update Service checks need the person’s consent');
+  }
+  if (kind === 'RIGHT_TO_WORK') {
+    if (d.outcome === 'TIME_LIMITED' && !d.permissionEndsOn)
+      fail('A time-limited right to work needs the date the permission ends');
+    // The follow-up reminder defaults to four weeks before the permission ends.
+    if (d.permissionEndsOn && !d.followUpOn)
+      d.followUpOn = addDays(d.permissionEndsOn as string, -28);
+    if (d.followUpOn && d.permissionEndsOn && String(d.followUpOn) > String(d.permissionEndsOn))
+      fail('The follow-up check must be on or before the date the permission ends');
+  }
+  if (kind === 'LICENCE' && d.emergencyDriverQualified && !d.emergencyDriverExpiresOn)
+    fail('Add the expiry date of the emergency response driver qualification');
+  if (kind === 'IDENTITY' && d.photoMatches !== true && d.photoMatches !== false)
+    fail('Confirm whether the photograph matches the person');
+}
+const lifecycleLabel = (s: string) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, ' ');
+
+function notSetUp(role: string) {
+  return new HubError(
+    'TRANSITION_NOT_ALLOWED',
+    422,
+    `${roleLabel(role)} has no requirements set up. Set them up in Settings, Requirement library first`,
+  );
+}
+
+function notVerified(role: string, r: RoleCheckResult) {
+  return new HubError(
+    'TRANSITION_NOT_ALLOWED',
+    422,
+    `${roleLabel(role)} cannot be approved yet: ${r.blockers.length} required check${r.blockers.length === 1 ? ' is' : 's are'} not verified.`,
+    r.blockers.map((b) => ({
+      code: b.code,
+      title: b.title,
+      status: b.status,
+      reasonText: b.reasonText,
+    })),
+  );
+}
+
+/** Reviewers of the currently accepted evidence on these requirement instances. */
+async function verifiersFor(tx: TenantTx, instanceIds: string[]): Promise<Set<string>> {
+  if (instanceIds.length === 0) return new Set();
+  const links = await tx.evidenceLink.findMany({
+    where: { instanceId: { in: instanceIds } },
+    select: { itemId: true },
+  });
+  const v = await tx.verification.findMany({
+    where: {
+      decision: 'ACCEPTED',
+      evidenceVersion: { itemId: { in: links.map((l) => l.itemId) } },
+    },
+    select: { reviewerId: true },
+  });
+  return new Set(v.map((x) => x.reviewerId));
+}
+
+/** Every requirement the person has on record (excluding approved N/A), with what is unverified. */
+async function openStaffItems(tx: TenantTx, staffId: string, now: Date) {
+  const instances = await tx.requirementInstance.findMany({
+    where: { subjectType: 'STAFF', subjectId: staffId },
+    include: { template: { select: { code: true, title: true } } },
+  });
+  const blockers: Record<string, unknown>[] = [];
+  let total = 0;
+  for (const i of instances) {
+    const { result } = await evaluateInstanceDetail(tx, i.id, now);
+    if (result.status === 'NOT_APPLICABLE') continue;
+    total++;
+    if (!(result.currentlyVerified && (result.status === 'GREEN' || result.status === 'AMBER')))
+      blockers.push({
+        code: i.template.code,
+        title: i.template.title,
+        status: result.status,
+        reasonText: result.reasonText,
+      });
+  }
+  return { total, blockers };
 }

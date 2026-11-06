@@ -3,7 +3,11 @@ import {
   AGE_BANDS,
   ageBand,
   endOfLondonDay,
+  IG_TRAINING_TARGET,
+  IG_TRAINING_TITLE,
+  isNhsContractItem,
   londonDate,
+  NHS_CONTRACT_PACK,
   monthsIn,
   percent,
   punctual,
@@ -51,6 +55,7 @@ export interface ReportQuery {
 
 const TASK = /SUPERVISION|APPRAISAL/;
 const DAY = 86_400_000;
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 function measure(
   id: ReportId,
@@ -110,9 +115,12 @@ export async function computeReport(
         staff.map((s) => s.id),
         now,
       );
+      // Ready means checks apply AND all are verified: nobody counts as ready when nothing was
+      // checked (finding 1: "100% ready" with no requirements).
       const ready = [...summary.values()].filter(
-        (s) => s.counts.red + s.counts.amber + s.counts.grey === 0,
+        (s) => s.setUp && s.counts.red + s.counts.amber + s.counts.grey === 0,
       ).length;
+      const notSetUp = [...summary.values()].filter((s) => !s.setUp).length;
       const gaps = await tx.requirementInstance.findMany({
         where: {
           subjectType: 'STAFF',
@@ -137,12 +145,25 @@ export async function computeReport(
             key: 'gaps',
             title: 'Gaps by requirement',
             columns: ['Requirement', 'Red', 'Amber', 'Awaiting verification', 'Total'],
-            rows: [...byTitle.entries()]
-              .map(([t, c]) => [t, c.red, c.amber, c.grey, c.red + c.amber + c.grey])
-              .sort(
-                (a, b) =>
-                  (b[4] as number) - (a[4] as number) || String(a[0]).localeCompare(String(b[0])),
-              ),
+            rows: [
+              ...(notSetUp > 0
+                ? [
+                    [
+                      'No requirements set up (people whose roles have no requirements)',
+                      0,
+                      0,
+                      notSetUp,
+                      notSetUp,
+                    ],
+                  ]
+                : []),
+              ...[...byTitle.entries()]
+                .map(([t, c]) => [t, c.red, c.amber, c.grey, c.red + c.amber + c.grey])
+                .sort(
+                  (a, b) =>
+                    (b[4] as number) - (a[4] as number) || String(a[0]).localeCompare(String(b[0])),
+                ),
+            ],
           },
         ],
       );
@@ -195,11 +216,17 @@ export async function computeReport(
         },
         select: { severity: true, vehicleId: true, status: true },
       });
-      const open = await tx.defect.groupBy({
-        by: ['vehicleId'],
-        where: { status: { in: ['OPEN', 'REPAIRING'] }, vehicleId: { in: ids } },
-        _count: { _all: true },
+      // Same rule as the vehicle status: a defect stays open until it is released (finding 73).
+      const open = await tx.defect.findMany({
+        where: { status: { not: 'RELEASED' }, vehicleId: { in: ids } },
+        select: { vehicleId: true, stopUse: true },
       });
+      const openOf = (vid: string) => open.filter((d) => d.vehicleId === vid);
+      const reasonOf = (v: (typeof vehicles)[number]) => {
+        if (v.status !== 'BLOCKED') return v.statusReason;
+        const n = openOf(v.id).filter((d) => d.stopUse).length;
+        return n ? `${n} open stop-use defect${n === 1 ? '' : 's'}` : v.statusReason;
+      };
       const plans = await tx.maintenancePlan.findMany({
         where: { active: true, vehicleId: { in: ids } },
       });
@@ -237,12 +264,7 @@ export async function computeReport(
             key: 'vehicles',
             title: 'Vehicles',
             columns: ['Vehicle', 'Status', 'Reason', 'Open defects'],
-            rows: vehicles.map((v) => [
-              v.callsign,
-              v.status,
-              v.statusReason,
-              open.find((o) => o.vehicleId === v.id)?._count._all ?? 0,
-            ]),
+            rows: vehicles.map((v) => [v.callsign, v.status, reasonOf(v), openOf(v.id).length]),
           },
           {
             key: 'defects',
@@ -393,7 +415,7 @@ export async function computeReport(
           validFrom: { lte: now },
           OR: [{ validTo: null }, { validTo: { gt: now } }],
         },
-        select: { userId: true, role: { select: { key: true } } },
+        select: { userId: true, locationId: true, role: { select: { key: true } } },
       });
       const acks = await tx.policyAcknowledgement.findMany({
         where: { policyVersionId: { in: versions.map((v) => v.id) } },
@@ -403,8 +425,17 @@ export async function computeReport(
       let num = 0;
       let den = 0;
       for (const v of versions) {
+        const d = v.document;
         const readers = new Set(
-          members.filter((m) => v.document.readerRoles.includes(m.role.key)).map((m) => m.userId),
+          members
+            .filter(
+              (m) =>
+                d.readerEveryone ||
+                (!d.readerRoles.length && !d.readerLocationIds.length) ||
+                d.readerRoles.includes(m.role.key) ||
+                (m.locationId !== null && d.readerLocationIds.includes(m.locationId)),
+            )
+            .map((m) => m.userId),
         );
         const done = new Set(
           acks
@@ -523,6 +554,95 @@ export async function computeReport(
                 return ['Open or in progress', n, percent(n, jobs.length)];
               })(),
             ],
+          },
+        ],
+      );
+    }
+
+    case 'NHS_KPI': {
+      const items = (
+        await tx.requirementInstance.findMany({
+          where: {
+            OR: [
+              { template: { pack: NHS_CONTRACT_PACK } },
+              { template: { code: { startsWith: 'NHS-' } } },
+            ],
+          },
+          select: {
+            status: true,
+            dueDate: true,
+            reasonText: true,
+            template: { select: { code: true, title: true, pack: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        })
+      ).filter((i) => isNhsContractItem(i.template));
+      const applicable = items.filter((i) => i.status !== 'NOT_APPLICABLE');
+      const staff = await tx.staff.findMany({
+        where: { lifecycleState: { not: 'LEAVER' }, ...(loc ? { primaryLocationId: loc } : {}) },
+        select: { id: true },
+      });
+      const ig = (
+        await tx.requirementInstance.findMany({
+          where: { subjectType: 'STAFF', subjectId: { in: staff.map((s) => s.id) } },
+          select: { subjectId: true, status: true, template: { select: { title: true } } },
+        })
+      ).filter((i) => IG_TRAINING_TITLE.test(i.template.title) && i.status !== 'NOT_APPLICABLE');
+      const igPeople = new Map<string, boolean>();
+      for (const i of ig)
+        igPeople.set(i.subjectId, (igPeople.get(i.subjectId) ?? true) && i.status === 'GREEN');
+      const igGreen = [...igPeople.values()].filter(Boolean).length;
+      const igRate = percent(igGreen, igPeople.size);
+      const contracts = await tx.nhsContract.findMany({ orderBy: { endOn: 'asc' } });
+      const dspt = items.find((i) => i.template.code === 'NHS-ORG-01');
+      return out(
+        [
+          measure(id, 'contractItems', {
+            numerator: applicable.filter((i) => i.status === 'GREEN').length,
+            denominator: applicable.length,
+          }),
+          measure(id, 'igTraining', { numerator: igGreen, denominator: igPeople.size }),
+        ],
+        [
+          {
+            key: 'summary',
+            title: 'Key figures',
+            columns: ['Measure', 'Result'],
+            rows: [
+              ['NHS contracts recorded', contracts.length],
+              [
+                'DSPT submission',
+                !dspt
+                  ? 'Not set up'
+                  : dspt.dueDate
+                    ? `${dspt.status} (due ${ymd(dspt.dueDate)})`
+                    : dspt.status,
+              ],
+              [
+                `Data security training (target ${IG_TRAINING_TARGET}%)`,
+                igRate === null
+                  ? 'No training requirement set up'
+                  : `${igRate}% ${igRate >= IG_TRAINING_TARGET ? 'meets' : 'below'} target`,
+              ],
+            ],
+          },
+          {
+            key: 'contracts',
+            title: 'Contracts',
+            columns: ['Reference', 'Commissioner', 'Service', 'Ends'],
+            rows: contracts.map((c) => [c.reference, c.commissioner, c.service, ymd(c.endOn)]),
+          },
+          {
+            key: 'items',
+            title: 'Contract items',
+            columns: ['Item', 'Title', 'Status', 'Due', 'Reason'],
+            rows: items.map((i) => [
+              i.template.code,
+              i.template.title,
+              i.status,
+              i.dueDate ? ymd(i.dueDate) : null,
+              i.reasonText ?? null,
+            ]),
           },
         ],
       );

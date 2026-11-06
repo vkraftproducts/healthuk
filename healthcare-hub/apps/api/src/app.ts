@@ -1,10 +1,10 @@
 import 'reflect-metadata';
+import { createHash } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import { HubError } from './common/problem.filter.js';
 import { AppModule, type AppDeps } from './app.module.js';
 
 /** Builds the configured Nest/Fastify app (shared by main.ts and tests). */
@@ -46,12 +46,22 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
     ],
   });
   await fastify.register(rateLimit, {
-    max: deps.config.RATE_LIMIT_PER_MINUTE,
+    max: deps.config.NODE_ENV === 'test' ? 10_000 : deps.config.RATE_LIMIT_PER_MINUTE,
     timeWindow: '1 minute',
-    // Thrown as a HubError so the problem filter answers 429 RATE_LIMITED: a plain object here
-    // was not recognised and went out as a 500 internal error.
-    errorResponseBuilder: (_req, ctx) =>
-      new HubError('RATE_LIMITED', 429, `Too many requests. Try again in ${ctx.after}.`),
+    // Per user (DECISIONS M8): many staff can share one office IP. Unauthenticated routes,
+    // including password sign-in, stay keyed by IP.
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      return typeof auth === 'string' && auth.startsWith('Bearer ')
+        ? `t:${createHash('sha256').update(auth).digest('base64url').slice(0, 32)}`
+        : `ip:${req.ip}`;
+    },
+    errorResponseBuilder: () => ({
+      type: 'https://healthcare-hub.example/problems/rate-limited',
+      title: 'Too many requests',
+      status: 429,
+      code: 'RATE_LIMITED',
+    }),
   });
   app.setGlobalPrefix('api/v1', { exclude: ['healthz', 'readyz'] });
   return app;

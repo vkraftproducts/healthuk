@@ -70,7 +70,7 @@ export async function bookCrewDay(call: Call, ids: DemoIds, now = new Date()): P
       pickupTo: at(2.5),
       plannedStart: at(2),
       plannedEnd: at(3),
-      pickupAddress: '1 Synthetic Road, Watford',
+      pickupAddress: '1 Synthetic Road, London',
       destinationAddress: 'Synthetic General Hospital',
       accessNotes: 'Key safe at side door',
       patientRef: `DEMO-${now.getTime().toString(36).toUpperCase()}`,

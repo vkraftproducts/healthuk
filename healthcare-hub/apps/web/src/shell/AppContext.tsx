@@ -10,7 +10,7 @@ export interface AppState {
   orgId: string | null;
   setOrgId: (id: string) => void;
   refresh: () => void;
-  /** False once the service check has failed (not while it is still loading). */
+  lastUpdated: Date | null;
   sourceOk: boolean;
   /** Live updates connection; null when the app runs without one. */
   live: LiveState | null;

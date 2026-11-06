@@ -21,6 +21,7 @@ describe('report catalogue [PRD 4.10]', () => {
       'POLICY_ACK',
       'PREMISES',
       'JOURNEYS',
+      'NHS_KPI',
     ]);
     for (const r of REPORTS)
       for (const m of r.measures) {

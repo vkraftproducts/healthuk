@@ -67,6 +67,7 @@ const IDS = [
   'POLICY_ACK',
   'PREMISES',
   'JOURNEYS',
+  'NHS_KPI',
 ];
 
 describe('reports [PRD 4.10]', () => {
@@ -191,7 +192,7 @@ describe('reports [PRD 4.10]', () => {
       `SELECT after_summary FROM audit_log WHERE action = 'export.generated' AND entity_id = $1`,
       [req.body.id],
     );
-    expect(log!.after_summary).toMatchObject({ kind: 'MANAGEMENT_PACK', reports: 8 });
+    expect(log!.after_summary).toMatchObject({ kind: 'MANAGEMENT_PACK', reports: 9 });
   });
 });
 
@@ -208,11 +209,11 @@ describe('CSV import [INT-01, PRD 4.12]', () => {
   it('previews with per-row errors and duplicates, and creates nothing until committed', async () => {
     const csv = [
       'Staff No,Display Name,Location,Job title',
-      `${sn(1)},Synthetic Import One,Watford,Ambulance care assistant`,
+      `${sn(1)},Synthetic Import One,London,Ambulance care assistant`,
       `${sn(2)},Synthetic Import Two,Nowhere,`,
-      `ST-0042,Synthetic Duplicate,Watford,`,
-      `${sn(1)},Synthetic Repeat,Watford,`,
-      `BAD-1,"=HYPERLINK(""x"")",Watford,`,
+      `ST-0042,Synthetic Duplicate,London,`,
+      `${sn(1)},Synthetic Repeat,London,`,
+      `BAD-1,"=HYPERLINK(""x"")",London,`,
     ].join('\r\n');
     const before = await sql(`SELECT count(*)::int AS n FROM staff WHERE organisation_id = $1`, [
       ORG,
@@ -264,8 +265,8 @@ describe('CSV import [INT-01, PRD 4.12]', () => {
   it('commits through the normal endpoint, then rolls back without deleting history', async () => {
     const csv = [
       'staffNo,displayName,location',
-      `${sn(3)},Synthetic Import Three,Watford`,
-      `${sn(4)},Synthetic Import Four,Watford`,
+      `${sn(3)},Synthetic Import Three,London`,
+      `${sn(4)},Synthetic Import Four,London`,
     ].join('\n');
     const p = await imp('STAFF', csv);
     const c = await call('POST', `/api/v1/imports/${p.body.id}/commit`);
@@ -294,10 +295,16 @@ describe('CSV import [INT-01, PRD 4.12]', () => {
   });
 
   it('vehicles: imported, then withdrawn off the road', async () => {
-    const reg = `IM${String(tag).padStart(4, '0')}ZZ`;
+    // D1: registrations must be a UK format; current style AB12 CDE, unique per run.
+    const plate = (prefix: string) =>
+      `${prefix}${String(tag % 100).padStart(2, '0')}Z${String.fromCharCode(
+        65 + (Math.floor(tag / 100) % 26),
+        65 + (Math.floor(tag / 2600) % 26),
+      )}`;
+    const reg = plate('IM');
     const csv = [
       'Registration,Callsign,Type,Location,Seats,Wheelchair capacity,Stretcher',
-      `${reg},IMP-${tag},PTS vehicle,Watford,4,1,yes`,
+      `${reg},IMP-${tag},PTS vehicle,London,4,1,yes`,
     ].join('\n');
     const p = await imp('VEHICLES', csv);
     expect(p.body.rows[0]).toMatchObject({ status: 'VALID' });
@@ -313,7 +320,7 @@ describe('CSV import [INT-01, PRD 4.12]', () => {
     // A discarded preview creates nothing and cannot be committed.
     const d = await imp(
       'VEHICLES',
-      csv.replace(reg, `${reg}X`).replace(`IMP-${tag}`, `IMQ-${tag}`),
+      csv.replace(reg, plate('IN')).replace(`IMP-${tag}`, `IMQ-${tag}`),
     );
     expect((await call('POST', `/api/v1/imports/${d.body.id}/discard`)).body.status).toBe(
       'DISCARDED',
@@ -480,12 +487,19 @@ describe('full data export [PRD 4.12]', () => {
       .filter(([k]) => k.startsWith('data/'))
       .map(([, v]) => strFromU8(v))
       .join('\n');
-    expect(all).not.toMatch(/"(pushToken|blobKey|idpSubject)"/);
+    expect(all).not.toMatch(/"(pushToken|blobKey|idpSubject|codeHash)"/);
+    for (const secret of [
+      'local_credential',
+      'local_refresh_token',
+      'push_device',
+      'idempotency_key',
+    ])
+      expect(files[`data/${secret}.json`]).toBeUndefined();
     const [log] = await sql(
       `SELECT after_summary FROM audit_log WHERE action = 'export.generated' AND entity_id = $1`,
       [req.body.id],
     );
-    expect(log!.after_summary).toMatchObject({ kind: 'FULL_EXPORT', tables: 70 });
+    expect(log!.after_summary).toMatchObject({ kind: 'FULL_EXPORT', tables: 113 });
   });
 });
 
@@ -536,12 +550,25 @@ describe('retention and legal hold [SECURITY_COMPLIANCE §4]', () => {
         })
       ).status,
     ).toBe(400);
-    await call('PATCH', `/api/v1/retention-rules/${audit.id}`, {
+    const changed = await call('PATCH', `/api/v1/retention-rules/${audit.id}`, {
       body: { basis: 'Organisation schedule v1 approved by the board' },
     });
-    expect((await call('POST', `/api/v1/retention-rules/${audit.id}/approve`)).body.status).toBe(
-      'APPROVED',
-    );
+    expect(changed.body.changedByName).toEqual(expect.any(String));
+    // The person who changed the rule cannot approve it.
+    const own = await call('POST', `/api/v1/retention-rules/${audit.id}/approve`);
+    expect(own.status).toBe(422);
+    expect(own.body.code).toBe('FOUR_EYES_REQUIRED');
+    const approved = await call('POST', `/api/v1/retention-rules/${audit.id}/approve`, {
+      sub: 'dev|governance',
+    });
+    expect(approved.body).toMatchObject({ status: 'APPROVED', approvedByName: expect.any(String) });
+    expect(
+      (
+        await call('POST', `/api/v1/retention-rules/${audit.id}/approve`, {
+          sub: 'dev|governance',
+        })
+      ).status,
+    ).toBe(409);
     const again = await call('PATCH', `/api/v1/retention-rules/${audit.id}`, {
       body: { retainMonths: 84 },
     });
@@ -563,7 +590,7 @@ describe('retention and legal hold [SECURITY_COMPLIANCE §4]', () => {
         basis: 'Organisation schedule v1 approved by the board',
       },
     });
-    await call('POST', `/api/v1/retention-rules/${pc.id}/approve`);
+    await call('POST', `/api/v1/retention-rules/${pc.id}/approve`, { sub: 'dev|governance' });
     expect(
       (
         await call('POST', '/api/v1/legal-holds', {
@@ -660,9 +687,29 @@ describe('data subject requests and disclosures [UK GDPR Art 12, 15]', () => {
     });
     expect(r.body.dueOn).toBe(addDays(received, 0) < r.body.dueOn ? r.body.dueOn : 'wrong');
     expect((await call('POST', `/api/v1/subject-requests/${r.body.id}/export`)).status).toBe(422);
+    expect(r.body).toMatchObject({
+      staffName: expect.any(String),
+      handledByName: expect.any(String),
+      latestExtension: expect.any(String),
+    });
+    // Identity first: the request cannot be worked on or completed before it is verified.
+    expect(
+      (
+        await call('POST', `/api/v1/subject-requests/${r.body.id}/update`, {
+          body: { status: 'IN_PROGRESS' },
+        })
+      ).status,
+    ).toBe(422);
     await call('POST', `/api/v1/subject-requests/${r.body.id}/update`, {
       body: { status: 'IDENTITY_VERIFIED' },
     });
+    expect(
+      (
+        await call('POST', `/api/v1/subject-requests/${r.body.id}/update`, {
+          body: { status: 'IDENTITY_VERIFIED' },
+        })
+      ).status,
+    ).toBe(409);
     expect(
       (
         await call('POST', `/api/v1/subject-requests/${r.body.id}/update`, {
@@ -766,7 +813,14 @@ describe('personal data breaches: the 72-hour ICO clock', () => {
         decisionReason: 'Names and shift times disclosed externally',
       },
     });
-    expect(as.body).toMatchObject({ status: 'ASSESSED', icoReportable: true });
+    expect(as.body).toMatchObject({
+      status: 'ASSESSED',
+      icoReportable: true,
+      decidedByName: expect.any(String),
+      recordedByName: expect.any(String),
+      subjectsEstimate: 12,
+      dataCategories: ['Staff names'],
+    });
     const late = new Date(new Date(discoveredAt).getTime() + 73 * 3_600_000);
     if (late < new Date()) {
       expect(
@@ -790,8 +844,98 @@ describe('personal data breaches: the 72-hour ICO clock', () => {
       (x) => x.sourceId === b.body.id && x.state !== 'RESOLVED',
     );
     expect(after).toHaveLength(0);
-    expect((await call('POST', `/api/v1/breaches/${b.body.id}/close`)).body.status).toBe('CLOSED');
+    // K1: closing needs containment and lessons learned.
+    expect(
+      (
+        await call('POST', `/api/v1/breaches/${b.body.id}/close`, {
+          body: { lessons: 'Check recipients before sending rotas' },
+        })
+      ).status,
+    ).toBe(422);
+    const contained = await call('POST', `/api/v1/breaches/${b.body.id}/containment`, {
+      body: {
+        containment: 'Recipient asked to delete; confirmed in writing',
+        containedAt: new Date().toISOString(),
+        peopleAffected: 12,
+      },
+    });
+    expect(contained.body).toMatchObject({ peopleAffected: 12, containedAt: expect.any(String) });
+    expect((await call('POST', `/api/v1/breaches/${b.body.id}/close`)).status).toBe(400);
+    const closedBreach = await call('POST', `/api/v1/breaches/${b.body.id}/close`, {
+      body: { lessons: 'Check recipients before sending rotas' },
+    });
+    expect(closedBreach.body).toMatchObject({
+      status: 'CLOSED',
+      lessons: 'Check recipients before sending rotas',
+      closedByName: expect.any(String),
+    });
     expect((await call('GET', '/api/v1/breaches', { sub: 'dev|dispatcher' })).status).toBe(403);
+  });
+});
+
+describe('data protection complaints [task 13]', () => {
+  it('acknowledge within 30 days, then record the outcome; privacy permission only', async () => {
+    const users = (await call('GET', '/api/v1/admin/users')).body.data as J[];
+    const owner = users.find((u) => u.email === 'governance@example.test')!.id as string;
+    const received = londonDate(new Date());
+    const c = await call('POST', '/api/v1/dp-complaints', {
+      body: {
+        source: 'DATA_SUBJECT',
+        summary: 'Synthetic: unhappy with how a subject access request was handled',
+        receivedOn: received,
+        ownerUserId: owner,
+      },
+    });
+    expect(c.status).toBe(201);
+    expect(c.body).toMatchObject({
+      code: expect.stringMatching(/^DPC-\d+$/),
+      status: 'RECEIVED',
+      acknowledgeDue: addDays(received, 30),
+      acknowledgeOverdue: false,
+      ownerName: expect.any(String),
+    });
+    const id = c.body.id as string;
+    expect(
+      (
+        await call('POST', `/api/v1/dp-complaints/${id}/resolve`, {
+          body: { outcome: 'Apology sent', resolvedOn: received },
+        })
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await call('POST', `/api/v1/dp-complaints/${id}/acknowledge`, {
+          body: { acknowledgedOn: addDays(received, 1) },
+        })
+      ).status,
+    ).toBe(400);
+    const ack = await call('POST', `/api/v1/dp-complaints/${id}/acknowledge`, {
+      body: { acknowledgedOn: received },
+    });
+    expect(ack.body.status).toBe('ACKNOWLEDGED');
+    const done = await call('POST', `/api/v1/dp-complaints/${id}/resolve`, {
+      body: { outcome: 'Process explained and apology sent', resolvedOn: received },
+    });
+    expect(done.body).toMatchObject({ status: 'RESOLVED', resolvedByName: expect.any(String) });
+    expect((await call('GET', '/api/v1/dp-complaints', { sub: 'dev|dispatcher' })).status).toBe(
+      403,
+    );
+    // Old unacknowledged complaints show as overdue.
+    const old = await call('POST', '/api/v1/dp-complaints', {
+      body: {
+        source: 'ICO',
+        summary: 'Synthetic: ICO forwarded a complaint',
+        receivedOn: addDays(received, -40),
+        ownerUserId: owner,
+        icoCaseRef: 'IC-123456-SYN',
+      },
+    });
+    expect(old.body.acknowledgeOverdue).toBe(true);
+    const [a] = await sql(
+      `SELECT after_summary::text AS s FROM audit_log WHERE entity_id = $1 AND action = 'privacy.complaint.record'`,
+      [id],
+    );
+    expect(a!.s).not.toContain('unhappy');
   });
 });
 
@@ -820,7 +964,7 @@ describe('restore to a new server within the RTO [UAT-08, NFR-01]', () => {
       const text = readFileSync(report, 'utf8');
       expect(text).toContain('**Result: PASS**');
       expect(text).toContain('mismatched tables: none');
-      expect(text).toMatch(/Exora intact/);
+      expect(text).toMatch(/Exora International Ltd intact/);
     },
     120_000,
   );

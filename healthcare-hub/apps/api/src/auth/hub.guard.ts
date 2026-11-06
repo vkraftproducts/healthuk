@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { AUTH_MESSAGES } from '@hub/contracts';
 import { DB } from '../db.provider.js';
 import type { Db, ResolvedUser } from '@hub/db';
 import { CONFIG, type AppConfig } from '../config.js';
@@ -8,7 +9,7 @@ import { PUBLIC_KEY } from '../common/decorators.js';
 import type { HubRequest } from '../common/context.js';
 import { dbNow } from '../common/http.js';
 import { HubError, notFound } from '../common/problem.filter.js';
-import { mfaRequiredFor } from './mfa.js';
+import { mfaRequiredFor, mfaSatisfiedBy } from './mfa.js';
 import { TokenService } from './token.service.js';
 import { UserCache } from './user-cache.js';
 
@@ -42,9 +43,9 @@ export class HubGuard implements CanActivate {
     if (!match?.[1]) throw new HubError('UNAUTHENTICATED', 401);
 
     const token = await this.tokens.verify(match[1]);
-    const user = await this.lookupUser(token.sub, token.verifiedEmail);
-    if (!user) throw new HubError('UNAUTHENTICATED', 401);
-    if (user.status !== 'ACTIVE') throw new HubError('USER_INACTIVE', 401);
+    const user = await this.lookupUser(token.sub, token.verifiedEmail, token.localUserId);
+    if (!user) throw new HubError('UNAUTHENTICATED', 401, AUTH_MESSAGES.unknownAccount);
+    if (user.status !== 'ACTIVE') throw new HubError('USER_INACTIVE', 401, AUTH_MESSAGES.ended);
 
     const ipHash = createHmac('sha256', this.config.IP_HASH_SECRET)
       .update(req.ip ?? '')
@@ -66,9 +67,17 @@ export class HubGuard implements CanActivate {
           },
           include: { role: { include: { rolePermissions: true } } },
         });
-        const grants = await tx.supportAccessGrant.findMany({
+        const live = await tx.supportAccessGrant.findMany({
           where: { supportUserId: user.id, startsAt: { lte: now }, endsAt: { gt: now } },
         });
+        // A4: a grant ended early stops working at once.
+        const ended = live.length
+          ? await tx.supportAccessEnd.findMany({
+              where: { grantId: { in: live.map((g) => g.id) } },
+              select: { grantId: true },
+            })
+          : [];
+        const grants = live.filter((g) => !ended.some((e) => e.grantId === g.id));
         const supportRole = grants.length
           ? await tx.role.findFirst({
               where: { organisationId: null, key: 'PLATFORM_SUPPORT' },
@@ -94,7 +103,8 @@ export class HubGuard implements CanActivate {
 
     if (deviceRevoked) throw new HubError('DEVICE_REVOKED', 401);
     // No current access anywhere: the user has been revoked (leaver) - the next call fails (US-SYS-1).
-    if (memberships.length === 0 && grants.length === 0) throw new HubError('USER_INACTIVE', 401);
+    if (memberships.length === 0 && grants.length === 0)
+      throw new HubError('USER_INACTIVE', 401, AUTH_MESSAGES.ended);
 
     let orgId: string | null = null;
     let roleKeys: string[] = [];
@@ -102,6 +112,7 @@ export class HubGuard implements CanActivate {
     let locationIds: string[] | null = null;
     let support = false;
     let grantId: string | null = null;
+    let supportEndsAt: Date | undefined;
 
     if (typeof orgHeader === 'string' && orgHeader !== '') {
       if (!UUID.test(orgHeader)) throw notFound();
@@ -120,6 +131,7 @@ export class HubGuard implements CanActivate {
         orgId = orgHeader;
         support = true;
         grantId = grant.id;
+        supportEndsAt = grant.endsAt;
         roleKeys = ['PLATFORM_SUPPORT'];
         permissions = new Set(supportPerms);
         locationIds = null;
@@ -139,10 +151,11 @@ export class HubGuard implements CanActivate {
       roleKeys,
       permissions,
       locationIds,
-      mfaSatisfied: token.amr.includes('mfa'),
+      mfaSatisfied: mfaSatisfiedBy(token.amr),
       mfaRequired: mfaRequiredFor(roleKeys),
       ipHash,
       support,
+      ...(supportEndsAt ? { supportEndsAt } : {}),
     };
 
     if (support && orgId && grantId) {
@@ -163,14 +176,32 @@ export class HubGuard implements CanActivate {
     return true;
   }
 
+  /**
+   * IdP tokens map through app_user.idp_subject (and link a pending invitation by verified email).
+   * Local sign-in tokens (signed by this API, AUTH_MODE=local only) are bound directly to the
+   * app_user id they were issued for; idp_subject is left untouched so Entra can link later.
+   */
   private async lookupUser(
     sub: string,
     verifiedEmail: string | null,
+    localUserId: string | null,
   ): Promise<ResolvedUser | null> {
     const hit = this.cache.get(sub);
     if (hit?.user) return hit.user;
-    let user = await this.db.resolveUser(sub);
-    if (!user && verifiedEmail) user = await this.db.linkInvitedUser(sub, verifiedEmail);
+    let user: ResolvedUser | null;
+    if (localUserId) {
+      user = await this.db.withIdentity(localUserId, async (tx) => {
+        const rows = await tx.$queryRaw<
+          { id: string; email: string; display_name: string; status: ResolvedUser['status'] }[]
+        >`SELECT id, email, display_name, status FROM app_user WHERE id = ${localUserId}::uuid`;
+        const r = rows[0];
+        if (!r) return null;
+        return { id: r.id, email: r.email, displayName: r.display_name, status: r.status };
+      });
+    } else {
+      user = await this.db.resolveUser(sub);
+      if (!user && verifiedEmail) user = await this.db.linkInvitedUser(sub, verifiedEmail);
+    }
     if (user) this.cache.set(sub, user);
     return user;
   }

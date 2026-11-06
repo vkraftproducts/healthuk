@@ -81,7 +81,9 @@ export const WorkbookItemDto = z.object({
   proposedTitle: z.string().nullable(),
   proposedSubject: z.string().nullable(),
   proposedBy: uuid.nullable(),
+  proposedByName: z.string().nullable().optional(),
   decidedBy: uuid.nullable(),
+  decidedByName: z.string().nullable().optional(),
   decisionNote: z.string().nullable(),
   publishedTemplateId: uuid.nullable(),
   version: z.number(),
@@ -113,7 +115,12 @@ export const WorkbookProposeInput = z
     'In-scope items need a proposed code, title and subject',
   );
 
-export const WorkbookDecisionInput = z.strictObject({
-  decision: z.enum(['APPROVED', 'REJECTED']),
-  note: z.string().trim().max(500).optional(),
-});
+export const WorkbookDecisionInput = z
+  .strictObject({
+    decision: z.enum(['APPROVED', 'REJECTED']),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine(
+    (d) => d.decision === 'APPROVED' || (d.note?.length ?? 0) >= 3,
+    'Say why the mapping is rejected',
+  );

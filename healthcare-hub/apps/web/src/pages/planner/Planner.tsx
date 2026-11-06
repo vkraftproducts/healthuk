@@ -3,10 +3,13 @@ import { addDays, formatDate, londonDate, londonDateTime, londonTime } from '@hu
 import { useQueries } from '@tanstack/react-query';
 import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from 'react';
 import {
+  ActionDialog,
   Field,
   Section,
   button,
   errText,
+  fmtDate,
+  fmtDateTime,
   input,
   smallButton,
   useCan,
@@ -15,6 +18,8 @@ import {
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useOne } from '../settings/hooks.js';
+import { CrewReadiness } from './CrewReadiness.js';
+import { ShiftActions } from './ShiftActions.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -26,6 +31,11 @@ const IN_PROGRESS = [
   'HANDOVER_COMPLETE',
 ];
 const UNAVAILABLE = ['BLOCKED', 'QUARANTINED', 'OFF_ROAD'];
+const VEHICLE_WORD: Record<string, string> = {
+  BLOCKED: 'blocked',
+  QUARANTINED: 'quarantined',
+  OFF_ROAD: 'off road',
+};
 const CHECK_STATUS: Record<string, StatusKind> = { PASS: 'GREEN', FAIL: 'RED', PENDING: 'AMBER' };
 const CHECK_WORD: Record<string, string> = { PASS: 'Pass', FAIL: 'Fail', PENDING: 'Pending' };
 const CHECK_LABEL: Record<string, string> = {
@@ -53,6 +63,7 @@ export function Planner() {
   const [view, setView] = useState<'day' | 'week'>('day');
   const [jobId, setJobId] = useState<string | null>(null);
   const [shiftId, setShiftId] = useState<string | null>(null);
+  const [manageId, setManageId] = useState<string | null>(null);
   const locations = useOne<{ data: Row[] }>(
     orgId ? `/api/v1/organisations/${orgId}/locations` : null,
   );
@@ -63,6 +74,7 @@ export function Planner() {
   const unallocated = planner.data?.unallocated ?? [];
   const job = unallocated.find((j) => j.id === jobId) ?? null;
   const shift = shifts.find((s) => s.id === shiftId) ?? null;
+  const managed = shifts.find((s) => s.id === manageId) ?? null;
 
   // Hour columns span the day's shifts (06:00–22:00 when there are none).
   const hours = shifts.flatMap((s) => [
@@ -93,7 +105,6 @@ export function Planner() {
   if (!canView) return <p role="alert">You do not have permission to view the work planner.</p>;
   return (
     <div className="space-y-6">
-      {can('allocation.exception.approve') && <ExceptionRequests />}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Work planner</h1>
@@ -124,6 +135,7 @@ export function Planner() {
                 if (e.target.value) setDate(e.target.value);
                 setJobId(null);
                 setShiftId(null);
+                setManageId(null);
               }}
               className={input}
             />
@@ -206,6 +218,16 @@ export function Planner() {
                           Assign here
                         </button>
                       )}
+                      {can('jobs.allocate') && ['PLANNED', 'STARTED'].includes(s.state) && (
+                        <button
+                          className={`${smallButton} mt-1 ml-1`}
+                          aria-label={`Manage shift for ${s.vehicleCallsign}`}
+                          aria-pressed={manageId === s.id}
+                          onClick={() => setManageId(manageId === s.id ? null : s.id)}
+                        >
+                          Manage shift
+                        </button>
+                      )}
                     </div>
                     <div
                       className={`relative min-h-12 flex-1 rounded ${blocked ? 'bg-[repeating-linear-gradient(45deg,#fee2e2,#fee2e2_6px,#fff_6px,#fff_12px)]' : 'bg-slate-50'}`}
@@ -245,6 +267,15 @@ export function Planner() {
             <p className="mt-2 text-sm text-slate-700">
               Drag an unallocated job onto a row, or select the job and choose “Assign here”.
             </p>
+            {managed && (
+              <div className="mt-4 border-t border-hub-line pt-4">
+                <ShiftActions
+                  shift={managed}
+                  otherShifts={shifts}
+                  onClose={() => setManageId(null)}
+                />
+              </div>
+            )}
           </section>
 
           <div className="space-y-6">
@@ -285,11 +316,13 @@ export function Planner() {
                   setJobId(null);
                   setShiftId(null);
                 }}
+                onManage={setManageId}
               />
             )}
           </div>
         </div>
       )}
+      {can('allocation.exception.approve') && <ExceptionRequests />}
       {can('jobs.booking.manage') && <BookJourney date={date} locations={locations.data?.data} />}
       {can('jobs.allocate') && <PlanShift date={date} locations={locations.data?.data} />}
     </div>
@@ -429,12 +462,26 @@ function JobCard({ job }: { job: Row }) {
   );
 }
 
-function ValidatePanel({ job, shift, onDone }: { job: Row; shift: Row; onDone: () => void }) {
+function ValidatePanel({
+  job,
+  shift,
+  onDone,
+  onManage,
+}: {
+  job: Row;
+  shift: Row;
+  onDone: () => void;
+  onManage: (shiftId: string) => void;
+}) {
   const { api, orgId } = useApp();
   const can = useCan();
   const { run, msg } = useRun();
   const v = useValidation(job.id, shift.id);
   const [excepting, setExcepting] = useState<string | null>(null);
+  const approver = can('allocation.exception.approve');
+  const requests = useOne<{ data: Row[] }>(`/api/v1/allocation-exception-requests?jobId=${job.id}`);
+  const latest = (code: string) =>
+    (requests.data?.data ?? []).find((r) => r.checkCode === code && r.shiftId === shift.id);
   const checks = (v.data?.checks ?? []) as Row[];
   const failing = checks.some((c) => c.result === 'FAIL' && !c.excepted);
   const allowed = !!v.data?.allowed && !failing;
@@ -482,25 +529,64 @@ function ValidatePanel({ job, shift, onDone }: { job: Row; shift: Row; onDone: (
                 ))}
               </ul>
             )}
+            {c.fix && c.fix.action !== 'EXCEPTION' && (
+              <p className="mt-1 text-slate-800">
+                How to fix: {c.fix.text}{' '}
+                {c.fix.action === 'SHIFT_ACTIONS' ? (
+                  <button
+                    className={smallButton}
+                    aria-label={`Open shift ${shift.vehicleCallsign} to fix ${
+                      CHECK_LABEL[c.code] ?? 'this check'
+                    }`}
+                    onClick={() => onManage(shift.id)}
+                  >
+                    Manage shift
+                  </button>
+                ) : c.fix.action === 'VEHICLE' ? (
+                  <a className="underline" href={`/vehicles/${shift.vehicleId}`}>
+                    Open {shift.vehicleCallsign}
+                  </a>
+                ) : (
+                  <a className="underline" href="/staff">
+                    Open staff records
+                  </a>
+                )}
+              </p>
+            )}
             {c.result === 'FAIL' && !c.excepted && !c.overridable && (
               <p className="text-slate-700">
                 Safety or statutory check: this cannot be overridden. Choose another vehicle or
                 crew.
               </p>
             )}
-            {c.result === 'FAIL' && !c.excepted && c.overridable && can('jobs.allocate') && (
-              <button className={`${smallButton} mt-1`} onClick={() => setExcepting(c.code)}>
-                Request exception
-              </button>
+            {c.result === 'FAIL' && !c.excepted && c.overridable && (
+              <RequestState request={latest(c.code)} />
             )}
+            {c.result === 'FAIL' &&
+              !c.excepted &&
+              c.overridable &&
+              latest(c.code)?.status !== 'REQUESTED' &&
+              (can('allocation.exception.approve') || can('jobs.allocate')) && (
+                <button
+                  className={`${smallButton} mt-1`}
+                  aria-label={`${approver ? 'Approve an exception' : 'Ask for an exception'} for ${
+                    CHECK_LABEL[c.code] ?? 'this check'
+                  }`}
+                  onClick={() => setExcepting(c.code)}
+                >
+                  {approver ? 'Approve exception' : 'Ask for an exception'}
+                </button>
+              )}
             {excepting === c.code && (
               <ExceptionForm
                 jobId={job.id}
                 shiftId={shift.id}
                 checkCode={c.code}
+                mode={approver ? 'approve' : 'request'}
                 onClose={() => {
                   setExcepting(null);
                   void v.reload();
+                  void requests.refetch();
                 }}
               />
             )}
@@ -549,138 +635,147 @@ function useValidation(jobId: string, shiftId: string) {
   return { ...state, reload };
 }
 
-/** E3: requests addressed to me, approved or declined with a reason (no browser pop-ups). */
+/**
+ * Exception requests waiting for a decision (finding 69). Only policy-level checks can be asked
+ * about; the person who asked can never decide their own request.
+ */
 function ExceptionRequests() {
   const { api, orgId, me } = useApp();
-  const res = useOne<{ data: Row[] }>('/api/v1/allocation-exceptions');
-  const { run, msg } = useRun();
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const waiting = (res.data?.data ?? []).filter(
-    (r) => r.state === 'REQUESTED' && r.approverId === me.user.id,
-  );
-  if (waiting.length === 0) return null;
-  const decide = (r: Row, decision: 'APPROVED' | 'DECLINED') => {
-    const reason = (reasons[r.id] ?? '').trim();
-    void run(
-      () =>
-        api.send('POST', `/api/v1/allocation-exceptions/${r.id}/decide`, orgId, {
-          decision,
-          reason,
-        }),
-      decision === 'APPROVED'
-        ? `Exception approved for ${r.jobCode}. It can now be allocated.`
-        : `Declined. ${r.requestedByName} has been told why.`,
-    );
-  };
+  const res = useOne<{ data: Row[] }>('/api/v1/allocation-exception-requests?status=REQUESTED');
+  const [deciding, setDeciding] = useState<{ r: Row; d: 'APPROVED' | 'REJECTED' } | null>(null);
+  const rows = res.data?.data ?? [];
+  const name = (r: Row) =>
+    `${r.jobCode} on ${r.vehicleCallsign ?? 'the shift'} (${CHECK_LABEL[r.checkCode] ?? 'check'})`;
   return (
-    <section
-      aria-labelledby="exc-req-h"
-      className="space-y-3 rounded-lg border border-amber-600 bg-amber-50 p-4"
-    >
-      <h2 id="exc-req-h" className="text-lg font-bold">
-        Exception requests waiting for you
-      </h2>
-      {msg}
-      <ul className="space-y-3">
-        {waiting.map((r) => (
-          <li
-            key={r.id}
-            className="space-y-2 rounded-md border border-hub-line bg-white p-3 text-sm"
-          >
+    <Section title="Exceptions waiting for a decision">
+      {res.isError && <p role="alert">Could not load exception requests.</p>}
+      {!res.isLoading && rows.length === 0 && <p role="status">No exceptions are waiting.</p>}
+      <ul className="space-y-2">
+        {rows.map((r) => (
+          <li key={r.id} className="rounded-lg border border-hub-line bg-white p-3 text-sm">
+            <p className="font-semibold">{name(r)}</p>
             <p>
-              <b>{r.jobCode}</b> · {words(r.checkCode)} · asked by {r.requestedByName} · until{' '}
-              {formatDate(londonDate(new Date(r.expiresAt)))}
+              Asked by {r.requestedByName ?? 'a dispatcher'} on {fmtDateTime(r.requestedAt)}, to
+              last until {fmtDateTime(r.expiresAt)}.
             </p>
-            <p className="text-slate-700">“{r.reason}”</p>
-            <label className="block">
-              <span className="text-slate-700">Reason for your decision</span>
-              <input
-                className={input}
-                value={reasons[r.id] ?? ''}
-                minLength={3}
-                maxLength={1000}
-                onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })}
-              />
-            </label>
-            <div className="flex gap-2">
-              <button
-                className={button}
-                disabled={(reasons[r.id] ?? '').trim().length < 3}
-                aria-label={`Approve ${r.jobCode}`}
-                onClick={() => decide(r, 'APPROVED')}
-              >
-                Approve
-              </button>
-              <button
-                className={smallButton}
-                disabled={(reasons[r.id] ?? '').trim().length < 3}
-                aria-label={`Decline ${r.jobCode}`}
-                onClick={() => decide(r, 'DECLINED')}
-              >
-                Decline
-              </button>
-            </div>
+            <p className="text-slate-800">Reason: {r.reason}</p>
+            {r.requestedBy === me.user.id ? (
+              <p className="text-slate-700">You asked for this: someone else must decide.</p>
+            ) : (
+              <div className="mt-1 flex gap-2">
+                <button
+                  className={smallButton}
+                  aria-label={`Approve exception for ${name(r)}`}
+                  onClick={() => setDeciding({ r, d: 'APPROVED' })}
+                >
+                  Approve
+                </button>
+                <button
+                  className={smallButton}
+                  aria-label={`Refuse exception for ${name(r)}`}
+                  onClick={() => setDeciding({ r, d: 'REJECTED' })}
+                >
+                  Refuse
+                </button>
+              </div>
+            )}
           </li>
         ))}
       </ul>
-    </section>
+      <ActionDialog
+        open={deciding !== null}
+        title={`${deciding?.d === 'APPROVED' ? 'Approve' : 'Refuse'} exception for ${
+          deciding ? name(deciding.r) : ''
+        }`}
+        confirmLabel={deciding?.d === 'APPROVED' ? 'Approve exception' : 'Refuse exception'}
+        danger={deciding?.d === 'REJECTED'}
+        reasonLabel={
+          deciding?.d === 'APPROVED' ? 'Note' : 'Why is it refused? The dispatcher sees this'
+        }
+        reasonRequired={deciding?.d === 'REJECTED'}
+        onCancel={() => setDeciding(null)}
+        onConfirm={(note) =>
+          api.send(
+            'POST',
+            `/api/v1/allocation-exception-requests/${deciding!.r.id}/decide`,
+            orgId,
+            { decision: deciding!.d, ...(note ? { note } : {}) },
+          )
+        }
+      >
+        <p>
+          {deciding?.d === 'APPROVED'
+            ? 'The check is re-run first. You are recorded as the named approver; the exception ' +
+              'ends on its expiry date.'
+            : 'The job stays unallocated. Your name and reason are recorded.'}
+        </p>
+      </ActionDialog>
+    </Section>
   );
 }
 
-/** E3: asks a named approver; nothing is excepted until that person approves. */
+/** Where an exception request stands, in words, with who asked and who decided. */
+function RequestState({ request }: { request: Row | undefined }) {
+  if (!request) return null;
+  if (request.status === 'REQUESTED')
+    return (
+      <p role="status" className="mt-1 text-slate-800">
+        <StatusBadge status="AMBER" reason="Exception asked for" />{' '}
+        {request.requestedByName ?? 'A dispatcher'} asked on {fmtDateTime(request.requestedAt)}. A
+        manager who did not ask must decide.
+      </p>
+    );
+  if (request.status === 'REJECTED')
+    return (
+      <p className="mt-1 text-slate-800">
+        <StatusBadge status="RED" reason="Exception refused" /> by{' '}
+        {request.decidedByName ?? 'a manager'}
+        {request.decisionNote ? `: ${request.decisionNote}` : ''}
+      </p>
+    );
+  return null;
+}
+
 function ExceptionForm(p: {
   jobId: string;
   shiftId: string;
   checkCode: string;
+  mode: 'approve' | 'request';
   onClose: () => void;
 }) {
   const { api, orgId } = useApp();
   const { run, msg } = useRun();
-  const approvers = useOne<{ data: { id: string; name: string }[] }>(
-    '/api/v1/allocation-exceptions/approvers',
-  );
   const max = londonDate(new Date(Date.now() + 7 * 86_400_000));
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    const approverId = String(f.get('approver'));
-    const name = approvers.data?.data.find((x) => x.id === approverId)?.name ?? 'the approver';
     const ok = await run(
       () =>
-        api.send('POST', '/api/v1/allocation-exceptions', orgId, {
-          jobId: p.jobId,
-          shiftId: p.shiftId,
-          checkCode: p.checkCode,
-          approverId,
-          reason: String(f.get('reason')),
-          expiresAt: londonDateTime(String(f.get('until')), '23:59').toISOString(),
-        }),
-      `Request sent to ${name}. Allocation stays unavailable until they approve.`,
+        api.send(
+          'POST',
+          p.mode === 'approve'
+            ? '/api/v1/allocation-exceptions'
+            : '/api/v1/allocation-exception-requests',
+          orgId,
+          {
+            jobId: p.jobId,
+            shiftId: p.shiftId,
+            checkCode: p.checkCode,
+            reason: String(f.get('reason')),
+            expiresAt: londonDateTime(String(f.get('until')), '23:59').toISOString(),
+          },
+        ),
+      p.mode === 'approve'
+        ? 'Exception recorded with you as the named approver.'
+        : 'Exception asked for. A manager decides; the job stays unallocated until then.',
     );
     if (ok) p.onClose();
   }
-  const people = approvers.data?.data ?? [];
   return (
     <form
       onSubmit={submit}
       className="mt-2 space-y-2 rounded-lg border border-hub-line bg-white p-2"
     >
-      <Field label="Ask">
-        <select name="approver" required defaultValue="" className={input}>
-          <option value="" disabled>
-            {approvers.isLoading
-              ? 'Loading…'
-              : people.length
-                ? 'Choose an approver'
-                : 'Nobody can approve'}
-          </option>
-          {people.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.name}
-            </option>
-          ))}
-        </select>
-      </Field>
       <Field label="Reason (recorded in the audit trail)">
         <textarea name="reason" required minLength={10} maxLength={1000} className={input} />
       </Field>
@@ -696,7 +791,9 @@ function ExceptionForm(p: {
         />
       </Field>
       <div className="flex gap-2">
-        <button className={button}>Send request</button>
+        <button className={button}>
+          {p.mode === 'approve' ? 'Approve exception' : 'Send request'}
+        </button>
         <button type="button" className={smallButton} onClick={p.onClose}>
           Cancel
         </button>
@@ -706,47 +803,196 @@ function ExceptionForm(p: {
   );
 }
 
+const EQUIPMENT_NEEDS: Record<string, string> = {
+  WHEELCHAIR_RAMP: 'Wheelchair ramp',
+  CARRY_CHAIR: 'Carry chair',
+  STRETCHER: 'Stretcher',
+  OXYGEN: 'Oxygen',
+  BARIATRIC_STRETCHER: 'Bariatric stretcher',
+};
+const SKILL_NEEDS: Record<string, string> = {
+  BARIATRIC: 'Bariatric handling',
+  MENTAL_HEALTH: 'Mental health transport',
+  PAEDIATRIC: 'Children',
+  END_OF_LIFE: 'End of life care',
+};
+const checked = (f: FormData, name: string) => f.getAll(name).map(String);
+
+/**
+ * Booking with the needs the planner checks against (finding 70). Patient contact details go
+ * only into the protected contact record, never into the job, the URL or the audit trail.
+ */
+const MOBILITY_LABEL: Record<string, string> = {
+  WALKING: 'Walking',
+  WHEELCHAIR: 'Wheelchair (vehicle chair)',
+  OWN_WHEELCHAIR: 'Own wheelchair',
+  CARRY_CHAIR: 'Carry chair',
+  STRETCHER: 'Stretcher',
+  BARIATRIC: 'Bariatric',
+};
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 function BookJourney({ date, locations }: { date: string; locations?: Row[] }) {
   const { api, orgId } = useApp();
   const { run, msg } = useRun();
+  const [repeat, setRepeat] = useState('');
+  const [mobility, setMobility] = useState('WALKING');
+  const [contract, setContract] = useState('');
+  const [withReturn, setWithReturn] = useState(false);
+  const [warnings, setWarnings] = useState<string[]>([]);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
     const f = new FormData(form);
-    const at = (name: string) => londonDateTime(String(f.get('date')), String(f.get(name)));
+    const text = (k: string) => String(f.get(k) ?? '').trim();
+    const at = (name: string) => londonDateTime(text('date'), text(name));
     const from = at('from');
     const minutes = Number(f.get('duration') || 60);
+    const contactName = text('contactName');
+    const back = withReturn ? at('returnFrom') : null;
+    let out: Row | null = null;
+    setWarnings([]);
     const ok = await run(
-      () =>
-        api.send('POST', '/api/v1/bookings', orgId, {
-          customer: String(f.get('customer')),
+      async () =>
+        (out = (await api.send('POST', '/api/v1/bookings', orgId, {
+          customer: text('customer'),
+          ...(text('reference') ? { reference: text('reference') } : {}),
+          ...(contract ? { contractType: contract } : {}),
+          ...(contract === 'NHS'
+            ? {
+                nhsEligibility: {
+                  met: f.get('nhsMet') === 'on',
+                  criteria: text('nhsCriteria'),
+                  assessedBy: text('nhsAssessedBy'),
+                },
+              }
+            : {}),
+          ...(back
+            ? {
+                returnJourney: {
+                  pickupFrom: back.toISOString(),
+                  pickupTo: at('returnTo').toISOString(),
+                  plannedStart: back.toISOString(),
+                  plannedEnd: new Date(back.getTime() + minutes * 60_000).toISOString(),
+                },
+              }
+            : {}),
+          ...(contactName
+            ? {
+                patientContact: {
+                  name: contactName,
+                  ...(text('contactPhone') ? { phone: text('contactPhone') } : {}),
+                },
+              }
+            : {}),
+          ...(repeat && text('until')
+            ? {
+                recurrence: {
+                  freq: repeat,
+                  interval: 1,
+                  until: text('until'),
+                  ...(repeat === 'WEEKLY' && f.getAll('weekday').length
+                    ? { byWeekday: f.getAll('weekday').map(Number) }
+                    : {}),
+                },
+              }
+            : {}),
           job: {
-            locationId: String(f.get('location')),
+            locationId: text('location'),
             pickupFrom: from.toISOString(),
             pickupTo: at('to').toISOString(),
+            ...(text('appointment') ? { appointmentAt: at('appointment').toISOString() } : {}),
             plannedStart: from.toISOString(),
             plannedEnd: new Date(from.getTime() + minutes * 60_000).toISOString(),
-            pickupAddress: String(f.get('pickup')),
-            destinationAddress: String(f.get('destination')),
-            patientRef: String(f.get('ref')),
-            mobility: String(f.get('mobility')),
+            pickupAddress: text('pickup'),
+            destinationAddress: text('destination'),
+            ...(text('accessNotes') ? { accessNotes: text('accessNotes') } : {}),
+            patientRef: text('ref'),
+            mobility,
+            ...(text('weight') ? { weightKg: Number(text('weight')) } : {}),
+            stairs: f.get('stairs') === 'on',
+            escorts: Number(f.get('escorts') || 0),
+            infectionPrecautions: f.get('infection') === 'on',
+            ...(text('comms') ? { commsNeeds: text('comms') } : {}),
+            requiredEquipment: checked(f, 'equipment'),
+            requiredSkills: checked(f, 'skills'),
             crewSize: Number(f.get('crew') || 2),
             accessPlanReviewed: f.get('access') === 'on',
+            blueLights: f.get('blueLights') === 'on',
           },
-        }),
-      'Journey booked. It is now waiting for allocation.',
+        })) as Row),
+      repeat
+        ? 'Journeys booked for each date in the series. They are now waiting for allocation.'
+        : 'Journey booked. It is now waiting for allocation.',
     );
-    if (ok) form.reset();
+    if (ok) {
+      setWarnings(((out as Row | null)?.warnings as string[] | undefined) ?? []);
+      form.reset();
+      setRepeat('');
+      setMobility('WALKING');
+      setContract('');
+      setWithReturn(false);
+    }
   }
   return (
     <Section title="Book a journey">
-      <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+      <form
+        onSubmit={submit}
+        className="flex flex-wrap items-end gap-3"
+        aria-label="Book a journey"
+      >
         <Field label="Customer">
           <input name="customer" required minLength={2} className={input} />
         </Field>
-        <Field label="Booking reference (not a name)">
-          <input name="ref" required pattern="[A-Za-z0-9\-]{2,30}" className={input} />
+        <Field label="Customer order number (optional)">
+          <input name="reference" maxLength={60} className={input} />
         </Field>
+        <Field label="Booking reference (never a patient name)">
+          <input
+            name="ref"
+            required
+            pattern="[A-Za-z0-9\-]{2,30}"
+            title="Letters, numbers and hyphens only: use the booking reference, not a name"
+            aria-describedby="ref-help"
+            className={input}
+          />
+        </Field>
+        <p id="ref-help" className="w-full text-xs text-slate-700">
+          The reference is shown on the grid and to crews. Never type a patient&apos;s name here.
+        </p>
+        <Field label="Contract">
+          <select
+            name="contract"
+            className={input}
+            value={contract}
+            onChange={(e) => setContract(e.target.value)}
+          >
+            <option value="">Not stated</option>
+            <option value="NHS">NHS</option>
+            <option value="PRIVATE">Private</option>
+            <option value="INSURER">Insurer</option>
+          </select>
+        </Field>
+        {contract === 'NHS' && (
+          <fieldset className="flex flex-wrap items-end gap-3 text-sm">
+            <legend className="font-medium">NHS eligibility</legend>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" name="nhsMet" /> Eligibility criteria met
+            </label>
+            <Field label="Criteria applied">
+              <input name="nhsCriteria" required minLength={3} maxLength={500} className={input} />
+            </Field>
+            <Field label="Assessed by">
+              <input
+                name="nhsAssessedBy"
+                required
+                minLength={2}
+                maxLength={120}
+                className={input}
+              />
+            </Field>
+          </fieldset>
+        )}
         <Field label="Location">
           <select name="location" required className={input}>
             {(locations ?? []).map((l) => (
@@ -765,6 +1011,9 @@ function BookJourney({ date, locations }: { date: string; locations?: Row[] }) {
         <Field label="Pickup by">
           <input name="to" type="time" required className={input} />
         </Field>
+        <Field label="Appointment time (optional)">
+          <input name="appointment" type="time" className={input} />
+        </Field>
         <Field label="Minutes">
           <input
             name="duration"
@@ -781,14 +1030,48 @@ function BookJourney({ date, locations }: { date: string; locations?: Row[] }) {
         <Field label="Destination">
           <input name="destination" required minLength={3} className={input} />
         </Field>
+        <Field label="Access notes (optional, no names)">
+          <input name="accessNotes" maxLength={500} className={input} />
+        </Field>
         <Field label="Mobility">
-          <select name="mobility" className={input}>
-            {['WALKING', 'WHEELCHAIR', 'CARRY_CHAIR', 'STRETCHER'].map((m) => (
+          <select
+            name="mobility"
+            className={input}
+            value={mobility}
+            onChange={(e) => setMobility(e.target.value)}
+          >
+            {Object.entries(MOBILITY_LABEL).map(([m, label]) => (
               <option key={m} value={m}>
-                {words(m)}
+                {label}
               </option>
             ))}
           </select>
+        </Field>
+        <Field
+          label={
+            mobility === 'STRETCHER' || mobility === 'BARIATRIC'
+              ? 'Patient weight in kg (checked against stretcher and vehicle load)'
+              : 'Patient weight in kg (optional)'
+          }
+        >
+          <input
+            name="weight"
+            type="number"
+            min={1}
+            max={500}
+            required={mobility === 'STRETCHER' || mobility === 'BARIATRIC'}
+            className={`${input} w-24`}
+          />
+        </Field>
+        <Field label="Escorts travelling">
+          <input
+            name="escorts"
+            type="number"
+            min={0}
+            max={4}
+            defaultValue={0}
+            className={`${input} w-16`}
+          />
         </Field>
         <Field label="Crew">
           <input
@@ -800,12 +1083,118 @@ function BookJourney({ date, locations }: { date: string; locations?: Row[] }) {
             className={`${input} w-16`}
           />
         </Field>
+        <Field label="Communication needs (optional)">
+          <input
+            name="comms"
+            maxLength={200}
+            placeholder="For example: British Sign Language"
+            className={input}
+          />
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="stairs" /> Stairs at pickup or destination
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="infection" /> Infection precautions needed
+        </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="access" /> Access plan reviewed
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="blueLights" /> Blue-light (emergency) journey
+        </label>
+        <fieldset className="flex flex-wrap items-end gap-3 text-sm">
+          <legend className="font-medium">Return journey</legend>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={withReturn}
+              onChange={(e) => setWithReturn(e.target.checked)}
+            />{' '}
+            Book a return journey (destination back to pickup)
+          </label>
+          {withReturn && (
+            <>
+              <Field label="Return pickup from">
+                <input name="returnFrom" type="time" required className={input} />
+              </Field>
+              <Field label="Return pickup by">
+                <input name="returnTo" type="time" required className={input} />
+              </Field>
+            </>
+          )}
+        </fieldset>
+        <fieldset className="flex flex-wrap gap-3 text-sm">
+          <legend className="font-medium">Equipment needed</legend>
+          {Object.entries(EQUIPMENT_NEEDS).map(([k, v]) => (
+            <label key={k} className="flex items-center gap-1">
+              <input type="checkbox" name="equipment" value={k} /> {v}
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="flex flex-wrap gap-3 text-sm">
+          <legend className="font-medium">Crew skills needed</legend>
+          {Object.entries(SKILL_NEEDS).map(([k, v]) => (
+            <label key={k} className="flex items-center gap-1">
+              <input type="checkbox" name="skills" value={k} /> {v}
+            </label>
+          ))}
+        </fieldset>
+        <fieldset className="flex flex-wrap items-end gap-3 text-sm">
+          <legend className="font-medium">
+            Patient contact (kept separately, shown only to staff allowed to see it)
+          </legend>
+          <Field label="Contact name (optional)">
+            <input name="contactName" maxLength={120} autoComplete="off" className={input} />
+          </Field>
+          <Field label="Contact phone (optional)">
+            <input
+              name="contactPhone"
+              type="tel"
+              maxLength={30}
+              autoComplete="off"
+              className={input}
+            />
+          </Field>
+        </fieldset>
+        <fieldset className="flex flex-wrap items-end gap-3 text-sm">
+          <legend className="font-medium">Repeat</legend>
+          <Field label="Repeats">
+            <select className={input} value={repeat} onChange={(e) => setRepeat(e.target.value)}>
+              <option value="">Does not repeat</option>
+              <option value="DAILY">Every day</option>
+              <option value="WEEKLY">Every week</option>
+            </select>
+          </Field>
+          {repeat === 'WEEKLY' && (
+            <fieldset className="flex flex-wrap items-center gap-2">
+              <legend className="text-sm">On these days (leave blank for the booking day)</legend>
+              {WEEKDAYS.map((d, i) => (
+                <label key={d} className="flex items-center gap-1">
+                  <input type="checkbox" name="weekday" value={i + 1} /> {d}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {repeat && (
+            <Field label="Until">
+              <input name="until" type="date" required min={date} className={input} />
+            </Field>
+          )}
+        </fieldset>
         <button className={button}>Book</button>
       </form>
       {msg}
+      {warnings.length > 0 && (
+        <div role="status" className="rounded border border-amber-700 bg-amber-50 p-3 text-sm">
+          <StatusBadge status="AMBER" reason="Check before allocating" />
+          <ul className="ml-4 list-disc">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </Section>
   );
 }
@@ -816,34 +1205,64 @@ function PlanShift({ date, locations }: { date: string; locations?: Row[] }) {
   const { run, msg } = useRun();
   const vehicles = useOne<{ data: Row[] }>('/api/v1/vehicles', can('fleet.vehicle.view'));
   const staff = useOne<{ data: Row[] }>('/api/v1/staff?lifecycle=ACTIVE');
+  const [driver, setDriver] = useState('');
+  const [second, setSecond] = useState('');
+  const [secondRole, setSecondRole] = useState('CARE_ASSISTANT');
+  const [day, setDay] = useState(date);
+  const [start, setStart] = useState('07:00');
+  const [end, setEnd] = useState('19:00');
+  const [vehicleId, setVehicleId] = useState('');
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
     const f = new FormData(form);
-    const day = String(f.get('date'));
+    const own = (prefix: string) => {
+      const a = String(f.get(`${prefix}From`) ?? '');
+      const b = String(f.get(`${prefix}To`) ?? '');
+      return {
+        ...(a ? { startsAt: londonDateTime(day, a).toISOString() } : {}),
+        ...(b ? { endsAt: londonDateTime(day, b).toISOString() } : {}),
+      };
+    };
     const crew = [
-      { staffId: String(f.get('driver')), role: 'DRIVER' },
-      ...(f.get('second')
-        ? [{ staffId: String(f.get('second')), role: String(f.get('secondRole')) }]
+      { staffId: driverId, role: 'DRIVER', ...own('driver') },
+      ...(second && second !== driverId
+        ? [{ staffId: second, role: secondRole, ...own('second') }]
         : []),
     ];
     const ok = await run(
       () =>
         api.send('POST', '/api/v1/shifts', orgId, {
           locationId: String(f.get('location')),
-          vehicleId: String(f.get('vehicle')),
-          startsAt: londonDateTime(day, String(f.get('start'))).toISOString(),
-          endsAt: londonDateTime(day, String(f.get('end'))).toISOString(),
+          vehicleId: vehicleId || usable[0]?.id || '',
+          startsAt: londonDateTime(day, start).toISOString(),
+          endsAt: londonDateTime(day, end).toISOString(),
           crew,
         }),
       'Shift planned.',
     );
-    if (ok) form.reset();
+    if (ok) {
+      form.reset();
+      setDriver('');
+      setSecond('');
+    }
   }
+  const shiftWindow =
+    day && start && end && end > start
+      ? {
+          from: londonDateTime(day, start).toISOString(),
+          to: londonDateTime(day, end).toISOString(),
+        }
+      : null;
   const people = staff.data?.data ?? [];
+  const drivers = people.filter((p) => (p.roles as string[]).includes('DRIVER'));
+  const driverId = driver || drivers[0]?.id || '';
+  const all = vehicles.data?.data ?? [];
+  const usable = all.filter((v) => v.status === 'AVAILABLE');
+  const unusable = all.filter((v) => v.status !== 'AVAILABLE');
   return (
     <Section title="Plan a shift">
-      <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+      <form onSubmit={submit} className="flex flex-wrap items-end gap-3" aria-label="Plan a shift">
         <Field label="Location">
           <select name="location" required className={input}>
             {(locations ?? []).map((l) => (
@@ -854,28 +1273,95 @@ function PlanShift({ date, locations }: { date: string; locations?: Row[] }) {
           </select>
         </Field>
         <Field label="Vehicle">
-          <select name="vehicle" required className={input}>
-            {(vehicles.data?.data ?? []).map((v) => (
+          <select
+            name="vehicle"
+            required
+            className={input}
+            value={vehicleId || usable[0]?.id || ''}
+            onChange={(e) => setVehicleId(e.target.value)}
+          >
+            {usable.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.callsign}
-                {v.status !== 'AVAILABLE' ? ` (${words(v.status)})` : ''}
+              </option>
+            ))}
+            {unusable.length > 0 && (
+              <optgroup label="Not available (cannot be planned)">
+                {unusable.map((v) => (
+                  <option key={v.id} value={v.id} disabled>
+                    {v.callsign} – {VEHICLE_WORD[v.status] ?? 'not available'}
+                    {v.statusReason ? `: ${v.statusReason}` : ''}
+                    {v.expectedReturnOn ? `; expected back ${fmtDate(v.expectedReturnOn)}` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </Field>
+        <Field label="Shift date">
+          <input
+            name="date"
+            type="date"
+            required
+            value={day}
+            onChange={(e) => setDay(e.target.value)}
+            className={input}
+          />
+        </Field>
+        <Field label="Start">
+          <input
+            name="start"
+            type="time"
+            required
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            className={input}
+          />
+        </Field>
+        <Field label="End">
+          <input
+            name="end"
+            type="time"
+            required
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+            className={input}
+          />
+        </Field>
+        <Field label="Driver">
+          <select
+            name="driver"
+            required
+            className={input}
+            value={driverId}
+            onChange={(e) => {
+              setDriver(e.target.value);
+              if (second === e.target.value) setSecond('');
+            }}
+          >
+            {drivers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.displayName} ({p.staffNo})
               </option>
             ))}
           </select>
         </Field>
-        <Field label="Shift date">
-          <input name="date" type="date" required defaultValue={date} className={input} />
+        <Field label="Driver from (optional)">
+          <input name="driverFrom" type="time" className={input} />
         </Field>
-        <Field label="Start">
-          <input name="start" type="time" required defaultValue="07:00" className={input} />
+        <Field label="Driver to (optional)">
+          <input name="driverTo" type="time" className={input} />
         </Field>
-        <Field label="End">
-          <input name="end" type="time" required defaultValue="19:00" className={input} />
-        </Field>
-        <Field label="Driver">
-          <select name="driver" required className={input}>
+        <Field label="Second crew member">
+          <select
+            name="second"
+            className={input}
+            value={second}
+            onChange={(e) => setSecond(e.target.value)}
+          >
+            <option value="">None</option>
             {people
-              .filter((p) => (p.roles as string[]).includes('DRIVER'))
+              .filter((p) => p.id !== driverId)
               .map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.displayName} ({p.staffNo})
@@ -883,18 +1369,13 @@ function PlanShift({ date, locations }: { date: string; locations?: Row[] }) {
               ))}
           </select>
         </Field>
-        <Field label="Second crew member">
-          <select name="second" className={input}>
-            <option value="">None</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.displayName} ({p.staffNo})
-              </option>
-            ))}
-          </select>
-        </Field>
         <Field label="Second crew role">
-          <select name="secondRole" className={input}>
+          <select
+            name="secondRole"
+            className={input}
+            value={secondRole}
+            onChange={(e) => setSecondRole(e.target.value)}
+          >
             {['CARE_ASSISTANT', 'EMERGENCY_CARE_ASSISTANT', 'TECHNICIAN', 'PARAMEDIC'].map((r) => (
               <option key={r} value={r}>
                 {words(r)}
@@ -902,6 +1383,35 @@ function PlanShift({ date, locations }: { date: string; locations?: Row[] }) {
             ))}
           </select>
         </Field>
+        {second && (
+          <>
+            <Field label="Second crew from (optional)">
+              <input name="secondFrom" type="time" className={input} />
+            </Field>
+            <Field label="Second crew to (optional)">
+              <input name="secondTo" type="time" className={input} />
+            </Field>
+          </>
+        )}
+        <div className="w-full space-y-1">
+          {driverId && shiftWindow && (
+            <CrewReadiness
+              staffId={driverId}
+              name={people.find((p) => p.id === driverId)?.displayName ?? 'Driver'}
+              role="DRIVER"
+              window={shiftWindow}
+              vehicleId={vehicleId || usable[0]?.id}
+            />
+          )}
+          {second && shiftWindow && (
+            <CrewReadiness
+              staffId={second}
+              name={people.find((p) => p.id === second)?.displayName ?? 'Second crew member'}
+              role={secondRole}
+              window={shiftWindow}
+            />
+          )}
+        </div>
         <button className={button}>Plan shift</button>
       </form>
       {msg}

@@ -15,7 +15,7 @@ const me = (permissions: string[]): MeResponse => ({
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Exora',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'DISPATCHER',
       roleName: 'Dispatcher',
@@ -101,19 +101,14 @@ const check = (code: string, result: string, overridable = false, reasonText = '
   details: [],
 });
 
-function renderPlanner(
-  permissions: string[],
-  validation: object,
-  extra: Record<string, unknown> = {},
-) {
+function renderPlanner(permissions: string[], validation: object) {
   const send = vi.fn(async (_m: string, path: string) =>
     path.endsWith('/validate') ? validation : {},
   );
   const api: ApiClient = {
     me: async () => me(permissions),
     readyz: async () => ({ status: 'ready' }),
-    get: async (p) =>
-      p.startsWith('/api/v1/planner') ? planner : (extra[p.split('?')[0]!] ?? { data: [] }),
+    get: async (p) => (p.startsWith('/api/v1/planner') ? planner : { data: [] }),
     send: send as ApiClient['send'],
   };
   render(<App api={api} history={createMemoryHistory({ initialEntries: ['/planner'] })} />);
@@ -158,76 +153,19 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     });
   });
 
-  it('a policy failure lets the dispatcher ask a named approver, rather than grant it', async () => {
+  it('a policy failure lets a dispatcher ask; only approvers record one directly', async () => {
     const v = {
       allowed: false,
       checks: [check('COMPETENCE', 'FAIL', true, 'Bariatric competence missing')],
     };
-    const { send } = renderPlanner(DISPATCH, v, {
-      '/api/v1/allocation-exceptions/approvers': { data: [{ id: 'mgr-1', name: 'Manager' }] },
-    });
+    renderPlanner(DISPATCH, v);
     await userEvent.click(await screen.findByRole('button', { name: /J-117/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Check J-117 on AMB-01' }));
     await screen.findByText('Bariatric competence missing');
-    await userEvent.click(screen.getByRole('button', { name: 'Request exception' }));
-    await userEvent.selectOptions(await screen.findByLabelText('Ask'), 'mgr-1');
-    await userEvent.type(
-      screen.getByLabelText('Reason (recorded in the audit trail)'),
-      'Bariatric-trained supervisor attending',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Send request' }));
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(
-        'POST',
-        '/api/v1/allocation-exceptions',
-        ORG,
-        expect.objectContaining({
-          jobId: JOB,
-          checkCode: 'COMPETENCE',
-          approverId: 'mgr-1',
-          reason: 'Bariatric-trained supervisor attending',
-        }),
-      ),
-    );
-    expect(screen.queryByRole('button', { name: 'Approve exception' })).toBeNull();
-  });
-
-  it('the named approver sees the request and declines it with a reason, in the page', async () => {
-    const request = {
-      id: 'req-1',
-      jobId: JOB,
-      jobCode: 'J-117',
-      shiftId: S3,
-      checkCode: 'COMPETENCE',
-      reason: 'Bariatric-trained supervisor attending',
-      expiresAt: '2026-11-08T23:59:00Z',
-      requestedBy: 'disp-1',
-      requestedByName: 'Dispatcher',
-      approverId: '01900000-0000-7000-8000-000000000101',
-      approverName: 'Dev',
-      state: 'REQUESTED',
-      decisionReason: null,
-      createdAt: '2026-11-06T09:00:00Z',
-    };
-    const { send } = renderPlanner(
-      ['jobs.job.view', 'allocation.exception.approve'],
-      {},
-      { '/api/v1/allocation-exceptions': { data: [request] } },
-    );
-    const panel = await screen.findByRole('region', { name: 'Exception requests waiting for you' });
-    expect(panel).toHaveTextContent('J-117');
-    expect(panel).toHaveTextContent('Dispatcher');
-    await userEvent.type(
-      within(panel).getByLabelText('Reason for your decision'),
-      'No bariatric supervisor is free that day',
-    );
-    await userEvent.click(within(panel).getByRole('button', { name: 'Decline J-117' }));
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith('POST', '/api/v1/allocation-exceptions/req-1/decide', ORG, {
-        decision: 'DECLINED',
-        reason: 'No bariatric supervisor is free that day',
-      }),
-    );
+    expect(
+      screen.getByRole('button', { name: 'Ask for an exception for Competence' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Approve an exception/ })).toBeNull();
   });
 
   it('when every check passes, allocates then notifies the crew', async () => {
@@ -259,10 +197,63 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
   });
 
+  it('manage shift: takes a not-started job off the shift with a reason (task 26)', async () => {
+    const { send } = renderPlanner(DISPATCH, {});
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage shift for AMB-01' }));
+    const jobs = await screen.findByRole('table', { name: 'Jobs on AMB-01' });
+    expect(within(jobs).getByRole('row', { name: /J-105/ })).toHaveTextContent('Under way');
+    expect(within(jobs).queryByRole('button', { name: 'Cancel J-105' })).toBeNull();
+    await userEvent.click(within(jobs).getByRole('button', { name: 'Take J-104 off this shift' }));
+    const dialog = screen.getByRole('dialog', { name: 'Take J-104 off this shift' });
+    const confirm = within(dialog).getByRole('button', { name: 'Take off shift' });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Patient not ready until later');
+    await userEvent.click(confirm);
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'POST',
+        '/api/v1/jobs/j104/status',
+        ORG,
+        expect.objectContaining({ state: 'REASSIGNED', reason: 'Patient not ready until later' }),
+      ),
+    );
+  });
+
+  it('manage shift: stands down crew and cancels a planned shift (task 26)', async () => {
+    const { send } = renderPlanner(DISPATCH, {});
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage shift for AMB-01' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Stand down Alex Driver' }));
+    let dialog = screen.getByRole('dialog', { name: 'Stand down Alex Driver' });
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Called in sick');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Stand down' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('POST', `/api/v1/shifts/${S1}/crew/${S1}a/end`, ORG, {
+        reason: 'Called in sick',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel shift on AMB-01' }));
+    dialog = screen.getByRole('dialog', { name: 'Cancel shift on AMB-01' });
+    expect(dialog).toHaveTextContent('2 jobs on this shift go back to the planner');
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Vehicle needed elsewhere');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel shift' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('POST', `/api/v1/shifts/${S1}/cancel`, ORG, {
+        reason: 'Vehicle needed elsewhere',
+      }),
+    );
+  });
+
+  it('people without allocation rights cannot manage shifts (task 26)', async () => {
+    renderPlanner(['jobs.job.view'], {});
+    expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Manage shift for AMB-01' })).toBeNull();
+  });
+
   it('people without job access are told so', async () => {
     renderPlanner(['dashboard.view'], {});
-    expect(
-      await screen.findByText('You do not have permission to view the work planner.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your role does not give access to this page.',
+    );
+    expect(screen.queryByRole('link', { name: 'Work planner' })).toBeNull();
   });
 });

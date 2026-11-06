@@ -8,6 +8,8 @@ export * from './storage.js';
 export * from './governance.js';
 export * from './dispatch.js';
 export * from './push.js';
+export * from './notification-senders.js';
+export * from './escalations.js';
 export * from './reports.js';
 export * from './data-export.js';
 export * from './privacy.js';

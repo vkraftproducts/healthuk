@@ -22,6 +22,7 @@ import {
   UploadRequest,
   VerifyInput,
   type EvidenceVersionDto,
+  type ReviewQueueItemDto,
 } from '@hub/contracts';
 import { Public, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
@@ -32,7 +33,7 @@ import { DB } from '../../db.provider.js';
 import { BLOB_STORE, sha256, type BlobStore } from '../../storage/blob-store.js';
 import { SCANNER, type Scanner } from '../../storage/scanner.js';
 import { signBlobToken, verifyBlobToken } from '../../storage/tokens.js';
-import { canSeeEvidence, toEvidenceDto, versionInclude } from './evidence.mapper.js';
+import { canSeeEvidence, toEvidenceDto, versionInclude, withNames } from './evidence.mapper.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
 const UPLOAD_TTL_S = 15 * 60;
@@ -210,7 +211,6 @@ export class EvidenceController {
         });
       }
       await recomputeForEvidenceItem(tx, v.itemId, now);
-      if (status === 'CLEAN') await settleSentBack(tx, v.itemId, now);
       await audit(this.db, tx, hub, {
         action: 'evidence.upload.complete',
         entity: 'evidence_version',
@@ -223,6 +223,74 @@ export class EvidenceController {
           include: versionInclude,
         }),
       );
+    });
+  }
+
+  /**
+   * B4 review queue: scanned, clean, linked documents with no decision yet, oldest first, with what
+   * each one is evidence for. Location-scoped reviewers see their locations and organisation items.
+   */
+  @RequirePermission('compliance.evidence.verify')
+  @Get('review-queue')
+  async reviewQueue(@Hub() hub: HubRequestContext): Promise<{ data: ReviewQueueItemDto[] }> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.evidenceVersion.findMany({
+        where: {
+          uploadedAt: { not: null },
+          scanStatus: 'CLEAN',
+          verification: null,
+          item: { links: { some: {} } },
+        },
+        include: versionInclude,
+        orderBy: { uploadedAt: 'asc' },
+        take: 200,
+      });
+      const visible = rows.filter((r) => canSeeEvidence(hub, r.item.sensitivity, r.uploadedBy));
+      const instanceIds = [
+        ...new Set(visible.flatMap((r) => r.item.links.map((l) => l.instanceId))),
+      ];
+      const instances = await tx.requirementInstance.findMany({
+        where: { id: { in: instanceIds } },
+        include: {
+          template: { select: { title: true } },
+          templateVersion: { select: { deadlineKind: true } },
+        },
+      });
+      const ids = (t: string) =>
+        instances.filter((i) => i.subjectType === t).map((i) => i.subjectId);
+      const label = new Map<string, string>();
+      for (const s of await tx.staff.findMany({ where: { id: { in: ids('STAFF') } } }))
+        label.set(s.id, `${s.displayName} (${s.staffNo})`);
+      for (const v of await tx.vehicle.findMany({ where: { id: { in: ids('VEHICLE') } } }))
+        label.set(v.id, `${v.callsign} ${v.registration}`);
+      for (const a of await tx.equipmentAsset.findMany({ where: { id: { in: ids('EQUIPMENT') } } }))
+        label.set(a.id, `${a.category} ${a.assetTag}`);
+      for (const l of await tx.location.findMany({ where: { id: { in: ids('PREMISES') } } }))
+        label.set(l.id, l.name);
+      const inScope = (i: (typeof instances)[number]) =>
+        !hub.locationIds || !i.locationId || hub.locationIds.includes(i.locationId);
+      const named = await withNames(tx, visible.map(toEvidenceDto));
+      const data: ReviewQueueItemDto[] = [];
+      named.forEach((dto, n) => {
+        const reqs = instances.filter(
+          (i) => visible[n]!.item.links.some((l) => l.instanceId === i.id) && inScope(i),
+        );
+        if (reqs.length === 0) return;
+        data.push({
+          ...dto,
+          mine: dto.uploadedBy === hub.user.id,
+          requirements: reqs.map((i) => ({
+            instanceId: i.id,
+            templateTitle: i.template.title,
+            deadlineKind: i.templateVersion.deadlineKind,
+            subjectType: i.subjectType,
+            subjectId: i.subjectId,
+            subjectLabel:
+              label.get(i.subjectId) ?? (i.subjectType === 'ORGANISATION' ? 'Organisation' : '—'),
+          })),
+        });
+      });
+      return { data };
     });
   }
 
@@ -303,20 +371,6 @@ export class EvidenceController {
         }
       }
       for (const id of instanceIds) await recomputeInstance(tx, id, now);
-      if (input.decision === 'REJECTED')
-        // Sent back: the uploader is told why, until they send a replacement.
-        await tx.alert.create({
-          data: {
-            organisationId: v.organisationId,
-            sourceType: 'EVIDENCE_RETURNED',
-            sourceId: v.id,
-            severity: 'MEDIUM',
-            reasonCode: 'SENT_BACK',
-            reasonText: `Sent back: ${input.reason ?? 'no reason given'}`,
-            ownerUserId: v.uploadedBy,
-            raisedAt: now,
-          },
-        });
       await audit(this.db, tx, hub, {
         action: 'evidence.verify',
         entity: 'evidence_version',
@@ -417,31 +471,6 @@ export class EvidenceController {
       disposition: 'attachment; filename="evidence"',
     });
   }
-}
-
-/**
- * A replacement document has arrived: rejections of earlier documents for the same requirements
- * are no longer waiting on anyone, so their "sent back" alerts are resolved.
- */
-async function settleSentBack(tx: TenantTx, itemId: string, now: Date) {
-  const links = await tx.evidenceLink.findMany({ where: { itemId }, select: { instanceId: true } });
-  if (links.length === 0) return;
-  const rejected = await tx.evidenceVersion.findMany({
-    where: {
-      item: { links: { some: { instanceId: { in: links.map((l) => l.instanceId) } } } },
-      verification: { decision: 'REJECTED' },
-    },
-    select: { id: true },
-  });
-  if (rejected.length === 0) return;
-  await tx.alert.updateMany({
-    where: {
-      sourceType: 'EVIDENCE_RETURNED',
-      sourceId: { in: rejected.map((r) => r.id) },
-      state: { not: 'RESOLVED' },
-    },
-    data: { state: 'RESOLVED', resolvedAt: now },
-  });
 }
 
 /**

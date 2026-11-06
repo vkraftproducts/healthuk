@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { Db } from '@hub/db';
 import { LocalBlobStore, runPendingExports } from '@hub/domain';
-import { addDays, londonDate } from '@hub/rules';
+import { addDays, addWorkingDays, londonDate } from '@hub/rules';
 import { unzipSync, strFromU8 } from 'fflate';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { SEED_IDS, makeApp, sign } from './harness.js';
@@ -198,10 +198,32 @@ describe('audit builder, runs and sampling [AUD-01, AUD-02]', () => {
     expect(
       (await call('POST', '/api/v1/audit-runs', { sub: 'dev|governance', body: runBody })).status,
     ).toBe(422); // inactive
-    await call('POST', `/api/v1/audit-templates/${t.body.id}/activate`, { sub: 'dev|governance' });
+    const published = (await call('GET', '/api/v1/audit-templates')).body.data.find(
+      (x: J) => x.id === t.body.id,
+    );
+    expect(published.versions[0]).toMatchObject({
+      status: 'PUBLISHED',
+      createdByName: expect.any(String),
+      approvedByName: expect.any(String),
+    });
+    // The author cannot also give the management approval (task 9).
+    expect(
+      (
+        await call('POST', `/api/v1/audit-templates/${t.body.id}/activate`, {
+          sub: 'dev|governance',
+        })
+      ).body.code,
+    ).toBe('FOUR_EYES_REQUIRED');
+    expect((await call('POST', `/api/v1/audit-templates/${t.body.id}/activate`)).status).toBe(201);
+    expect((await call('POST', `/api/v1/audit-templates/${t.body.id}/activate`)).status).toBe(409);
     const run = await call('POST', '/api/v1/audit-runs', { sub: 'dev|governance', body: runBody });
     expect(run.status).toBe(201);
     expect(run.body.code).toMatch(/^AUD-\d+$/);
+    expect(run.body).toMatchObject({
+      auditorName: expect.any(String),
+      ownerName: expect.any(String),
+      overdue: false,
+    });
 
     const staff = [SEED_IDS.staffCrew, SEED_IDS.staffCrew2];
     const sample = {
@@ -252,14 +274,35 @@ describe('audit builder, runs and sampling [AUD-01, AUD-02]', () => {
         ],
       },
     });
+    const during = await call('GET', `/api/v1/audit-runs/${run.body.id}`, {
+      sub: 'dev|governance',
+    });
+    expect(during.body.methods).toEqual(['OBSERVATION', 'RECORDS']);
+    expect(during.body.status).toBe('IN_PROGRESS');
+    expect((during.body.responses as J[]).every((r) => typeof r.recordedByName === 'string')).toBe(
+      true,
+    );
+    // Every control must be answered before submitting (WORKFLOWS G2).
+    const early = await call('POST', `/api/v1/audit-runs/${run.body.id}/submit`, {
+      sub: 'dev|governance',
+    });
+    expect([early.status, early.body.detail]).toEqual([400, expect.stringMatching(/HH-2/)]);
+    await call('POST', `/api/v1/audit-runs/${run.body.id}/responses`, {
+      sub: 'dev|governance',
+      body: { responses: [resp('HH-2', staff[0]!, 'NOT_ASSESSED', 'Vehicle off site')] },
+    });
     const submitted = await call('POST', `/api/v1/audit-runs/${run.body.id}/submit`, {
       sub: 'dev|governance',
     });
+    // The failed critical control raised a draft action straight away, owned by the audit owner.
     expect(submitted.body).toMatchObject({
       status: 'ACTIONS_OPEN',
       outcome: 'RED',
-      outcomeReason: 'Action required',
+      outcomeReason: 'Action outstanding',
+      overall: { result: 'NON_COMPLIANT', text: 'Non-compliant: a critical control failed' },
     });
+    expect(submitted.body.actions).toHaveLength(1);
+    expect(submitted.body.actions[0]).toMatchObject({ ownerUserId: mgr, severity: 'CRITICAL' });
     const f = submitted.body.findings as J[];
     expect(f.find((x) => x.controlCode === 'HH-1')).toMatchObject({
       summary: '1 pass / 1 fail',
@@ -334,8 +377,30 @@ describe('policies and acknowledgement [COMP-04]', () => {
     expect((await move('APPROVED', 'dev|governance')).body.code).toBe('FOUR_EYES_REQUIRED');
     await move('APPROVED');
     const pub = await move('PUBLISHED');
-    expect(pub.body.currentVersion).toMatchObject({ version: 1, effectiveFrom: today() });
+    expect(pub.body.currentVersion).toMatchObject({
+      version: 1,
+      effectiveFrom: today(),
+      reviewOverdue: false,
+      documentEvidenceVersionId: null,
+    });
     expect(pub.body.acknowledgement.required).toBeGreaterThanOrEqual(1);
+    // Names for the people involved [task 10].
+    expect(pub.body.ownerName).toEqual(expect.any(String));
+    expect(pub.body.versions[0]).toMatchObject({
+      createdByName: expect.any(String),
+      approvedByName: expect.any(String),
+      approvedAt: expect.any(String),
+    });
+    const crewId = await userId('crew@example.test');
+    const readers = async () =>
+      (await call('GET', `/api/v1/policies/${p.body.id}/readers`)).body.data as J[];
+    expect((await readers()).find((r) => r.userId === crewId)).toMatchObject({
+      state: 'REQUIRED',
+      acknowledgedAt: null,
+    });
+    expect(
+      (await call('GET', `/api/v1/policies/${p.body.id}/readers`, { sub: 'dev|crew' })).status,
+    ).toBe(403);
 
     const mine = (await call('GET', `/api/v1/policies/${p.body.id}`, { sub: 'dev|crew' })).body;
     expect(mine.myAcknowledgement).toBe('REQUIRED');
@@ -347,6 +412,10 @@ describe('policies and acknowledgement [COMP-04]', () => {
         })
       ).body.myAcknowledgement,
     ).toBe('CURRENT');
+    expect((await readers()).find((r) => r.userId === crewId)).toMatchObject({
+      state: 'CURRENT',
+      acknowledgedAt: expect.any(String),
+    });
     expect(
       (await call('GET', `/api/v1/policies/${p.body.id}`, { sub: 'dev|dispatcher' })).status,
     ).toBe(404); // not a reader
@@ -383,6 +452,83 @@ describe('policies and acknowledgement [COMP-04]', () => {
         .myAcknowledgement,
     ).toBe('REQUIRED');
   });
+
+  it('a critical instruction needs explicit confirmation on the web route too [task 10]', async () => {
+    const mgr = await userId('manager@example.test');
+    const code = `CRI-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+    const p = await call('POST', '/api/v1/policies', {
+      sub: 'dev|governance',
+      body: {
+        code,
+        title: 'Oxygen cylinder handling',
+        category: 'CRITICAL_INSTRUCTION',
+        ownerUserId: mgr,
+        readerRoles: ['CREW'],
+        summary: 'Secure cylinders before moving',
+      },
+    });
+    const vid = p.body.versions[0].id;
+    for (const to of ['IN_REVIEW', 'APPROVED', 'PUBLISHED'])
+      await call('POST', `/api/v1/policies/${p.body.id}/versions/${vid}/transition`, {
+        sub: to === 'IN_REVIEW' ? 'dev|governance' : 'dev|manager',
+        body: { to },
+      });
+    const ack = (body: J) =>
+      call('POST', `/api/v1/policies/${p.body.id}/acknowledge`, { sub: 'dev|crew', body });
+    expect((await ack({})).status).toBe(400);
+    expect((await ack({ confirmCritical: true })).body.myAcknowledgement).toBe('CURRENT');
+  });
+});
+
+describe('risk actions and action changes [COMP-03, COMP-04]', () => {
+  it('names owners, counts open actions and records reassignment in history', async () => {
+    const mgr = await userId('manager@example.test');
+    const gov = await userId('governance@example.test');
+    const r = await call('POST', '/api/v1/risks', {
+      body: {
+        hazard: 'Vehicle reversing in depot',
+        peopleAffected: 'Crew and visitors',
+        inherentLikelihood: 3,
+        inherentImpact: 5,
+        controls: 'Banksman for reversing',
+        residualLikelihood: 2,
+        residualImpact: 5,
+        ownerUserId: mgr,
+        reviewDate: addDays(today(), 30),
+      },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ ownerName: expect.any(String), openActions: 0 });
+    const a = await call('POST', `/api/v1/risks/${r.body.id}/actions`, {
+      body: { title: 'Fit reversing cameras', ownerUserId: mgr, deadline: addDays(today(), 14) },
+    });
+    expect(a.status).toBe(201);
+    const list = await call('GET', '/api/v1/risks');
+    expect((list.body.data as J[]).find((x) => x.id === r.body.id)?.openActions).toBe(1);
+
+    const change = (body: J, ifMatch = a.body.version, sub = 'dev|manager') =>
+      call('PATCH', `/api/v1/actions/${a.body.id}`, { sub, body, ifMatch });
+    expect((await change({ ownerUserId: gov })).status).toBe(400); // reason required
+    expect((await change({ reason: 'nothing to change' })).status).toBe(400);
+    expect((await change({ deadline: addDays(today(), -1), reason: 'too late' })).status).toBe(400);
+    const crew = await change(
+      { ownerUserId: gov, reason: 'Fleet lead' },
+      a.body.version,
+      'dev|crew',
+    );
+    expect(crew.status).toBe(403);
+    const moved = await change({
+      ownerUserId: gov,
+      deadline: addDays(today(), 21),
+      reason: 'Fleet lead owns cameras',
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.body).toMatchObject({ ownerUserId: gov, ownerName: expect.any(String) });
+    const last = (moved.body.history as J[]).at(-1)!;
+    expect(last.note).toMatch(/owner changed; deadline moved .*Fleet lead owns cameras/);
+    expect(last.byName).toEqual(expect.any(String));
+    expect((await change({ deadline: addDays(today(), 28), reason: 'stale' })).status).toBe(409);
+  });
 });
 
 describe('risks, registration and correspondence [COMP-03]', () => {
@@ -412,10 +558,22 @@ describe('risks, registration and correspondence [COMP-03]', () => {
       ifMatch: r.body.version,
     });
     expect(u.body.reviewOverdue).toBe(false);
+    // The review date change is kept as a review; the band is shown in words with the score.
+    expect(u.body).toMatchObject({ bandText: 'Medium 8' });
+    expect(u.body.reviews).toHaveLength(1);
+    // Closing needs a reason (WORKFLOWS H4).
     expect(
       (
         await call('PATCH', `/api/v1/risks/${r.body.id}`, {
           body: { status: 'CLOSED' },
+          ifMatch: u.body.version,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call('PATCH', `/api/v1/risks/${r.body.id}`, {
+          body: { status: 'CLOSED', reason: 'Hazard removed' },
           ifMatch: r.body.version,
         })
       ).status,
@@ -515,8 +673,17 @@ describe('events, reporting duties and candour [EVT-01..04]', () => {
         })
       ).status,
     ).toBe(403);
+    // Duty of candour is decided by the registered manager (WORKFLOWS H1), not the governance lead.
+    expect(
+      (
+        await call('POST', `/api/v1/events/${e.body.id}/candour-assessment`, {
+          sub: 'dev|governance',
+          body: { notifiable: true, reason: 'Moderate harm occurred during care' },
+        })
+      ).status,
+    ).toBe(403);
     await call('POST', `/api/v1/events/${e.body.id}/candour-assessment`, {
-      sub: 'dev|governance',
+      sub: 'dev|manager',
       body: { notifiable: true, reason: 'Moderate harm occurred during care' },
     });
     expect((await step('INVESTIGATE')).status).toBe(201);
@@ -551,6 +718,21 @@ describe('events, reporting duties and candour [EVT-01..04]', () => {
       'ACTIONS',
     ]);
     expect(detail.candour[0]).toMatchObject({ notifiable: true });
+    // Names and the candour state for the screens [task 11].
+    expect(detail).toMatchObject({ leadName: expect.any(String), candourDecided: true });
+    expect(detail.candour[0].decidedByName).toEqual(expect.any(String));
+    expect(detail.transitions.every((t: J) => typeof t.byName === 'string')).toBe(true);
+    expect(detail.obligations[0]).toMatchObject({
+      decidedByName: expect.any(String),
+      reference: 'SYN-0001',
+    });
+    const listed = (
+      await call('GET', '/api/v1/events?open=true', { sub: 'dev|governance' })
+    ).body.data.find((x: J) => x.id === e.body.id);
+    expect(listed).toMatchObject({ candourFlag: true, candourDecided: true });
+    const closed = (await call('GET', '/api/v1/events?open=false', { sub: 'dev|governance' })).body
+      .data as J[];
+    expect(closed.every((x) => x.status === 'CLOSED')).toBe(true);
   });
 
   it('complaints get acknowledgement and response targets; safeguarding is restricted', async () => {
@@ -567,9 +749,13 @@ describe('events, reporting duties and candour [EVT-01..04]', () => {
         complaint: { receivedOn: today(), channel: 'EMAIL' },
       },
     });
+    // Default targets: 3 and 20 working days (WORKFLOWS H2).
     expect(c.body.complaint).toMatchObject({
-      acknowledgeBy: addDays(today(), 3),
-      respondBy: addDays(today(), 28),
+      acknowledgeBy: addWorkingDays(today(), 3),
+      respondBy: addWorkingDays(today(), 20),
+      acknowledgeOverdue: false,
+      respondOverdue: false,
+      preferences: null,
     });
     expect(
       (
@@ -657,6 +843,89 @@ describe('premises register [HSE-01]', () => {
     expect(na.body).toMatchObject({ status: 'NOT_APPLICABLE', applicable: false });
     expect((await call('GET', '/api/v1/premises-items', { sub: 'dev|crew' })).status).toBe(403);
   });
+
+  it('records contractor, assessment and action owner, and shows them back', async () => {
+    const mgr = await userId('manager@example.test');
+    const item = await call('POST', '/api/v1/premises-items', {
+      body: {
+        locationId: SEED_IDS.locWatford,
+        controlArea: 'WATER',
+        title: 'Water system risk assessment – Watford base',
+        responsibleUserId: mgr,
+        actionOwnerUserId: mgr,
+        contractorName: 'Synthetic Water Services Ltd',
+        assessmentRef: 'WRA-2026-01',
+        assessedOn: '2026-09-15',
+        frequencySource: 'Competent person assessment (Synthetic Water Services Ltd)',
+      },
+    });
+    expect(item.status).toBe(201);
+    expect(item.body).toMatchObject({
+      contractorName: 'Synthetic Water Services Ltd',
+      assessmentRef: 'WRA-2026-01',
+      assessedOn: '2026-09-15',
+      actionOwnerUserId: mgr,
+      evidenceCount: 0,
+    });
+    // The action owner must belong to the organisation.
+    const bad = await call('POST', '/api/v1/premises-items', {
+      body: {
+        locationId: SEED_IDS.locWatford,
+        controlArea: 'WATER',
+        title: 'Water system risk assessment – other',
+        responsibleUserId: mgr,
+        actionOwnerUserId: '01900000-0000-7000-8000-0000000000ff',
+        frequencySource: 'Competent person assessment',
+      },
+    });
+    expect(bad.status).toBe(400);
+  });
+});
+
+describe('feedback, surveys and themes [EVT-04]', () => {
+  it('records feedback, analyses themes with complaints, and raises an action', async () => {
+    const mgr = await userId('manager@example.test');
+    const theme = `punctuality-${Date.now().toString(36)}`;
+    const fb = await call('POST', '/api/v1/feedback', {
+      body: {
+        kind: 'PATIENT_SURVEY',
+        receivedOn: '2026-10-30',
+        source: 'Post-journey survey, October',
+        summary: 'Collected on time but the return journey was late',
+        rating: 3,
+        themes: [theme.toUpperCase()],
+      },
+    });
+    expect(fb.status).toBe(201);
+    expect(fb.body).toMatchObject({ kind: 'PATIENT_SURVEY', themes: [theme], openActions: 0 });
+    const future = await call('POST', '/api/v1/feedback', {
+      body: { kind: 'COMPLIMENT', receivedOn: '2099-01-01', source: 'Card', summary: 'Thank you' },
+    });
+    expect(future.status).toBe(400);
+    const th = await call('GET', '/api/v1/feedback/themes?from=2026-10-01&to=2026-11-04');
+    const row = th.body.themes.find((x: { theme: string }) => x.theme === theme);
+    expect(row).toMatchObject({ patientSurveys: 1, total: 1, averageRating: 3 });
+    const act = await call('POST', `/api/v1/feedback/${fb.body.id}/actions`, {
+      body: { title: 'Review return-journey scheduling', ownerUserId: mgr, deadline: '2026-12-01' },
+    });
+    expect(act.status).toBe(201);
+    expect(act.body).toMatchObject({
+      sourceType: 'FEEDBACK',
+      sourceId: fb.body.id,
+      status: 'OPEN',
+    });
+    const list = await call('GET', '/api/v1/feedback?kind=PATIENT_SURVEY');
+    expect(list.body.data.find((x: { id: string }) => x.id === fb.body.id).openActions).toBe(1);
+    // The dashboard names the owner instead of just "Assigned" (task 8).
+    const dash = (await call('GET', '/api/v1/dashboard/actions?module=COMPLIANCE')).body
+      .data as J[];
+    expect(dash.find((r) => r.key === `ACT:${act.body.id}`)).toMatchObject({
+      ownerUserId: mgr,
+      ownerName: expect.any(String),
+    });
+    // Crew have no access to feedback.
+    expect((await call('GET', '/api/v1/feedback', { sub: 'dev|crew' })).status).toBe(403);
+  });
 });
 
 describe('dashboard [DASH-01, UAT-08]', () => {
@@ -688,17 +957,103 @@ describe('dashboard [DASH-01, UAT-08]', () => {
       label: 'blocked',
     });
     const all = (await call('GET', '/api/v1/dashboard/actions')).body.data as J[];
-    const amb3 = all.find((r) => r.link.id === SEED_IDS.vehicleAmb3)!;
+    const amb3 = all.find((r) => r.key === `VEH:${SEED_IDS.vehicleAmb3}`)!;
     expect(amb3).toMatchObject({ status: 'RED', reasonText: expect.stringContaining('Blocked') });
+    // WORKFLOWS L1: its open critical defect is also listed, as a critical finding.
+    expect(
+      all.find((r) => r.key.startsWith('DEF:') && r.link.id === SEED_IDS.vehicleAmb3),
+    ).toMatchObject({ status: 'RED', reasonText: expect.stringContaining('Critical defect') });
     expect(all.every((r) => typeof r.reasonText === 'string' && r.reasonText.length > 0)).toBe(
       true,
     );
     const csv = await call('GET', '/api/v1/dashboard/actions/export?tile=blockedVehicles');
-    expect(csv.text.split('\r\n')[0]).toBe('Module,Item,Owner id,Deadline,State,Reason');
+    expect(csv.text.split('\r\n')[0]).toBe('Module,Item,Owner,Owner id,Deadline,State,Reason');
     expect(
       (await call('GET', '/api/v1/dashboard/actions/export', { sub: 'dev|dispatcher' })).status,
     ).toBe(403);
     expect((await call('GET', '/api/v1/dashboard/summary', { sub: 'dev|crew' })).status).toBe(403);
+  });
+});
+
+describe('dashboard filters and group view [DASH-01]', () => {
+  const TILES = ['overdue', 'dueSoon', 'blockedVehicles', 'unverified', 'jobsToday'] as const;
+  const countsMatch = async (qs: string) => {
+    const s = (await call('GET', `/api/v1/dashboard/summary${qs}`)).body;
+    for (const tile of TILES) {
+      const sep = qs ? '&' : '?';
+      const rows = (await call('GET', `/api/v1/dashboard/actions${qs}${sep}tile=${tile}`)).body
+        .data as J[];
+      expect(rows.length, `${qs} ${tile}`).toBe(s.tiles[tile]);
+    }
+    return s;
+  };
+
+  it('tiles still equal their drill-down under every filter', async () => {
+    const mgr = await userId('manager@example.test');
+    await countsMatch('');
+    await countsMatch(`?locationId=${SEED_IDS.locWatford}`);
+    await countsMatch(`?ownerUserId=${mgr}`);
+    await countsMatch('?dateFrom=2026-01-01&dateTo=2026-12-31');
+    await countsMatch(
+      `?locationId=${SEED_IDS.locWatford}&ownerUserId=${mgr}&dateFrom=2000-01-01&dateTo=2000-01-02`,
+    );
+  });
+
+  it('an owner filter hides vehicles (no owner); a date range outside all deadlines leaves no overdue items', async () => {
+    const mgr = await userId('manager@example.test');
+    const owner = await call('GET', `/api/v1/dashboard/summary?ownerUserId=${mgr}`);
+    expect(owner.body.tiles.blockedVehicles).toBe(0);
+    const none = await call(
+      'GET',
+      '/api/v1/dashboard/summary?dateFrom=2000-01-01&dateTo=2000-01-02',
+    );
+    expect(none.body.tiles.overdue).toBe(0);
+    expect(none.body.tiles.dueSoon).toBe(0);
+    // The blocked vehicle has no deadline, so a date range never hides it.
+    expect(none.body.tiles.blockedVehicles).toBeGreaterThanOrEqual(1);
+  });
+
+  it('refuses an end date before the start date and an unknown service', async () => {
+    expect(
+      (await call('GET', '/api/v1/dashboard/summary?dateFrom=2026-11-10&dateTo=2026-11-01')).status,
+    ).toBe(400);
+    expect(
+      (await call('GET', '/api/v1/dashboard/actions?dateFrom=2026-11-10&dateTo=2026-11-01')).status,
+    ).toBe(400);
+    expect((await call('GET', '/api/v1/dashboard/summary?ownerUserId=not-a-uuid')).status).toBe(
+      400,
+    );
+    const unknown = await call(
+      'GET',
+      '/api/v1/dashboard/summary?serviceId=01900000-0000-7000-8000-0000000000ff',
+    );
+    expect(unknown.status).toBe(200);
+  });
+
+  it('the group dashboard gives counts per authorised organisation and nothing else', async () => {
+    const group = await call('GET', '/api/v1/dashboard/group');
+    expect(group.status).toBe(200);
+    const mine = (group.body.organisations as J[]).find((o) => o.organisationId === ORG)!;
+    const own = (await call('GET', '/api/v1/dashboard/summary')).body;
+    expect(mine).toMatchObject({ ok: true, unavailableReason: null, tiles: own.tiles });
+    expect(Object.keys(mine).sort()).toEqual(
+      [
+        'criticalOpen',
+        'ok',
+        'organisationId',
+        'organisationName',
+        'tiles',
+        'unavailableReason',
+        'worstStatus',
+      ].sort(),
+    );
+    expect(group.body.totals.overdue).toBe(
+      (group.body.organisations as J[]).reduce((n, o) => n + (o.tiles?.overdue ?? 0), 0),
+    );
+    // Crew hold no dashboard permission anywhere: nothing is listed, and nothing leaks.
+    const crew = await call('GET', '/api/v1/dashboard/group', { sub: 'dev|crew' });
+    expect(crew.status).toBe(200);
+    expect(crew.body.organisations).toEqual([]);
   });
 });
 

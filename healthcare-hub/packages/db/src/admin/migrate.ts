@@ -26,10 +26,13 @@ export async function migrate(adminUrl: string): Promise<string[]> {
       .sort();
     for (const file of files) {
       const sql = readFileSync(dir + file, 'utf8');
-      const checksum = createHash('sha256').update(sql).digest('hex');
+      // Line endings differ between checkouts (Windows turns LF into CRLF), so the checksum is taken
+      // over LF text. A checksum recorded from the raw text by an older runner is still accepted.
+      const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+      const checksum = sha(sql.replace(/\r\n/g, '\n'));
       const prior = done.get(file);
       if (prior) {
-        if (prior !== checksum) {
+        if (prior !== checksum && prior !== sha(sql)) {
           throw new Error(`Migration ${file} was modified after being applied (checksum mismatch)`);
         }
         continue;

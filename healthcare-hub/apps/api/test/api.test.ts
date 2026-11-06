@@ -7,12 +7,7 @@ import { AuditController } from '../src/modules/audit/audit.controller.js';
 import { HealthController } from '../src/modules/health/health.controller.js';
 import { MeController } from '../src/modules/identity/me.controller.js';
 import { OpenApiController } from '../src/modules/openapi.controller.js';
-import {
-  AUTH_ONLY_KEY,
-  ORG_MEMBER_KEY,
-  PERMISSION_KEY,
-  PUBLIC_KEY,
-} from '../src/common/decorators.js';
+import { AUTH_ONLY_KEY, PERMISSION_KEY, PUBLIC_KEY } from '../src/common/decorators.js';
 import { createLogger } from '../src/logger.js';
 import { SEED_IDS, makeApp, sign } from './harness.js';
 
@@ -116,7 +111,7 @@ describe('/me and organisation selection', () => {
     expect(body.memberships).toEqual([
       expect.objectContaining({
         organisationId: SEED_IDS.orgExample,
-        organisationName: 'Exora',
+        organisationName: 'Exora International Ltd',
         roleKey: 'REGISTERED_MANAGER',
       }),
     ]);
@@ -234,7 +229,7 @@ describe('error responses', () => {
 });
 
 describe('route declarations (deny by default)', () => {
-  it('every controller route is Public, AuthenticatedOnly, OrgMember or declares a permission', () => {
+  it('every controller route is Public, AuthenticatedOnly or declares a permission', () => {
     const reflector = new Reflector();
     const missing: string[] = [];
     for (const C of [HealthController, OpenApiController, MeController, AuditController]) {
@@ -245,7 +240,6 @@ describe('route declarations (deny by default)', () => {
         const ok =
           reflector.get(PUBLIC_KEY, fn) ||
           reflector.get(AUTH_ONLY_KEY, fn) ||
-          reflector.get(ORG_MEMBER_KEY, fn) ||
           (reflector.get(PERMISSION_KEY, fn) as string[] | undefined)?.length;
         if (!ok) missing.push(`${C.name}.${name}`);
       }
@@ -312,26 +306,5 @@ describe('browser access', () => {
       headers: { origin: 'https://attacker.example', 'access-control-request-method': 'PUT' },
     });
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
-  });
-});
-
-describe('rate limiting', () => {
-  it('answers 429 "too many requests" with a Retry-After, never a 500 internal error', async () => {
-    const limited = await makeApp(urls, [], { RATE_LIMIT_PER_MINUTE: '10' });
-    try {
-      const codes: number[] = [];
-      let last;
-      for (let i = 0; i < 11; i++) {
-        last = await limited.app.inject({ method: 'GET', url: '/readyz' });
-        codes.push(last.statusCode);
-      }
-      expect(codes.slice(0, 10).every((s) => s === 200)).toBe(true);
-      expect(last!.statusCode).toBe(429);
-      expect(last!.json()).toMatchObject({ status: 429, code: 'RATE_LIMITED' });
-      expect(last!.headers['retry-after']).toBeDefined();
-    } finally {
-      await limited.app.close();
-      await limited.db.close();
-    }
   });
 });

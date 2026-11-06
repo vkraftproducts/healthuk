@@ -3,7 +3,7 @@ import pg from 'pg';
 import type { Db } from '@hub/db';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { bookCrewDay, type Call, type DemoIds } from '../scripts/crew-demo-lib.js';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
 
 // Other test files change the seeded crew (ST-0042) in the shared test database, so this test
 // runs the demo against its own fresh crew and vehicle; the script's steps are the same.
@@ -52,13 +52,9 @@ async function crew(tag: string, roles: string[]): Promise<{ staffId: string; su
       userId: u.rows[0].id,
     });
     const id = s.body.id as string;
-    for (const to of ['CHECKS_IN_PROGRESS', 'READY_FOR_REVIEW']) await move(id, to);
-    for (const role of roles)
-      await call('POST', `/api/v1/staff/${id}/role-approvals`, 'dev|hr', {
-        role,
-        reason: 'Checks complete',
-      });
-    for (const to of ['APPROVED_FOR_ROLE', 'ACTIVE']) await move(id, to);
+    await move(id, 'CHECKS_IN_PROGRESS');
+    await activateStaff(app, SEED_IDS.orgExample, id, roles);
+    if (roles.includes('DRIVER')) await addVerifiedLicence(app, SEED_IDS.orgExample, id);
     return { staffId: id, sub };
   } finally {
     await su.end();
@@ -73,7 +69,8 @@ describe('dev crew demo script', () => {
     const driver = await crew(`${tag}1`, ['DRIVER', 'CARE_ASSISTANT']);
     const assistant = await crew(`${tag}2`, ['CARE_ASSISTANT']);
     const v = await call('POST', '/api/v1/vehicles', 'dev|fleet', {
-      registration: `DM${tag.slice(0, 3)}XYZ`,
+      // D1: a current-format UK registration (two letters, two digits, three letters).
+      registration: `DM${(Date.now() % 90) + 10}XYZ`,
       callsign: `DEMO-${tag}`,
       type: 'PTS_VEHICLE',
       baseLocationId: SEED_IDS.locWatford,

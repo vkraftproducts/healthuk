@@ -12,7 +12,13 @@ export type ReportId =
   | 'EVENTS'
   | 'POLICY_ACK'
   | 'PREMISES'
-  | 'JOURNEYS';
+  | 'JOURNEYS'
+  | 'NHS_KPI';
+
+/** Information governance training target in the Data Security and Protection Toolkit. */
+export const IG_TRAINING_TARGET = 95;
+/** Requirement titles counted as data security (information governance) training. */
+export const IG_TRAINING_TITLE = /data security|information governance/i;
 
 export interface MeasureDefinition {
   key: string;
@@ -41,7 +47,8 @@ export const REPORTS: readonly ReportDefinition[] = [
       {
         key: 'ready',
         label: 'Staff fully ready',
-        numerator: 'Staff with no required item red, amber or awaiting verification',
+        numerator:
+          'Staff with at least one required check, all verified and in date (people with no checks set up are not ready)',
         denominator: 'Active and onboarding staff (leavers excluded)',
         period: SNAPSHOT,
         inclusion:
@@ -207,6 +214,31 @@ export const REPORTS: readonly ReportDefinition[] = [
           'Journeys in the period by final state (completed, cancelled, aborted, refused, no access, open)',
         period: IN_PERIOD,
         inclusion: 'Each journey counted once by its current state',
+      },
+    ],
+  },
+  {
+    id: 'NHS_KPI',
+    title: 'NHS contract: items, DSPT and information governance training',
+    summary:
+      'Contract items that are current, the DSPT submission and data security training ' +
+      'against the 95% target. Shows only what has been recorded.',
+    measures: [
+      {
+        key: 'contractItems',
+        label: 'Contract items current',
+        numerator: 'NHS contract items whose requirement is green',
+        denominator: 'NHS contract items adopted (not applicable excluded)',
+        period: SNAPSHOT,
+        inclusion: 'Items from the NHS contract pack; no figure when none are adopted',
+      },
+      {
+        key: 'igTraining',
+        label: 'Data security training current (target 95%)',
+        numerator: 'Staff whose data security training requirement is green',
+        denominator: 'Active staff who have a data security training requirement',
+        period: SNAPSHOT,
+        inclusion: 'Requirements titled data security or information governance; leavers excluded',
       },
     ],
   },

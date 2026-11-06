@@ -11,14 +11,17 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Db, TenantTx } from '@hub/db';
-import { recomputeInstance } from '@hub/domain';
+import { applyAutoRequirements, recomputeInstance, syncStaffRequirements } from '@hub/domain';
 import { londonDate } from '@hub/rules';
 import {
+  AdoptTemplateInput,
   ApplicabilityInput,
   DueDateChangeInput,
   InstanceCreate,
   InstanceListQuery,
   InstancePatch,
+  RetireTemplateInput,
+  SPECIALIST_VALIDATED_PACKS,
   TemplateCreate,
   TemplateVersionInput,
   type InstanceDetailDto,
@@ -69,13 +72,76 @@ export class RequirementsController {
   @RequirePermission('compliance.requirement.view')
   @Get('templates')
   async templates(@Hub() hub: HubRequestContext): Promise<{ data: TemplateDto[] }> {
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.requirementTemplate.findMany({
-        include: { versions: true },
-        orderBy: [{ pack: 'asc' }, { code: 'asc' }],
-      }),
+    const [rows, retired] = await this.db.withTenant(tenantOf(hub), (tx) =>
+      Promise.all([
+        tx.requirementTemplate.findMany({
+          include: { versions: true },
+          orderBy: [{ pack: 'asc' }, { code: 'asc' }],
+        }),
+        tx.requirementTemplateRetirement.findMany(),
+      ]),
     );
-    return { data: rows.map(toTemplateDto) };
+    const byTemplate = new Map(retired.map((r) => [r.templateId, r]));
+    return {
+      data: rows.map((t) => {
+        const r = byTemplate.get(t.id);
+        return {
+          ...toTemplateDto(t),
+          retired: r
+            ? { reason: r.reason, retiredBy: r.retiredBy, retiredAt: r.retiredAt.toISOString() }
+            : null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * A5: retire an organisation requirement with a reason instead of deleting it. Nothing new is
+   * created from it; requirements already on record stay in history.
+   */
+  @RequirePermission('admin.settings.manage')
+  @Post('templates/:id/retire')
+  async retire(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<TemplateDto> {
+    const { reason } = body(RetireTemplateInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const t = await tx.requirementTemplate.findFirst({
+        where: { id, organisationId: hub.orgId },
+        include: { versions: true },
+      });
+      if (!t) throw notFound();
+      if (await this.retirement(tx, id))
+        throw new HubError('CONFLICT', 409, 'This requirement is already retired');
+      const roles = await tx.roleRequirement.count({ where: { templateId: id } });
+      if (roles > 0)
+        throw new HubError(
+          'CONFLICT',
+          409,
+          `Still required for ${roles} role${roles === 1 ? '' : 's'}. ` +
+            'Remove it from those roles first.',
+        );
+      const r = await tx.requirementTemplateRetirement.create({
+        data: {
+          organisationId: hub.orgId as string,
+          templateId: id,
+          reason,
+          retiredBy: hub.user.id,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'requirements.template.retire',
+        entity: 'requirement_template',
+        entityId: id,
+        summary: { reason },
+      });
+      return {
+        ...toTemplateDto(t),
+        retired: { reason, retiredBy: hub.user.id, retiredAt: r.retiredAt.toISOString() },
+      };
+    });
   }
 
   @RequirePermission('admin.settings.manage')
@@ -119,13 +185,34 @@ export class RequirementsController {
   async adopt(
     @Hub() hub: HubRequestContext,
     @Param('id', idPipe) id: string,
+    @Body() raw?: unknown,
   ): Promise<TemplateDto> {
+    const input = body(AdoptTemplateInput, raw ?? {});
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const lib = await tx.requirementTemplate.findFirst({
         where: { id, organisationId: null },
         include: { versions: true },
       });
       if (!lib) throw notFound();
+      const needsPack = SPECIALIST_VALIDATED_PACKS[lib.pack];
+      if (needsPack) {
+        const org = await tx.organisation.findUniqueOrThrow({ where: { id: hub.orgId as string } });
+        if (!org.sectorPacks.includes(needsPack))
+          throw new HubError(
+            'CONFLICT',
+            409,
+            `The ${needsPack.replace('_', ' ')} pack is not enabled for this organisation`,
+          );
+        if (!input.specialistValidatedBy || !input.specialistOrganisation)
+          throw new HubError(
+            'VALIDATION_FAILED',
+            422,
+            'This is draft starting content. Name the specialist who validated it and their ' +
+              'organisation before adopting.',
+          );
+      }
+      if (await this.retirement(tx, id))
+        throw new HubError('CONFLICT', 409, 'This library item has been retired');
       const src =
         [...lib.versions]
           .sort((a, b) => b.version - a.version)
@@ -172,7 +259,15 @@ export class RequirementsController {
         action: 'requirements.template.adopt',
         entity: 'requirement_template',
         entityId: t.id,
-        summary: { fromLibraryId: id },
+        summary: {
+          fromLibraryId: id,
+          ...(input.specialistValidatedBy
+            ? { specialistValidatedBy: input.specialistValidatedBy }
+            : {}),
+          ...(input.specialistOrganisation
+            ? { specialistOrganisation: input.specialistOrganisation }
+            : {}),
+        },
       });
       return toTemplateDto(t);
     });
@@ -192,6 +287,8 @@ export class RequirementsController {
         include: { versions: { select: { version: true, status: true } } },
       });
       if (!t) throw notFound();
+      if (await this.retirement(tx, id))
+        throw new HubError('CONFLICT', 409, 'This requirement has been retired');
       if (t.versions.some((v) => v.status === 'DRAFT'))
         throw new HubError(
           'CONFLICT',
@@ -284,12 +381,10 @@ export class RequirementsController {
       if (cur.status !== 'DRAFT')
         throw new HubError('CONFLICT', 409, 'Only a draft can be published');
       if (cur.createdBy === hub.user.id) {
-        throw new HubError(
-          'FOUR_EYES_REQUIRED',
-          422,
-          'The approver must be a different person from the author',
-        );
+        throw new HubError('FOUR_EYES_REQUIRED', 422, 'Another person must publish this');
       }
+      if (await this.retirement(tx, id))
+        throw new HubError('CONFLICT', 409, 'This requirement has been retired');
       const now = new Date();
       const today = toDate(londonDate(now));
       await tx.requirementTemplateVersion.updateMany({
@@ -315,11 +410,49 @@ export class RequirementsController {
         data: { templateVersionId: versionId },
       });
       for (const m of moved) await recomputeInstance(tx, m.id, now);
+      // A5: publishing applies straight away to everyone and everything it covers.
+      let created = 0;
+      if (v.subjectType === 'STAFF') {
+        const staff = await tx.staff.findMany({
+          where: { lifecycleState: { not: 'LEAVER' } },
+          select: { id: true },
+        });
+        for (const s of staff)
+          created += (await syncStaffRequirements(tx, s.id, hub.user.id, now)).length;
+      } else if (v.subjectType === 'VEHICLE') {
+        for (const x of await tx.vehicle.findMany())
+          created += await applyAutoRequirements(
+            tx,
+            {
+              subjectType: 'VEHICLE',
+              subjectId: x.id,
+              kind: x.type,
+              locationId: x.baseLocationId,
+              organisationId: x.organisationId,
+            },
+            hub.user.id,
+            now,
+          );
+      } else if (v.subjectType === 'EQUIPMENT') {
+        for (const x of await tx.equipmentAsset.findMany())
+          created += await applyAutoRequirements(
+            tx,
+            {
+              subjectType: 'EQUIPMENT',
+              subjectId: x.id,
+              kind: x.category,
+              locationId: x.locationId,
+              organisationId: x.organisationId,
+            },
+            hub.user.id,
+            now,
+          );
+      }
       await audit(this.db, tx, hub, {
         action: 'requirements.version.publish',
         entity: 'requirement_template_version',
         entityId: versionId,
-        summary: { version: v.version, instances: moved.length },
+        summary: { version: v.version, instances: moved.length, created },
       });
       return toVersionDto(v);
     });
@@ -370,6 +503,8 @@ export class RequirementsController {
         include: { versions: { where: { status: 'EFFECTIVE' } } },
       });
       if (!t) throw notFound();
+      if (await this.retirement(tx, t.id))
+        throw new HubError('CONFLICT', 409, 'This requirement has been retired');
       const ev = t.versions[0];
       if (!ev)
         throw new HubError(
@@ -558,6 +693,15 @@ export class RequirementsController {
           422,
           'Expiry dates come from verified evidence and cannot be edited',
         );
+      // B8: statutory dates (licence, MOT, insurance and the like) never move; only local policy.
+      if (i.templateVersion.basisType === 'STATUTORY' || i.templateVersion.blocking === 'STATUTORY')
+        throw new HubError(
+          'OVERRIDE_NOT_PERMITTED',
+          422,
+          'This is a statutory date and cannot be moved. Only local-policy due dates can change.',
+        );
+      if (input.approverId === hub.user.id)
+        throw new HubError('SELF_APPROVAL', 422, 'Another person must approve the change');
       await this.assertApprover(tx, hub, input.approverId);
       const old = kind === 'DUE' ? i.dueDate : i.reviewDate;
       await tx.dueDateChange.create({
@@ -584,7 +728,13 @@ export class RequirementsController {
         action: 'requirements.instance.due_date_change',
         entity: 'requirement_instance',
         entityId: id,
-        summary: { field: kind, approverId: input.approverId },
+        summary: {
+          field: kind,
+          approverId: input.approverId,
+          oldDate: old ? old.toISOString().slice(0, 10) : null,
+          newDate: input.newDate,
+          reason: input.reason,
+        },
       });
       return toInstanceDto(
         await tx.requirementInstance.findUniqueOrThrow({ where: { id }, include: instanceInclude }),
@@ -602,6 +752,10 @@ export class RequirementsController {
   }
 
   // ---- helpers -------------------------------------------------------------
+  private retirement(tx: TenantTx, templateId: string) {
+    return tx.requirementTemplateRetirement.findUnique({ where: { templateId } });
+  }
+
   /** Loads an instance visible to the caller (organisation via RLS, location scope here). */
   private async load(tx: TenantTx, hub: HubRequestContext, id: string) {
     const i = await tx.requirementInstance.findUnique({ where: { id }, include: instanceInclude });

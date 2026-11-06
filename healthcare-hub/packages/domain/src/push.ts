@@ -15,12 +15,12 @@ export interface PushResult {
   invalidToken?: boolean;
   error?: string;
 }
-export interface PushSender {
+export interface CrewPushSender {
   send(targets: PushTarget[], payload: ReturnType<typeof pushPayload>): Promise<PushResult[]>;
 }
 
 /** Development / test sender: records what would be sent (never the patient — there is none). */
-export class MemoryPushSender implements PushSender {
+export class MemoryPushSender implements CrewPushSender {
   readonly sent: { target: PushTarget; payload: ReturnType<typeof pushPayload> }[] = [];
   async send(targets: PushTarget[], payload: ReturnType<typeof pushPayload>) {
     for (const target of targets) this.sent.push({ target, payload });
@@ -29,7 +29,7 @@ export class MemoryPushSender implements PushSender {
 }
 
 /** Expo push service adapter (EAS builds register Expo push tokens). */
-export class ExpoPushSender implements PushSender {
+export class ExpoPushSender implements CrewPushSender {
   constructor(
     private readonly fetchFn: typeof fetch = fetch,
     private readonly url = 'https://exp.host/--/api/v2/push/send',
@@ -107,7 +107,7 @@ const MAX_ATTEMPTS = 8;
 export async function sendPendingPush(
   tx: TenantTx,
   now: Date,
-  sender: PushSender,
+  sender: CrewPushSender,
 ): Promise<{ sent: number; failed: number; dead: number }> {
   const out = { sent: 0, failed: 0, dead: 0 };
   // New messages are stamped by the database (column default), so due-ness uses its clock too.
@@ -155,7 +155,7 @@ export async function sendPendingPush(
 export async function pushAll(
   db: Db,
   now: Date,
-  sender: PushSender,
+  sender: CrewPushSender,
   log?: (msg: string, ctx: object) => void,
 ): Promise<{ sent: number; failed: number; dead: number }> {
   const out = { sent: 0, failed: 0, dead: 0 };

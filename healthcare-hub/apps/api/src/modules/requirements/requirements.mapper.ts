@@ -100,7 +100,7 @@ type InstanceRow = {
 
 export const instanceInclude = {
   template: { select: { code: true, title: true } },
-  templateVersion: { select: { deadlineKind: true, blocking: true } },
+  templateVersion: { select: { deadlineKind: true, blocking: true, basisType: true } },
 } as const;
 
 export function toInstanceDto(i: InstanceRow): InstanceDto {

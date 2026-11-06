@@ -61,20 +61,32 @@ const ACTIVE_STAFF = [
   },
   { no: 'ST-1007', name: 'Ngozi Eze', title: 'Care assistant', roles: ['CARE_ASSISTANT'] },
 ];
+/** Joiners part way through checks: nothing approved, some evidence awaiting review. */
 const JOINERS = [
-  { no: 'ST-1008', name: 'Ella Hughes', title: 'Care assistant', stages: ['CHECKS_IN_PROGRESS'] },
   {
-    no: 'ST-1009',
-    name: 'Owen Price',
-    title: 'Ambulance driver',
-    stages: ['CHECKS_IN_PROGRESS', 'READY_FOR_REVIEW'],
+    no: 'ST-1008',
+    name: 'Ella Hughes',
+    title: 'Care assistant',
+    role: 'CARE_ASSISTANT',
+    uploaded: 0,
   },
-  { no: 'ST-1010', name: 'Zara Malik', title: 'Care assistant', stages: [] },
+  { no: 'ST-1009', name: 'Owen Price', title: 'Ambulance driver', role: 'DRIVER', uploaded: 2 },
+  { no: 'ST-1010', name: 'Zara Malik', title: 'Care assistant', role: null, uploaded: 0 },
 ];
-const VEHICLES = [
-  { callsign: 'AMB-04', registration: 'MB24AAA', type: 'AMBULANCE', seats: 3, wheelchairs: 1 },
-  { callsign: 'AMB-05', registration: 'MB24AAB', type: 'AMBULANCE', seats: 3, wheelchairs: 1 },
-  { callsign: 'AMB-06', registration: 'MB23AAC', type: 'AMBULANCE', seats: 3, wheelchairs: 1 },
+/** Ambulances are over 3,500 kg, so they need C1 (finding 89); the rest stay category B. */
+const AMBULANCE = { type: 'AMBULANCE', seats: 3, wheelchairs: 1, category: 'C1', kg: 4250 };
+const VEHICLES: {
+  callsign: string;
+  registration: string;
+  type: string;
+  seats: number;
+  wheelchairs: number;
+  category?: string;
+  kg?: number;
+}[] = [
+  { callsign: 'AMB-04', registration: 'MB24AAA', ...AMBULANCE },
+  { callsign: 'AMB-05', registration: 'MB24AAB', ...AMBULANCE },
+  { callsign: 'AMB-06', registration: 'MB23AAC', ...AMBULANCE },
   { callsign: 'PTS-01', registration: 'MB23AAD', type: 'PTS_VEHICLE', seats: 6, wheelchairs: 2 },
   { callsign: 'PTS-02', registration: 'MB22AAE', type: 'PTS_VEHICLE', seats: 6, wheelchairs: 2 },
   { callsign: 'WAV-01', registration: 'MB22AAF', type: 'WAV', seats: 4, wheelchairs: 1 },
@@ -84,8 +96,19 @@ const VEHICLES = [
  * that a second person verifies, because only verified evidence can turn anything green or amber.
  */
 const EVIDENCE_FILE = new TextEncoder().encode(
-  ['%PDF-1.4', '% Synthetic demo evidence', '%%EOF', ''].join(String.fromCharCode(10)),
+  ['%PDF-1.4', '% SYNTHETIC DEMO DOCUMENT - not a real certificate', '%%EOF', ''].join(
+    String.fromCharCode(10),
+  ),
 );
+/**
+ * What each role needs before approval (ambulance pack, Reg 19 / Schedule 3). Demo staff go
+ * through the real gate: checks started, synthetic evidence uploaded and verified by a second
+ * person, then approved.
+ */
+const ROLE_REQUIREMENTS: Record<string, string[]> = {
+  DRIVER: ['AMB-STF-01', 'AMB-STF-02', 'AMB-STF-03', 'AMB-STF-04', 'AMB-STF-09'],
+  CARE_ASSISTANT: ['AMB-STF-02', 'AMB-STF-03', 'AMB-STF-04', 'AMB-STF-09'],
+};
 /** Evidence uploaded but deliberately never verified: stays "awaiting review". */
 const LEFT_UNVERIFIED = new Set(['ST-1006', 'AMB-PRM-03']);
 /** Days from today until each subject's deadline: some past, some close, most comfortable. */
@@ -104,18 +127,38 @@ const VEHICLE_DEADLINES: [string, string, number][] = [
   ['WAV-01', 'AMB-VEH-03', 12],
   ['AMB-04', 'AMB-VEH-01', 140],
   ['PTS-02', 'AMB-VEH-01', 200],
+  // Publishing tax applies it to every vehicle; the two on today's shifts need it verified.
+  ['AMB-04', 'AMB-VEH-03', 180],
+  ['PTS-02', 'AMB-VEH-03', 250],
 ];
 const PREMISES_DEADLINES: [string, number][] = [
   ['AMB-PRM-02', -6],
   ['AMB-PRM-01', 18],
   ['AMB-PRM-03', 150],
 ];
+const PREMISES_ITEMS = [
+  {
+    area: 'FIRE',
+    title: 'Fire alarm weekly test – station call points',
+    source: 'Fire risk assessment (synthetic), weekly',
+  },
+  {
+    area: 'WATER',
+    title: 'Legionella flushing of little-used outlets',
+    source: 'Water risk assessment (synthetic), weekly',
+  },
+  {
+    area: 'OXYGEN',
+    title: 'Medical gas cylinder store inspection',
+    source: 'Medical gases policy (synthetic), monthly',
+  },
+];
 const JOBS = [
-  { from: 1, mobility: 'WALKING', to: 'Watford General Outpatients', ref: 'RENAL', crew: 0 },
+  { from: 1, mobility: 'WALKING', to: 'Synthetic General Outpatients', ref: 'RENAL', crew: 0 },
   { from: 3, mobility: 'WALKING', to: 'Hemel Urgent Treatment Centre', ref: 'CLINIC', crew: 0 },
   { from: 5, mobility: 'WALKING', to: 'St Albans Eye Unit', ref: 'EYE', crew: 0 },
   { from: 1.5, mobility: 'WALKING', to: 'Mount Vernon Cancer Centre', ref: 'ONC', crew: 1 },
-  { from: 4, mobility: 'WALKING', to: 'Watford General Discharge Lounge', ref: 'DISCH', crew: 1 },
+  { from: 4, mobility: 'WALKING', to: 'Synthetic General Discharge Lounge', ref: 'DISCH', crew: 1 },
   { from: 5, mobility: 'WHEELCHAIR', to: 'Harefield Hospital', ref: 'CARD', crew: null },
   { from: 6, mobility: 'STRETCHER', to: 'Northwick Park Hospital', ref: 'XFER', crew: null },
   { from: 7, mobility: 'WALKING', to: 'Luton and Dunstable Hospital', ref: 'ORTH', crew: null },
@@ -220,100 +263,6 @@ export async function loadDemoData(
     return result;
   }
 
-  // ---- staff ----------------------------------------------------------------------------------
-  const staffIds = new Map<string, string>();
-  const addStaff = async (s: { no: string; name: string; title: string }) => {
-    const created = await post(`staff ${s.no}`, '/api/v1/staff', MANAGER, {
-      staffNo: s.no,
-      displayName: s.name,
-      primaryLocationId: ids.locationId,
-      jobTitle: s.title,
-    });
-    if (created) {
-      staffIds.set(s.no, created.id as string);
-      count('staff');
-    }
-    return created;
-  };
-  const move = (id: string, to: string) =>
-    post(`staff move to ${to}`, `/api/v1/staff/${id}/transition`, HR, {
-      to,
-      reason: `Moved to ${to}`,
-    });
-  for (const s of ACTIVE_STAFF) {
-    const created = await addStaff(s);
-    if (!created) continue;
-    const id = created.id as string;
-    await move(id, 'CHECKS_IN_PROGRESS');
-    await move(id, 'READY_FOR_REVIEW');
-    for (const role of s.roles)
-      await post(`approve ${role}`, `/api/v1/staff/${id}/role-approvals`, HR, {
-        role,
-        reason: 'Checks complete',
-      });
-    await move(id, 'APPROVED_FOR_ROLE');
-    await move(id, 'ACTIVE');
-    if (s.roles.includes('DRIVER'))
-      await post(`licence ${s.no}`, `/api/v1/staff/${id}/licences`, MANAGER, {
-        data: {
-          categories: ['B', 'C1'],
-          photocardExpiry: addDays(today, 900),
-          lastCheckedOn: today,
-          checkMethod: 'DVLA_SHARE_CODE',
-        },
-      });
-  }
-  for (const s of JOINERS) {
-    const created = await addStaff(s);
-    if (created) for (const stage of s.stages) await move(created.id as string, stage);
-  }
-
-  // ---- vehicles -------------------------------------------------------------------------------
-  const vehicleIds = new Map<string, string>();
-  for (const v of VEHICLES) {
-    const created = await post(`vehicle ${v.callsign}`, '/api/v1/vehicles', FLEET, {
-      registration: v.registration,
-      callsign: v.callsign,
-      type: v.type,
-      baseLocationId: ids.locationId,
-      seats: v.seats,
-      wheelchairCapacity: v.wheelchairs,
-    });
-    if (created) {
-      vehicleIds.set(v.callsign, created.id as string);
-      count('vehicles');
-    }
-  }
-  const stopUse = vehicleIds.get('AMB-05');
-  if (
-    stopUse &&
-    (await post('stop-use defect', '/api/v1/defects', FLEET, {
-      vehicleId: stopUse,
-      severity: 'CRITICAL',
-      stopUse: true,
-      description: 'Tail lift will not stay locked in the raised position',
-      discoveredAt: at(-20),
-    }))
-  )
-    count('defects');
-  const major = vehicleIds.get('PTS-01');
-  if (
-    major &&
-    (await post('major defect', '/api/v1/defects', FLEET, {
-      vehicleId: major,
-      severity: 'MAJOR',
-      description: 'Rear saloon heater intermittently cuts out',
-      discoveredAt: at(-30),
-    }))
-  )
-    count('defects');
-  const offRoad = vehicleIds.get('WAV-01');
-  if (offRoad)
-    await post('off-road vehicle', `/api/v1/vehicles/${offRoad}/off-road`, FLEET, {
-      on: true,
-      reason: 'Booked in for bodywork repair',
-    });
-
   // ---- requirements ---------------------------------------------------------------------------
   const templates = ((await call('GET', '/api/v1/requirements/templates', MANAGER)).body.data ??
     []) as Row[];
@@ -354,7 +303,7 @@ export async function loadDemoData(
     verified: boolean,
   ) => {
     const upload = await post(`evidence for ${label}`, '/api/v1/evidence/uploads', MANAGER, {
-      title: `Certificate for ${label}`,
+      title: `Synthetic demo certificate for ${label}`,
       mime: 'application/pdf',
       sizeBytes: EVIDENCE_FILE.length,
       requirementInstanceIds: [instanceId],
@@ -376,6 +325,167 @@ export async function loadDemoData(
         confirmedValidTo: validTo,
       });
   };
+  // ---- staff ----------------------------------------------------------------------------------
+  const staffIds = new Map<string, string>();
+  const addStaff = async (s: { no: string; name: string; title: string }) => {
+    const created = await post(`staff ${s.no}`, '/api/v1/staff', MANAGER, {
+      staffNo: s.no,
+      displayName: s.name,
+      primaryLocationId: ids.locationId,
+      jobTitle: s.title,
+    });
+    if (created) {
+      staffIds.set(s.no, created.id as string);
+      count('staff');
+    }
+    return created;
+  };
+  const move = (id: string, to: string) =>
+    post(`staff move to ${to}`, `/api/v1/staff/${id}/transition`, HR, {
+      to,
+      reason: `Moved to ${to}`,
+    });
+  // Role requirements: adopt, publish (second person) and map to roles before anyone is approved.
+  for (const [role, codes] of Object.entries(ROLE_REQUIREMENTS))
+    for (const code of codes) {
+      const adopted = await adopt(code);
+      if (adopted)
+        await post(`map ${code} to ${role}`, '/api/v1/staff/role-requirements', MANAGER, {
+          role,
+          templateId: adopted.templateId,
+        });
+    }
+  const startChecks = async (id: string, role: string) =>
+    ((await post(`start ${role} checks`, `/api/v1/staff/${id}/role-checks`, HR, { role }))
+      ?.blockers ?? []) as Row[];
+  const evidenceYears = addDays(today, 3 * 365);
+  const hrId = userId('hr@example.test') ?? managerId;
+  /** Synthetic Schedule 3 staff file (reg 19): regulated roles cannot be approved without it. */
+  const schedule3File = async (id: string, no: string) => {
+    const records: [string, Row][] = [
+      [
+        'right-to-work',
+        { method: 'MANUAL_DOCUMENT', checkedOn: addDays(today, -90), checkerUserId: hrId },
+      ],
+      [
+        'dbs',
+        {
+          eligibility: 'ENHANCED_BARRED',
+          barredListChecked: true,
+          certificateNumber: '001234567890',
+          issueDate: addDays(today, -80),
+          updateServiceConsent: true,
+          riskDecision: 'CLEAR',
+          policyReviewDate: addDays(today, 3 * 365),
+        },
+      ],
+      ...['First', 'Second'].map((n): [string, Row] => [
+        'references',
+        {
+          refereeName: `${n} synthetic referee`,
+          refereeOrganisation: 'Synthetic Care Ltd',
+          relationship: 'Former line manager',
+          requestedOn: addDays(today, -100),
+          receivedOn: addDays(today, -95),
+          outcome: 'SATISFACTORY',
+        },
+      ]),
+      [
+        'employment-history',
+        { employer: 'Synthetic Care Ltd', role: 'Care assistant', from: addDays(today, -3000) },
+      ],
+      [
+        'training',
+        { courseCode: 'CARE-CERT', title: 'Care Certificate', completedOn: addDays(today, -85) },
+      ],
+      ['oh-clearance', { fitStatus: 'FIT', assessedOn: addDays(today, -85) }],
+    ];
+    for (const [slug, data] of records)
+      await post(`${slug} ${no}`, `/api/v1/staff/${id}/${slug}`, HR, { data });
+  };
+  for (const s of ACTIVE_STAFF) {
+    const created = await addStaff(s);
+    if (!created) continue;
+    const id = created.id as string;
+    await move(id, 'CHECKS_IN_PROGRESS');
+    for (const role of s.roles)
+      for (const b of await startChecks(id, role))
+        await addEvidence(b.instanceId as string, `${b.code} ${s.no}`, evidenceYears, true);
+    await move(id, 'READY_FOR_REVIEW');
+    await schedule3File(id, s.no);
+    for (const role of s.roles)
+      await post(`approve ${role}`, `/api/v1/staff/${id}/role-approvals`, HR, {
+        role,
+        reason: 'All checks verified',
+      });
+    await move(id, 'APPROVED_FOR_ROLE');
+    await move(id, 'ACTIVE');
+    if (s.roles.includes('DRIVER'))
+      await post(`licence ${s.no}`, `/api/v1/staff/${id}/licences`, MANAGER, {
+        data: {
+          categories: ['B', 'C1'],
+          photocardExpiry: addDays(today, 900),
+          lastCheckedOn: today,
+          checkMethod: 'DVLA_SHARE_CODE',
+        },
+      });
+  }
+  for (const j of JOINERS) {
+    const created = await addStaff(j);
+    if (!created || !j.role) continue;
+    const blockers = await startChecks(created.id as string, j.role);
+    for (const b of blockers.slice(0, j.uploaded))
+      await addEvidence(b.instanceId as string, `${b.code} ${j.no}`, evidenceYears, false);
+  }
+
+  // ---- vehicles -------------------------------------------------------------------------------
+  const vehicleIds = new Map<string, string>();
+  for (const v of VEHICLES) {
+    const created = await post(`vehicle ${v.callsign}`, '/api/v1/vehicles', FLEET, {
+      registration: v.registration,
+      callsign: v.callsign,
+      type: v.type,
+      baseLocationId: ids.locationId,
+      seats: v.seats,
+      wheelchairCapacity: v.wheelchairs,
+      ...(v.category ? { licenceCategory: v.category } : {}),
+      ...(v.kg ? { grossWeightKg: v.kg } : {}),
+    });
+    if (created) {
+      vehicleIds.set(v.callsign, created.id as string);
+      count('vehicles');
+    }
+  }
+  const stopUse = vehicleIds.get('AMB-05');
+  if (
+    stopUse &&
+    (await post('stop-use defect', '/api/v1/defects', FLEET, {
+      vehicleId: stopUse,
+      severity: 'CRITICAL',
+      stopUse: true,
+      description: 'Tail lift will not stay locked in the raised position',
+      discoveredAt: at(-20),
+    }))
+  )
+    count('defects');
+  const major = vehicleIds.get('PTS-01');
+  if (
+    major &&
+    (await post('major defect', '/api/v1/defects', FLEET, {
+      vehicleId: major,
+      severity: 'MAJOR',
+      description: 'Rear saloon heater intermittently cuts out',
+      discoveredAt: at(-30),
+    }))
+  )
+    count('defects');
+  const offRoad = vehicleIds.get('WAV-01');
+  if (offRoad)
+    await post('off-road vehicle', `/api/v1/vehicles/${offRoad}/off-road`, FLEET, {
+      on: true,
+      reason: 'Booked in for bodywork repair',
+    });
+
   const addRequirement = async (
     code: string,
     subjectType: string,
@@ -394,14 +504,26 @@ export async function loadDemoData(
         : deadlineKind === 'REVIEW'
           ? 'reviewDate'
           : 'dueDate';
-    const instance = await post(`requirement ${code}`, '/api/v1/requirements/instances', MANAGER, {
-      templateId,
-      subjectType,
-      subjectId,
-      locationId: ids.locationId,
-      ownerUserId: managerId,
-      [field]: date,
-    });
+    // Publishing applies auto-applied templates (MOT, insurance, tax) to every vehicle (A5).
+    const applied = (
+      ((
+        await call(
+          'GET',
+          `/api/v1/requirements/instances?subjectType=${subjectType}&subjectId=${subjectId}&limit=100`,
+          MANAGER,
+        )
+      ).body.data ?? []) as Row[]
+    ).find((i) => i.templateId === templateId);
+    const instance =
+      applied ??
+      (await post(`requirement ${code}`, '/api/v1/requirements/instances', MANAGER, {
+        templateId,
+        subjectType,
+        subjectId,
+        locationId: ids.locationId,
+        ownerUserId: managerId,
+        [field]: date,
+      }));
     if (!instance) return;
     count('requirements');
     if (inDays > 0)
@@ -418,6 +540,18 @@ export async function loadDemoData(
     await addRequirement(code, 'VEHICLE', vehicleIds.get(callsign), inDays, callsign);
   for (const [code, inDays] of PREMISES_DEADLINES)
     await addRequirement(code, 'PREMISES', ids.locationId, inDays, code);
+  // Premises register entries (finding 24). No schedule is linked, so none shows as met.
+  for (const p of PREMISES_ITEMS)
+    if (
+      await post(`premises ${p.title}`, '/api/v1/premises-items', MANAGER, {
+        locationId: ids.locationId,
+        controlArea: p.area,
+        title: p.title,
+        responsibleUserId: governanceId,
+        frequencySource: p.source,
+      })
+    )
+      count('premises');
 
   // ---- today's work ---------------------------------------------------------------------------
   const shiftOn = async (callsign: string, driver: string, assistant: string) => {
@@ -452,10 +586,11 @@ export async function loadDemoData(
         pickupTo: at(j.from + 0.5),
         plannedStart: at(j.from),
         plannedEnd: at(j.from + 1),
-        pickupAddress: `${10 + i} Synthetic Road, Watford`,
+        pickupAddress: `${10 + i} Synthetic Road, London`,
         destinationAddress: j.to,
         patientRef: `DEMO-${j.ref}-${now.getTime().toString(36).toUpperCase()}`,
         mobility: j.mobility,
+        ...(j.mobility === 'STRETCHER' ? { weightKg: 80 } : {}),
       },
     });
     const job = (booking?.jobs as Row[] | undefined)?.[0];

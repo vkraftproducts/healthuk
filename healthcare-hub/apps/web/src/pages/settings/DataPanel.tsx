@@ -1,6 +1,7 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { useState, type FormEvent } from 'react';
 import {
+  ActionDialog,
   button,
   Field,
   input,
@@ -216,19 +217,21 @@ function Workbook() {
       void items.refetch();
     }, 'Sheet staged. Nothing is published until a governance reviewer approves each mapping.');
   }
-  const decide = (id: string, decision: 'APPROVED' | 'REJECTED') =>
-    void run(
-      async () => {
-        await api.send('POST', `/api/v1/workbook-items/${id}/decision`, orgId, { decision });
-        void items.refetch();
-      },
-      decision === 'APPROVED' ? 'Mapping approved.' : 'Mapping rejected.',
-    );
-  const publish = (id: string) =>
-    void run(async () => {
-      await api.send('POST', `/api/v1/workbook-items/${id}/publish`, orgId, {});
-      void items.refetch();
-    }, 'Published as a draft library template. Approve and publish its version in the library.');
+  const { me } = useApp();
+  const [deciding, setDeciding] = useState<{ i: Row; d: 'APPROVED' | 'REJECTED' } | null>(null);
+  const [proposing, setProposing] = useState<{
+    i: Row;
+    classification: string;
+    code: string;
+    title: string;
+    subject: string;
+  } | null>(null);
+  const [publishing, setPublishing] = useState<Row | null>(null);
+  const label = (i: Row) => `${i.sheet} row ${i.rowNo}${i.promptCode ? ` ${i.promptCode}` : ''}`;
+  const proposeValid =
+    !!proposing &&
+    (proposing.classification === 'OUT_OF_SCOPE' ||
+      (/^[A-Z0-9][A-Z0-9_-]{1,59}$/.test(proposing.code) && proposing.title.trim().length > 0));
   return (
     <Section title="Compliance workbook staging">
       {can('admin.import.manage') && (
@@ -285,32 +288,201 @@ function Workbook() {
           {
             key: 'm',
             header: 'Mapping',
-            cell: (i) =>
-              `${words(i.mappingStatus)}${i.proposedCode ? ` – ${i.proposedCode} ${i.proposedTitle}` : ''}`,
+            cell: (i) => (
+              <>
+                {words(i.mappingStatus)}
+                {i.proposedCode ? ` – ${i.proposedCode} ${i.proposedTitle}` : ''}
+                {i.proposedByName && (
+                  <span className="block text-xs">Proposed by {i.proposedByName}</span>
+                )}
+                {i.decidedByName && (
+                  <span className="block text-xs">
+                    Decided by {i.decidedByName}
+                    {i.decisionNote ? `: ${i.decisionNote}` : ''}
+                  </span>
+                )}
+              </>
+            ),
           },
           {
             key: 'a',
             header: 'Action',
-            cell: (i) =>
-              can('admin.requirements.publish') && i.mappingStatus === 'PROPOSED' ? (
-                <span className="flex gap-1">
-                  <button className={smallButton} onClick={() => decide(i.id, 'APPROVED')}>
-                    Approve
-                  </button>
-                  <button className={smallButton} onClick={() => decide(i.id, 'REJECTED')}>
-                    Reject
-                  </button>
-                </span>
-              ) : can('admin.requirements.publish') &&
-                can('admin.settings.manage') &&
-                i.mappingStatus === 'APPROVED' ? (
-                <button className={smallButton} onClick={() => publish(i.id)}>
-                  Publish as draft
-                </button>
-              ) : null,
+            cell: (i) => (
+              <span className="flex flex-wrap gap-1">
+                {can('admin.import.manage') &&
+                  ['UNMAPPED', 'PROPOSED', 'REJECTED'].includes(i.mappingStatus) && (
+                    <button
+                      className={smallButton}
+                      aria-label={`Propose mapping: ${label(i)}`}
+                      onClick={() =>
+                        setProposing({
+                          i,
+                          classification: i.classification ?? 'SHARED',
+                          code: i.proposedCode ?? i.promptCode ?? '',
+                          title: i.proposedTitle ?? i.text.slice(0, 200),
+                          subject: i.proposedSubject ?? 'ORGANISATION',
+                        })
+                      }
+                    >
+                      {i.mappingStatus === 'UNMAPPED' ? 'Propose' : 'Re-propose'}
+                    </button>
+                  )}
+                {can('admin.requirements.publish') &&
+                  i.mappingStatus === 'PROPOSED' &&
+                  (i.proposedBy === me.user.id ? (
+                    <span className="text-xs">You proposed this; someone else decides.</span>
+                  ) : (
+                    <>
+                      <button
+                        className={smallButton}
+                        aria-label={`Approve mapping: ${label(i)}`}
+                        onClick={() => setDeciding({ i, d: 'APPROVED' })}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className={smallButton}
+                        aria-label={`Reject mapping: ${label(i)}`}
+                        onClick={() => setDeciding({ i, d: 'REJECTED' })}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  ))}
+                {can('admin.requirements.publish') &&
+                  can('admin.settings.manage') &&
+                  i.mappingStatus === 'APPROVED' && (
+                    <button
+                      className={smallButton}
+                      aria-label={`Publish as draft: ${label(i)}`}
+                      onClick={() => setPublishing(i)}
+                    >
+                      Publish as draft
+                    </button>
+                  )}
+              </span>
+            ),
           },
         ]}
       />
+      <ActionDialog
+        open={proposing !== null}
+        title={`Propose mapping: ${proposing ? label(proposing.i) : ''}`}
+        confirmLabel="Propose"
+        confirmDisabled={!proposeValid}
+        onCancel={() => setProposing(null)}
+        onConfirm={async () => {
+          const p = proposing!;
+          const out = p.classification === 'OUT_OF_SCOPE';
+          await api.send('POST', `/api/v1/workbook-items/${p.i.id}/propose`, orgId, {
+            classification: p.classification,
+            ...(out
+              ? {}
+              : {
+                  proposedCode: p.code,
+                  proposedTitle: p.title.trim(),
+                  proposedSubject: p.subject,
+                }),
+          });
+          void items.refetch();
+        }}
+        fields={
+          proposing && (
+            <div className="grid gap-3">
+              <Field label="Applies to">
+                <select
+                  className={input}
+                  value={proposing.classification}
+                  onChange={(e) => setProposing({ ...proposing, classification: e.target.value })}
+                >
+                  {['SHARED', 'AMBULANCE', 'DENTAL', 'CARE_HOME', 'GP', 'OUT_OF_SCOPE'].map((c) => (
+                    <option key={c} value={c}>
+                      {c === 'SHARED' ? 'All services' : words(c)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {proposing.classification !== 'OUT_OF_SCOPE' && (
+                <>
+                  <Field label="Requirement code (capitals, digits, - or _)">
+                    <input
+                      className={input}
+                      value={proposing.code}
+                      onChange={(e) =>
+                        setProposing({ ...proposing, code: e.target.value.toUpperCase() })
+                      }
+                    />
+                  </Field>
+                  <Field label="Requirement title">
+                    <input
+                      className={input}
+                      maxLength={200}
+                      value={proposing.title}
+                      onChange={(e) => setProposing({ ...proposing, title: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Checked for">
+                    <select
+                      className={input}
+                      value={proposing.subject}
+                      onChange={(e) => setProposing({ ...proposing, subject: e.target.value })}
+                    >
+                      {['ORGANISATION', 'SERVICE', 'STAFF', 'VEHICLE', 'EQUIPMENT', 'PREMISES'].map(
+                        (s) => (
+                          <option key={s} value={s}>
+                            {s === 'ORGANISATION'
+                              ? 'The organisation'
+                              : `Each ${words(s).toLowerCase()}`}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </Field>
+                </>
+              )}
+            </div>
+          )
+        }
+      >
+        <p>{proposing?.i.text}</p>
+        <p>A governance reviewer other than you must approve the mapping before it is published.</p>
+      </ActionDialog>
+      <ActionDialog
+        open={deciding !== null}
+        title={`${deciding?.d === 'APPROVED' ? 'Approve' : 'Reject'} mapping: ${deciding ? label(deciding.i) : ''}`}
+        confirmLabel={deciding?.d === 'APPROVED' ? 'Approve mapping' : 'Reject mapping'}
+        danger={deciding?.d === 'REJECTED'}
+        reasonLabel={deciding?.d === 'APPROVED' ? 'Note' : 'Why is it rejected?'}
+        reasonRequired={deciding?.d === 'REJECTED'}
+        onCancel={() => setDeciding(null)}
+        onConfirm={async (note) => {
+          await api.send('POST', `/api/v1/workbook-items/${deciding!.i.id}/decision`, orgId, {
+            decision: deciding!.d,
+            ...(note ? { note } : {}),
+          });
+          void items.refetch();
+        }}
+      >
+        <p>
+          {deciding?.i.text} → {deciding?.i.proposedCode} {deciding?.i.proposedTitle}
+        </p>
+        <p>Your name is recorded with the decision.</p>
+      </ActionDialog>
+      <ActionDialog
+        open={publishing !== null}
+        title={`Publish as draft: ${publishing ? label(publishing) : ''}`}
+        confirmLabel="Publish as draft"
+        onCancel={() => setPublishing(null)}
+        onConfirm={async () => {
+          await api.send('POST', `/api/v1/workbook-items/${publishing!.id}/publish`, orgId, {});
+          void items.refetch();
+        }}
+      >
+        <p>
+          This creates a draft library template ({publishing?.proposedCode}). It only takes effect
+          once its version is approved and published in the requirement library.
+        </p>
+      </ActionDialog>
     </Section>
   );
 }

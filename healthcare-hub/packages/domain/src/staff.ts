@@ -1,5 +1,6 @@
 import type { TenantTx } from '@hub/db';
 import {
+  drivingCategoryFor,
   licenceCovers,
   readinessLifecycle,
   staffReadiness,
@@ -72,27 +73,14 @@ export async function syncStaffRequirements(
   staffId: string,
   actorUserId: string,
   now: Date,
+  /** Roles being checked before approval: their requirements are created too. */
+  extraRoles: readonly string[] = [],
 ): Promise<string[]> {
   const staff = await tx.staff.findUniqueOrThrow({ where: { id: staffId } });
   if (staff.lifecycleState === 'LEAVER') return [];
-  const roles = await activeRoles(tx, staffId, now);
+  const roles = [...new Set([...(await activeRoles(tx, staffId, now)), ...extraRoles])];
   const { required } = await requiredTemplates(tx, roles);
   if (required.size === 0) return [];
-  return ensureStaffInstances(tx, staff, required, actorUserId, now);
-}
-
-/**
- * Creates any missing instances of `templateIds` for the person (from each template's EFFECTIVE
- * version). Idempotent. Returns the ids created.
- */
-async function ensureStaffInstances(
-  tx: TenantTx,
-  staff: { id: string; organisationId: string; primaryLocationId: string; userId: string | null },
-  templateIds: Iterable<string>,
-  actorUserId: string,
-  now: Date,
-): Promise<string[]> {
-  const staffId = staff.id;
   const existing = new Set(
     (
       await tx.requirementInstance.findMany({
@@ -102,7 +90,7 @@ async function ensureStaffInstances(
     ).map((i) => i.templateId),
   );
   const created: string[] = [];
-  for (const templateId of templateIds) {
+  for (const templateId of required) {
     if (existing.has(templateId)) continue;
     const v = await tx.requirementTemplateVersion.findFirst({
       where: { templateId, status: 'EFFECTIVE', subjectType: 'STAFF' },
@@ -144,8 +132,8 @@ export async function syncRole(
   return n;
 }
 
-function groupFor(code: string): CheckGroup {
-  if (/LICEN[CS]E|DRIV/.test(code)) return 'LICENCE';
+function groupFor(code: string, title = ''): CheckGroup {
+  if (/LICEN[CS]E|DRIV/.test(code) || /driving licen[cs]e/i.test(title)) return 'LICENCE';
   if (/TRAIN|COMPET|MANUAL|HANDLING|BLS|ILS/.test(code)) return 'COMPETENCE';
   return 'CLEARANCE';
 }
@@ -155,6 +143,8 @@ export interface StaffReadinessArgs {
   role: string;
   window: { start: Date; end: Date };
   licenceCategory?: string;
+  /** Vehicle maximum authorised mass: above 3,500 kg a category B licence is not enough. */
+  vehicleGrossWeightKg?: number | null;
   competencies?: readonly string[];
   now: Date;
 }
@@ -172,7 +162,7 @@ export async function staffReadinessFor(
   const set = await requiredTemplates(tx, roles);
   const instances = await tx.requirementInstance.findMany({
     where: { subjectType: 'STAFF', subjectId: a.staffId },
-    include: { template: { select: { code: true } } },
+    include: { template: { select: { code: true, title: true } } },
   });
   const requirements = [];
   for (const i of instances) {
@@ -181,7 +171,7 @@ export async function staffReadinessFor(
     requirements.push({
       instanceId: i.id,
       code: i.template.code,
-      group: groupFor(i.template.code),
+      group: groupFor(i.template.code, i.template.title),
       result,
       validFrom: verified?.validFrom ?? null,
       expiryDate: verified?.validTo ?? iso(i.expiryDate),
@@ -193,11 +183,33 @@ export async function staffReadinessFor(
     orderBy: { createdAt: 'desc' },
   });
   let licenceCategoryCovers: boolean | null = null;
+  const licenceProblems: { code: string; reasonText: string }[] = [];
   if (a.licenceCategory) {
     const lic = records.find((r) => r.kind === 'LICENCE');
-    const cats = ((lic?.data as { categories?: string[] } | undefined)?.categories ??
-      []) as string[];
-    licenceCategoryCovers = licenceCovers(cats, a.licenceCategory);
+    const data = (lic?.data ?? {}) as { categories?: string[]; photocardExpiry?: string };
+    const cats = (data.categories ?? []) as string[];
+    licenceCategoryCovers = licenceCovers(
+      cats,
+      drivingCategoryFor(a.licenceCategory, a.vehicleGrossWeightKg),
+    );
+    // A typed licence record is not proof: the licence requirement must be verified by a
+    // reviewer, and the photocard must stay valid for the whole job (UAT-01, upload never greens).
+    if (!lic)
+      licenceProblems.push({
+        code: 'LICENCE_RECORD',
+        reasonText: 'No driving licence details on record',
+      });
+    else if (data.photocardExpiry && data.photocardExpiry < (iso(a.window.end) as string))
+      licenceProblems.push({
+        code: 'LICENCE_EXPIRY',
+        reasonText: `Licence photocard expires ${data.photocardExpiry}, before the job ends`,
+      });
+    if (!requirements.some((r) => r.group === 'LICENCE'))
+      licenceProblems.push({
+        code: 'LICENCE_NOT_VERIFIED',
+        reasonText:
+          'No verified driving licence check: map the driving licence requirement to the Driver role and verify the evidence',
+      });
   }
   const endDay = iso(a.window.end) as string;
   const held = new Set(
@@ -219,6 +231,10 @@ export async function staffReadinessFor(
     },
     a.window,
   );
+  for (const p of licenceProblems) {
+    r.checks.push({ ...p, group: 'LICENCE', result: 'FAIL', overridable: false });
+    r.state = 'BLOCKED';
+  }
   // A NO_DRIVING restriction is a hard block for a driving role, not just a "restricted" flag.
   if (a.role === 'DRIVER' && restrictions.includes('NO_DRIVING')) {
     r.checks.push({
@@ -254,17 +270,17 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
     string,
     {
       counts: { red: number; amber: number; grey: number; green: number };
-      overall: 'RED' | 'AMBER' | 'GREY' | 'GREEN' | 'NOT_APPLICABLE';
+      overall: 'RED' | 'AMBER' | 'GREY' | 'GREEN';
+      /** False when nothing is required yet: shown as "not set up", never as compliant or N/A. */
+      setUp: boolean;
       roles: string[];
     }
   >();
-  const checking = await checkingRoles(tx, staffIds);
   for (const id of staffIds) {
     const roles = [
       ...new Set(approvals.filter((a) => a.staffId === id).map((a) => a.role as string)),
     ];
-    const counting = [...roles, ...(checking.get(id) ?? [])];
-    const required = new Set(map.filter((m) => counting.includes(m.role)).map((m) => m.templateId));
+    const required = new Set(map.filter((m) => roles.includes(m.role)).map((m) => m.templateId));
     const counts = { red: 0, amber: 0, grey: 0, green: 0 };
     for (const i of instances) {
       if (i.subjectId !== id) continue;
@@ -282,46 +298,74 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
           ? 'GREY'
           : counts.green
             ? 'GREEN'
-            : 'NOT_APPLICABLE';
-    out.set(id, { counts, overall, roles });
+            : 'GREY';
+    const setUp = counts.red + counts.amber + counts.grey + counts.green > 0;
+    out.set(id, { counts, overall, setUp, roles });
   }
   return out;
+}
+
+export interface RoleCheckItem {
+  instanceId: string;
+  code: string;
+  title: string;
+  status: string;
+  reasonText: string;
+  verified: boolean;
+}
+
+export interface RoleCheckResult {
+  role: string;
+  /** False when the role has no published staff requirements: nothing could be checked. */
+  setUp: boolean;
+  items: RoleCheckItem[];
+  /** Items that stop approval: not verified and in date (N/A only with an approved decision). */
+  blockers: RoleCheckItem[];
 }
 
 /**
- * B1: roles whose checks have started and that have never been approved (or revoked). Their
- * requirements count for the person, so a candidate shows what is still missing; deployment still
- * needs the role approved.
+ * Reg 19 / Schedule 3 gate. Creates the person's requirement instances for `role` (so evidence
+ * can be uploaded before approval) and reports which are not yet verified. Approval is allowed
+ * only when the role has published requirements and none of them is blocking.
  */
-export async function checkingRoles(
-  tx: TenantTx,
-  staffIds: readonly string[],
-): Promise<Map<string, string[]>> {
-  const checks = await tx.staffRoleCheck.findMany({
-    where: { staffId: { in: [...staffIds] } },
-    select: { staffId: true, role: true },
-  });
-  const decided = await tx.staffRoleApproval.findMany({
-    where: { staffId: { in: [...staffIds] } },
-    select: { staffId: true, role: true },
-  });
-  const out = new Map<string, string[]>();
-  for (const c of checks) {
-    if (decided.some((a) => a.staffId === c.staffId && a.role === c.role)) continue;
-    out.set(c.staffId, [...(out.get(c.staffId) ?? []), c.role]);
-  }
-  return out;
-}
-
-/** B1: start checks for a role: creates its requirements for the person, each awaiting evidence. */
-export async function startRoleChecks(
+export async function roleChecks(
   tx: TenantTx,
   staffId: string,
   role: string,
   actorUserId: string,
   now: Date,
-): Promise<string[]> {
-  const staff = await tx.staff.findUniqueOrThrow({ where: { id: staffId } });
-  const { required } = await requiredTemplates(tx, [role]);
-  return ensureStaffInstances(tx, staff, required, actorUserId, now);
+  opts: { create: boolean } = { create: true },
+): Promise<RoleCheckResult> {
+  const maps = await tx.roleRequirement.findMany({ where: { role: role as never } });
+  const templateIds = maps.map((m) => m.templateId);
+  const published = await tx.requirementTemplateVersion.findMany({
+    where: { templateId: { in: templateIds }, status: 'EFFECTIVE', subjectType: 'STAFF' },
+    select: { templateId: true },
+  });
+  const ids = [...new Set(published.map((p) => p.templateId))];
+  if (ids.length === 0) return { role, setUp: false, items: [], blockers: [] };
+  if (opts.create) await syncStaffRequirements(tx, staffId, actorUserId, now, [role]);
+  const instances = await tx.requirementInstance.findMany({
+    where: { subjectType: 'STAFF', subjectId: staffId, templateId: { in: ids } },
+    include: { template: { select: { code: true, title: true } } },
+    orderBy: { createdAt: 'asc' },
+  });
+  const items: RoleCheckItem[] = [];
+  for (const i of instances) {
+    const { result } = await evaluateInstanceDetail(tx, i.id, now);
+    items.push({
+      instanceId: i.id,
+      code: i.template.code,
+      title: i.template.title,
+      status: result.status,
+      reasonText: result.reasonText,
+      verified: result.currentlyVerified,
+    });
+  }
+  const blockers = items.filter(
+    (x) =>
+      x.status !== 'NOT_APPLICABLE' &&
+      !(x.verified && (x.status === 'GREEN' || x.status === 'AMBER')),
+  );
+  return { role, setUp: true, items, blockers };
 }
