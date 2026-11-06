@@ -33,6 +33,7 @@ import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../co
 import { audit, body, requireAny } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
+import { userNames } from '../evidence/evidence.mapper.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
 const ROLLBACK_DAYS = 7;
@@ -451,17 +452,27 @@ export class ImportsController {
   ): Promise<{ data: WorkbookItemDto[] }> {
     requireAny(hub, 'admin.import.manage', 'admin.requirements.publish');
     const f = body(WorkbookItemsQuery, q);
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.workbookItem.findMany({
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.workbookItem.findMany({
         where: {
           ...(f.batchId ? { batchId: f.batchId } : {}),
           ...(f.status ? { mappingStatus: f.status } : {}),
         },
         orderBy: [{ sheet: 'asc' }, { rowNo: 'asc' }],
         take: 2000,
-      }),
-    );
-    return { data: rows.map(itemDto) };
+      });
+      const names = await userNames(
+        tx,
+        rows.flatMap((r) => [r.proposedBy, r.decidedBy]),
+      );
+      return {
+        data: rows.map((r) => ({
+          ...itemDto(r),
+          proposedByName: r.proposedBy ? (names.get(r.proposedBy) ?? null) : null,
+          decidedByName: r.decidedBy ? (names.get(r.decidedBy) ?? null) : null,
+        })),
+      };
+    });
   }
 
   @RequirePermission('admin.import.manage')

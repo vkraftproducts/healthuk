@@ -11,7 +11,7 @@ const me = (permissions: string[]): MeResponse => ({
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'X',
       roleName: 'X',
@@ -57,16 +57,22 @@ const fleet = {
     },
   ],
 };
-function renderAt(permissions: string[]) {
+const asked: string[] = [];
+function renderAt(
+  permissions: string[],
+  catalogue: unknown[] = [{ id: 'FLEET', title: fleet.title, summary: '', measures: [def] }],
+) {
   const api: ApiClient = {
     me: async () => me(permissions),
     readyz: async () => ({ status: 'ready' }),
-    get: async (path: string) =>
-      path === '/api/v1/reports'
-        ? { data: [{ id: 'FLEET', title: fleet.title, summary: '', measures: [def] }] }
+    get: async (path: string) => {
+      asked.push(path);
+      return path === '/api/v1/reports'
+        ? { data: catalogue }
         : path.startsWith('/api/v1/reports/')
           ? fleet
-          : { data: [] },
+          : { data: [] };
+    },
     send: async () => ({}),
   };
   render(<App api={api} history={createMemoryHistory({ initialEntries: ['/reports'] })} />);
@@ -94,8 +100,32 @@ describe('reports page [PRD 4.10]', () => {
     expect(screen.queryByRole('heading', { name: 'Monthly management pack' })).toBeNull();
   });
 
+  it('explains why export and the management pack are missing [task 16, finding 26]', async () => {
+    renderAt(['reports.view']);
+    await screen.findByRole('article', { name: 'Vehicles available' });
+    expect(screen.getByText(/need the export permission/)).toBeInTheDocument();
+  });
+
+  it('runs the first report the server lists, never one the role cannot run [finding 84]', async () => {
+    asked.length = 0;
+    renderAt(['reports.view']);
+    await screen.findByRole('article', { name: 'Vehicles available' });
+    expect(asked.some((p) => p.startsWith('/api/v1/reports/FLEET?'))).toBe(true);
+    expect(asked.some((p) => p.startsWith('/api/v1/reports/WORKFORCE_READINESS'))).toBe(false);
+  });
+
+  it('says so when the role has no reports in this organisation', async () => {
+    renderAt(['reports.view'], []);
+    expect(
+      await screen.findByText(/Your role has no reports in this organisation/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run report' })).toBeNull();
+  });
+
   it('without report permission the page says so', async () => {
     renderAt(['dashboard.view']);
-    expect(await screen.findByText(/do not have permission to view reports/)).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your role does not give access to this page.',
+    );
   });
 });

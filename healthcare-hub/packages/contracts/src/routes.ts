@@ -3,6 +3,13 @@ import { AuditListResponse, VerifyChainResponse } from './audit.js';
 import { HealthResponse, ReadyResponse } from './health.js';
 import { MeResponse } from './me.js';
 import {
+  LoginResponse,
+  MfaResetResponse,
+  MfaSetupResponse,
+  PasswordResetResponse,
+  TokenResponse,
+} from './auth.js';
+import {
   CrewJobDto,
   CrewPolicyDto,
   CrewProfileDto,
@@ -10,12 +17,14 @@ import {
   DeviceDto,
   SyncResultDto,
 } from './crew.js';
+import { NotificationPreferencesDto, PushDeviceDto } from './notification-delivery.js';
 import { Problem } from './problem.js';
 import { ReportDataDto, ReportDefinitionDto } from './reports.js';
 import { ImportBatchDto, ImportDetailDto, WorkbookItemDto } from './imports.js';
 import {
   BreachDto,
   DisclosureDto,
+  DpComplaintDto,
   LegalHoldDto,
   RetentionLogDto,
   RetentionRuleDto,
@@ -24,6 +33,7 @@ import {
 import {
   ActivityDto,
   AdminUserDto,
+  PersonDto,
   LocationDto,
   OrganisationDto,
   PermissionDto,
@@ -34,8 +44,10 @@ import {
 } from './admin.js';
 import {
   AlertDto,
+  AlertCentreDto,
   DownloadResponse,
   EvidenceVersionDto,
+  ReviewQueueItemDto,
   InstanceDetailDto,
   InstanceDto,
   InstancePage,
@@ -46,10 +58,14 @@ import {
 } from './requirements.js';
 import {
   CorrectionDto,
+  DriverEligibilityDto,
   MatrixDto,
+  Schedule3Dto,
   MyStaffDto,
   ReadinessDto,
+  SelfRequestDto,
   RoleApprovalDto,
+  RoleCheckResultDto,
   RoleRequirementDto,
   RestrictionDto,
   StaffClearanceDto,
@@ -72,6 +88,7 @@ import {
   VehicleDto,
   VehiclePage,
   VehicleReadinessDto,
+  VehicleStatusChangeDto,
 } from './fleet.js';
 import {
   ActionDto,
@@ -81,19 +98,51 @@ import {
   AuditTemplateDto,
   CorrespondenceDto,
   DashboardSummary,
+  FeedbackDto,
+  FeedbackThemesDto,
+  GroupDashboardSummary,
   EventDetailDto,
   EventDto,
   ExportDto,
   FindingDto,
   ObligationDto,
   PolicyDto,
+  PolicyReadersDto,
   PremisesDto,
+  PremisesHistoryDto,
   RegistrationDto,
   RiskDto,
+  IncidentReportReceipt,
+  InspectionOverviewDto,
+  MyReportDto,
+  ObligationSuggestionDto,
+  RegistrationLocationDto,
 } from './governance.js';
+import { IntegrationDto, IntegrationList, IntegrationRunDto } from './integrations.js';
+import {
+  HarassmentAssessmentDto,
+  HarassmentDutyDto,
+  MySpeakUpDto,
+  SpeakUpDto,
+  SpeakUpReceiptDto,
+} from './speakup.js';
+import {
+  CqcNotificationDto,
+  CqcRatingDto,
+  FppCheckDto,
+  FppDirectorDto,
+  MeetingDto,
+  MeetingPackDto,
+  NhsContractDto,
+  NhsContractsDto,
+  NotificationSuggestionDto,
+  RegistrationHistoryDto,
+} from './regulatory.js';
 import {
   BookingDto,
+  CrewReadinessDto,
   ExceptionDto,
+  ExceptionRequestDto,
   JobDetailDto,
   JobDto,
   PlannerDto,
@@ -103,6 +152,7 @@ import {
 } from './jobs.js';
 import { z as zz } from 'zod';
 import { uuid } from './common.js';
+import { peopleRoutes } from './routes-people.js';
 
 const list = <T extends zz.ZodType>(t: T) => zz.object({ data: zz.array(t) });
 
@@ -138,6 +188,63 @@ export const routes: Record<string, RouteDef> = {
     path: '/me',
     summary: 'Current user, memberships and permissions',
     response: MeResponse,
+  },
+  // ---- local username + password sign-in (AUTH_MODE=local only; 404 otherwise; ADR 0006) ------
+  authLogin: {
+    method: 'post',
+    path: '/auth/login',
+    summary: 'Sign in with username and password: a token, or the next step (MFA, password change)',
+    response: LoginResponse,
+    public: true,
+  },
+  authMfaSetup: {
+    method: 'post',
+    path: '/auth/mfa/setup',
+    summary: 'Start TOTP enrolment for a sign-in challenge (secret and otpauth URI, shown once)',
+    response: MfaSetupResponse,
+    public: true,
+  },
+  authMfaVerify: {
+    method: 'post',
+    path: '/auth/mfa/verify',
+    summary: 'Check a 6-digit TOTP code for a sign-in challenge (also confirms enrolment)',
+    response: LoginResponse,
+    public: true,
+  },
+  authForcedPasswordChange: {
+    method: 'post',
+    path: '/auth/forced-password-change',
+    summary: 'Replace a temporary password during sign-in, then receive a token',
+    response: TokenResponse,
+    public: true,
+  },
+  authChangePassword: {
+    method: 'post',
+    path: '/auth/change-password',
+    summary: 'Change your own password (current password required)',
+    response: zz.object({ changed: zz.literal(true) }),
+  },
+  authRefresh: {
+    method: 'post',
+    path: '/auth/refresh',
+    summary:
+      'New access token from the HttpOnly refresh cookie (rotated on every use; reuse of an old one ends the session)',
+    response: TokenResponse,
+    public: true,
+  },
+  authLogout: {
+    method: 'post',
+    path: '/auth/logout',
+    summary: 'Sign out: ends the refresh session in the cookie, clears the cookie and records it',
+    response: zz.object({ signedOut: zz.literal(true) }),
+    public: true,
+  },
+  liveChanges: {
+    method: 'get',
+    path: '/live/changes',
+    summary:
+      'Server-sent events: `ready` once listening, then `change` when this organisation has new data. Carries no record data; refetch through the normal endpoints.',
+    response: z.object({}),
   },
   orgGet: {
     method: 'get',
@@ -205,6 +312,12 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Update a registered activity (If-Match)',
     response: ActivityDto,
   },
+  adminPeople: {
+    method: 'get',
+    path: '/admin/people',
+    summary: 'Active members (names and roles) for owner pickers',
+    response: list(PersonDto),
+  },
   adminUsers: {
     method: 'get',
     path: '/admin/users',
@@ -228,6 +341,25 @@ export const routes: Record<string, RouteDef> = {
     path: '/admin/users/{id}/revoke',
     summary: 'Revoke access immediately',
     response: zz.object({ revokedMemberships: zz.number(), revokedDevices: zz.number() }),
+  },
+  adminResetPassword: {
+    method: 'post',
+    path: '/admin/users/{id}/reset-password',
+    summary: 'Local sign-in only: set a one-time temporary password (shown once; must be changed)',
+    response: PasswordResetResponse,
+  },
+  adminMfaReset: {
+    method: 'post',
+    path: '/admin/users/{id}/mfa-reset',
+    summary:
+      'Local sign-in only: remove a member’s authenticator (they enrol again at next sign-in) and end their sessions; reason required',
+    response: MfaResetResponse,
+  },
+  adminMembershipChange: {
+    method: 'patch',
+    path: '/admin/memberships/{id}',
+    summary: "Change a person's role or location (ends the old membership, starts a new one)",
+    response: zz.object({ membershipId: zz.string() }),
   },
   adminPermissions: {
     method: 'get',
@@ -386,6 +518,12 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Link evidence to requirement instances',
     response: LinkResponse,
   },
+  evidenceReviewQueue: {
+    method: 'get',
+    path: '/evidence/review-queue',
+    summary: 'Documents waiting for a verify or reject decision (B4)',
+    response: list(ReviewQueueItemDto),
+  },
   evidenceDownload: {
     method: 'get',
     path: '/evidence/{versionId}/download',
@@ -404,6 +542,14 @@ export const routes: Record<string, RouteDef> = {
     path: '/alerts',
     summary: 'Alerts derived from requirement state',
     response: list(AlertDto),
+  },
+  alertCentre: {
+    method: 'get',
+    path: '/alerts/centre',
+    summary:
+      'Alerts centre for the signed-in person: their alerts, overdue actions and audits, ' +
+      'new incidents and published policies, plus anything notification rules route to them',
+    response: AlertCentreDto,
   },
   alertAcknowledge: {
     method: 'post',
@@ -457,6 +603,48 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Request a correction to own record',
     response: CorrectionDto,
   },
+  staffMyReadiness: {
+    method: 'get',
+    path: '/staff/me/readiness',
+    summary: 'Own readiness for a role over a window of up to 31 days (staff.self.view)',
+    response: ReadinessDto,
+  },
+  staffMyRequests: {
+    method: 'get',
+    path: '/staff/me/requests',
+    summary: 'Own due-date change, review and supervision requests',
+    response: list(SelfRequestDto),
+  },
+  staffMyRequestCreate: {
+    method: 'post',
+    path: '/staff/me/requests',
+    summary:
+      'Ask for a due-date change, a review of a requirement, or a supervision session ' +
+      '(staff.self.update; someone else decides)',
+    response: SelfRequestDto,
+  },
+  staffMyRequestWithdraw: {
+    method: 'post',
+    path: '/staff/me/requests/{id}/withdraw',
+    summary: 'Withdraw an open request (If-Match)',
+    response: SelfRequestDto,
+  },
+  staffSelfRequests: {
+    method: 'get',
+    path: '/staff/self-requests',
+    summary:
+      'Staff requests waiting for a decision (staff.profile.manage, compliance.due_date.change ' +
+      'or compliance.evidence.verify)',
+    response: list(SelfRequestDto),
+  },
+  staffSelfRequestDecide: {
+    method: 'post',
+    path: '/staff/self-requests/{id}/decide',
+    summary:
+      'Accept or decline a staff request (If-Match; not by the requester). Accepting a ' +
+      'due-date change applies it through the due-date log',
+    response: SelfRequestDto,
+  },
   staffCorrections: {
     method: 'get',
     path: '/staff/corrections',
@@ -490,7 +678,7 @@ export const routes: Record<string, RouteDef> = {
   trainingMatrix: {
     method: 'get',
     path: '/staff/training-matrix',
-    summary: 'Required items by staff and role with status',
+    summary: 'Required items by staff and role with status, column totals and a gaps filter',
     response: MatrixDto,
   },
   staffGet: {
@@ -517,11 +705,51 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Readiness for a role across a time window',
     response: ReadinessDto,
   },
+  staffRoleChecksGet: {
+    method: 'get',
+    path: '/staff/{id}/role-checks/{role}',
+    summary: 'What a role needs from this person and what still blocks approval',
+    response: RoleCheckResultDto,
+  },
+  staffRoleChecksStart: {
+    method: 'post',
+    path: '/staff/{id}/role-checks',
+    summary: 'Start checks for a role (creates the requirements as awaiting evidence)',
+    response: RoleCheckResultDto,
+  },
+  staffSchedule3: {
+    method: 'get',
+    path: '/staff/{id}/schedule-3',
+    summary: 'Schedule 3 (reg 19) information held, item by item (sensitive, audited)',
+    response: Schedule3Dto,
+  },
+  staffDriverEligibility: {
+    method: 'get',
+    path: '/staff/{id}/driver-eligibility',
+    summary: 'Whether the person may drive a vehicle needing a licence category, with reasons',
+    response: DriverEligibilityDto,
+  },
   staffRoleApprove: {
     method: 'post',
     path: '/staff/{id}/role-approvals',
-    summary: 'Approve the staff member for a role',
+    summary:
+      'Approve the staff member for a role. Regulated roles also need a complete Schedule 3 ' +
+      'staff file (422 with the missing items)',
     response: RoleApprovalDto,
+  },
+  staffRequests: {
+    method: 'get',
+    path: '/staff/{id}/requests',
+    summary: 'Review and supervision requests about one person (staff.profile.manage)',
+    response: list(SelfRequestDto),
+  },
+  staffRequestCreate: {
+    method: 'post',
+    path: '/staff/{id}/requests',
+    summary:
+      'A manager asks for a review of a requirement or books a supervision for someone ' +
+      '(staff.profile.manage; someone else decides)',
+    response: SelfRequestDto,
   },
   staffRoleRevoke: {
     method: 'post',
@@ -590,6 +818,16 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Record an odometer reading (flags stale/decreasing values)',
     response: OdometerDto,
   },
+  vehicleOdometerReview: {
+    method: 'post',
+    path: '/vehicles/{id}/odometer/{readingId}/review',
+    summary: 'Fleet lead confirms or corrects a flagged reading, with a reason (D2)',
+    response: zz.object({
+      readingId: uuid,
+      decision: zz.enum(['CONFIRMED', 'CORRECTED']),
+      reading: zz.number(),
+    }),
+  },
   vehicleMaintenance: {
     method: 'get',
     path: '/vehicles/{id}/maintenance',
@@ -625,6 +863,12 @@ export const routes: Record<string, RouteDef> = {
     path: '/vehicles/{id}/off-road',
     summary: 'Take a vehicle off the road or return it',
     response: VehicleDto,
+  },
+  vehicleStatusHistory: {
+    method: 'get',
+    path: '/vehicles/{id}/status-history',
+    summary: 'Off-road and quarantine history with reasons (append-only)',
+    response: list(VehicleStatusChangeDto),
   },
   equipmentList: {
     method: 'get',
@@ -677,13 +921,19 @@ export const routes: Record<string, RouteDef> = {
   vdiTemplates: {
     method: 'get',
     path: '/vdi-templates',
-    summary: 'Active VDI checklist templates',
+    summary: 'Published VDI checklists (?all=true for drafts and retired, fleet managers)',
     response: list(VdiTemplateDto),
   },
   vdiTemplateCreate: {
     method: 'post',
     path: '/vdi-templates',
-    summary: 'Publish a VDI checklist (new version)',
+    summary: 'Draft a VDI checklist (published by a second person)',
+    response: VdiTemplateDto,
+  },
+  vdiTemplatePublish: {
+    method: 'post',
+    path: '/vdi-templates/{id}/publish',
+    summary: 'Publish a draft checklist; a different person; retires the old version (D6)',
     response: VdiTemplateDto,
   },
   vdiTemplateRetire: {
@@ -741,6 +991,12 @@ export const routes: Record<string, RouteDef> = {
     method: 'post',
     path: '/defects/{id}/release',
     summary: 'Authorised return to service',
+    response: DefectDto,
+  },
+  defectReopen: {
+    method: 'post',
+    path: '/defects/{id}/reopen',
+    summary: 'Send a signed-off repair back for more work',
     response: DefectDto,
   },
   expensesList: {
@@ -858,6 +1114,12 @@ export const routes: Record<string, RouteDef> = {
     summary: 'One action with history',
     response: ActionDto,
   },
+  actionPatch: {
+    method: 'patch',
+    path: '/actions/{id}',
+    summary: 'Reassign an open action or move its deadline, with a reason (If-Match)',
+    response: ActionDto,
+  },
   actionEvidence: {
     method: 'post',
     path: '/actions/{id}/evidence',
@@ -900,6 +1162,12 @@ export const routes: Record<string, RouteDef> = {
     path: '/policies/{id}/acknowledge',
     summary: 'Acknowledge the current version',
     response: PolicyDto,
+  },
+  policyReaders: {
+    method: 'get',
+    path: '/policies/{id}/readers',
+    summary: 'Required readers and whether each has acknowledged the current version',
+    response: PolicyReadersDto,
   },
   risksList: { method: 'get', path: '/risks', summary: 'Risk register', response: list(RiskDto) },
   riskCreate: { method: 'post', path: '/risks', summary: 'Add a risk', response: RiskDto },
@@ -984,8 +1252,106 @@ export const routes: Record<string, RouteDef> = {
   eventCandour: {
     method: 'post',
     path: '/events/{id}/candour-assessment',
-    summary: 'Record a duty of candour decision',
+    summary: 'Record a duty of candour decision (registered manager)',
     response: EventDetailDto,
+  },
+  incidentTypes: {
+    method: 'get',
+    path: '/incidents/types',
+    summary: 'Report types offered in this organisation (IR(ME)R dental, DoLS care home)',
+    response: list(zz.string()),
+  },
+  incidentReport: {
+    method: 'post',
+    path: '/incidents/report',
+    summary:
+      'Any staff member reports an incident, concern or complaint; returns the reference number. ' +
+      'Still at risk alerts the registered manager and governance lead',
+    response: IncidentReportReceipt,
+  },
+  incidentMine: {
+    method: 'get',
+    path: '/incidents/mine',
+    summary: 'My reports and where they stand',
+    response: list(MyReportDto),
+  },
+  eventTriage: {
+    method: 'post',
+    path: '/events/{id}/triage',
+    summary: 'Triage: priority, harm, category, lead and protection steps',
+    response: EventDetailDto,
+  },
+  eventObligationSuggestions: {
+    method: 'get',
+    path: '/events/{id}/obligation-suggestions',
+    summary: 'Suggested reporting duties with trigger, basis, deadline and draft text',
+    response: list(ObligationSuggestionDto),
+  },
+  eventObligationsSuggested: {
+    method: 'post',
+    path: '/events/{id}/obligations/suggested',
+    summary: 'Add chosen suggestions as obligations awaiting a decision',
+    response: EventDetailDto,
+  },
+  eventCandourStep: {
+    method: 'post',
+    path: '/events/{id}/candour-steps',
+    summary: 'Record a duty of candour step (after the decision that candour applies)',
+    response: EventDetailDto,
+  },
+  eventLearning: {
+    method: 'post',
+    path: '/events/{id}/learning',
+    summary: 'Record the PSIRF learning response',
+    response: EventDetailDto,
+  },
+  inspectionOverview: {
+    method: 'get',
+    path: '/inspection/overview',
+    summary: 'Read-only inspection view by key question (every view is logged)',
+    response: InspectionOverviewDto,
+  },
+  auditTemplateClone: {
+    method: 'post',
+    path: '/audit-templates/{id}/clone',
+    summary: 'New draft template copied from this one',
+    response: AuditTemplateDto,
+  },
+  auditTemplateRetire: {
+    method: 'post',
+    path: '/audit-templates/{id}/retire',
+    summary: 'Retire a template with a reason (past runs unchanged)',
+    response: AuditTemplateDto,
+  },
+  auditRunReview: {
+    method: 'post',
+    path: '/audit-runs/{id}/review',
+    summary: 'Reviewer accepts, or returns with a reason (never the auditor)',
+    response: AuditRunDetailDto,
+  },
+  actionCreate: {
+    method: 'post',
+    path: '/actions',
+    summary: 'Raise an action from any source with an owner',
+    response: ActionDto,
+  },
+  policyReadersUpdate: {
+    method: 'patch',
+    path: '/policies/{id}/readers',
+    summary: 'Reader groups: roles, locations or everyone',
+    response: PolicyDto,
+  },
+  policyChase: {
+    method: 'post',
+    path: '/policies/{id}/chase',
+    summary: 'Remind readers who have not acknowledged the current version (audited)',
+    response: zz.object({ chased: zz.number() }),
+  },
+  registrationLocation: {
+    method: 'post',
+    path: '/registration/locations',
+    summary: 'Record a location’s manager, activities and conditions from a date',
+    response: RegistrationDto.extend({ locations: zz.array(RegistrationLocationDto).optional() }),
   },
   eventComplaint: {
     method: 'patch',
@@ -997,6 +1363,66 @@ export const routes: Record<string, RouteDef> = {
     method: 'post',
     path: '/events/{id}/actions',
     summary: 'Assign an action from an event',
+    response: ActionDto,
+  },
+  integrationsList: {
+    method: 'get',
+    path: '/integrations',
+    summary: 'Integrations and recent runs (mock adapters only)',
+    response: IntegrationList,
+  },
+  integrationConnect: {
+    method: 'post',
+    path: '/integrations/{adapter}/connect',
+    summary: 'Connect a mock integration (LIVE is refused)',
+    response: IntegrationDto,
+  },
+  integrationDisconnect: {
+    method: 'post',
+    path: '/integrations/{adapter}/disconnect',
+    summary: 'Disconnect an integration',
+    response: zz.object({ ok: zz.literal(true) }),
+  },
+  integrationSync: {
+    method: 'post',
+    path: '/integrations/{adapter}/sync',
+    summary: 'Run an inbound mock sync',
+    response: IntegrationRunDto,
+  },
+  integrationPayrollExport: {
+    method: 'get',
+    path: '/integrations/payroll/export',
+    summary: 'Planned shift hours CSV (mock payroll export)',
+    response: zz.string(),
+  },
+  integrationCalendarFeed: {
+    method: 'get',
+    path: '/integrations/calendar/feed',
+    summary: 'iCalendar feed of upcoming shifts (mock)',
+    response: zz.string(),
+  },
+  feedbackList: {
+    method: 'get',
+    path: '/feedback',
+    summary: 'Compliments, staff feedback and patient surveys',
+    response: list(FeedbackDto),
+  },
+  feedbackCreate: {
+    method: 'post',
+    path: '/feedback',
+    summary: 'Record a compliment, staff feedback or survey result',
+    response: FeedbackDto,
+  },
+  feedbackThemes: {
+    method: 'get',
+    path: '/feedback/themes',
+    summary: 'Thematic analysis across feedback and complaints (counts only)',
+    response: FeedbackThemesDto,
+  },
+  feedbackAction: {
+    method: 'post',
+    path: '/feedback/{id}/actions',
+    summary: 'Assign an action arising from feedback',
     response: ActionDto,
   },
   premisesList: {
@@ -1017,11 +1443,42 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Applicability decision with reason',
     response: PremisesDto,
   },
+  premisesPatch: {
+    method: 'patch',
+    path: '/premises-items/{id}',
+    summary: 'Edit a premises item (If-Match)',
+    response: PremisesDto,
+  },
+  premisesSchedule: {
+    method: 'post',
+    path: '/premises-items/{id}/schedule',
+    summary: 'Link a published premises schedule and set its first due date',
+    response: PremisesDto,
+  },
+  premisesFinding: {
+    method: 'post',
+    path: '/premises-items/{id}/findings',
+    summary: 'Raise a finding on a premises item as an action (J1)',
+    response: ActionDto,
+  },
+  premisesHistory: {
+    method: 'get',
+    path: '/premises-items/{id}/history',
+    summary: 'Append-only change history of a premises item (J1)',
+    response: list(PremisesHistoryDto),
+  },
   dashboardSummary: {
     method: 'get',
     path: '/dashboard/summary',
     summary: 'Tiles, module status, coverage, sources',
     response: DashboardSummary,
+  },
+  dashboardGroup: {
+    method: 'get',
+    path: '/dashboard/group',
+    summary:
+      'Group dashboard: counts per authorised organisation (no record detail crosses organisations)',
+    response: GroupDashboardSummary,
   },
   dashboardActions: {
     method: 'get',
@@ -1038,7 +1495,8 @@ export const routes: Record<string, RouteDef> = {
   evidencePackCreate: {
     method: 'post',
     path: '/evidence-packs',
-    summary: 'Request an inspection evidence pack (PDF index + ZIP)',
+    summary:
+      'Request an evidence pack (PDF index + ZIP): purpose, sections, files or index only, gaps only',
     response: ExportDto,
   },
   exportsList: {
@@ -1104,6 +1562,12 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Re-check and offer to the crew',
     response: JobDetailDto,
   },
+  jobReassign: {
+    method: 'post',
+    path: '/jobs/{id}/reassign',
+    summary: 'Move a job to another shift: checks re-run, old allocation ends with reason (E5)',
+    response: JobDetailDto,
+  },
   jobStatus: {
     method: 'post',
     path: '/jobs/{id}/status',
@@ -1115,6 +1579,24 @@ export const routes: Record<string, RouteDef> = {
     path: '/allocation-exceptions',
     summary: 'Approve a policy exception (statutory/safety: 422)',
     response: ExceptionDto,
+  },
+  allocationExceptionRequests: {
+    method: 'get',
+    path: '/allocation-exception-requests',
+    summary: 'Policy exception requests with who asked and who decided',
+    response: list(ExceptionRequestDto),
+  },
+  allocationExceptionRequestCreate: {
+    method: 'post',
+    path: '/allocation-exception-requests',
+    summary: 'Ask for a policy exception (statutory/safety: 422)',
+    response: ExceptionRequestDto,
+  },
+  allocationExceptionRequestDecide: {
+    method: 'post',
+    path: '/allocation-exception-requests/{id}/decide',
+    summary: 'Approve or refuse a request; never your own (SELF_APPROVAL)',
+    response: ExceptionRequestDto,
   },
   planner: {
     method: 'get',
@@ -1147,10 +1629,28 @@ export const routes: Record<string, RouteDef> = {
     summary: 'End a crew assignment (swap or handover)',
     response: ShiftDto,
   },
+  shiftCrewSwap: {
+    method: 'post',
+    path: '/shifts/{id}/crew/{assignmentId}/swap',
+    summary: 'Swap a crew member for the rest of the assignment, with a reason (E2)',
+    response: ShiftDto,
+  },
+  shiftCrewReadiness: {
+    method: 'get',
+    path: '/shifts/crew-readiness',
+    summary: 'Readiness of a person for a crew role over a time, as they are picked (E2)',
+    response: CrewReadinessDto,
+  },
   shiftVehicle: {
     method: 'post',
     path: '/shifts/{id}/vehicle',
     summary: 'Swap the vehicle (new VDI and cleaning needed)',
+    response: ShiftDto,
+  },
+  shiftCancel: {
+    method: 'post',
+    path: '/shifts/{id}/cancel',
+    summary: 'Cancel a shift that has not started (jobs go back for reallocation)',
     response: ShiftDto,
   },
   shiftGate: {
@@ -1333,7 +1833,7 @@ export const routes: Record<string, RouteDef> = {
   retentionLog: {
     method: 'get',
     path: '/retention-log',
-    summary: 'What retention has done (immutable)',
+    summary: 'What retention has done (immutable; ?category&from&to)',
     response: list(RetentionLogDto),
   },
   legalHolds: {
@@ -1381,13 +1881,13 @@ export const routes: Record<string, RouteDef> = {
   disclosures: {
     method: 'get',
     path: '/disclosures',
-    summary: 'Disclosure log',
+    summary: 'Disclosure log (?from&to; who recorded it, linked request code)',
     response: list(DisclosureDto),
   },
   disclosureCreate: {
     method: 'post',
     path: '/disclosures',
-    summary: 'Record a disclosure',
+    summary: 'Record a disclosure (append-only; future dates refused)',
     response: DisclosureDto,
   },
   breaches: {
@@ -1420,12 +1920,284 @@ export const routes: Record<string, RouteDef> = {
     summary: 'Close a breach record',
     response: BreachDto,
   },
+  dpComplaints: {
+    method: 'get',
+    path: '/dp-complaints',
+    summary: 'Data protection complaints log (acknowledge within 30 days)',
+    response: list(DpComplaintDto),
+  },
+  dpComplaintCreate: {
+    method: 'post',
+    path: '/dp-complaints',
+    summary: 'Log a data protection complaint',
+    response: DpComplaintDto,
+  },
+  dpComplaintAcknowledge: {
+    method: 'post',
+    path: '/dp-complaints/{id}/acknowledge',
+    summary: 'Record that the complaint was acknowledged',
+    response: DpComplaintDto,
+  },
+  dpComplaintResolve: {
+    method: 'post',
+    path: '/dp-complaints/{id}/resolve',
+    summary: 'Record the outcome and close the complaint',
+    response: DpComplaintDto,
+  },
   fullExportCreate: {
     method: 'post',
     path: '/exports/full',
     summary: 'Full organisation data export with attachments and stable IDs (audited)',
     response: ExportDto,
   },
+  // ---- speaking up and harassment prevention (task 20) ----
+  speakUpRaise: {
+    method: 'post',
+    path: '/speak-up',
+    summary: 'Raise a concern, named or anonymous (anonymous stores no raiser)',
+    response: SpeakUpReceiptDto,
+  },
+  speakUpMine: {
+    method: 'get',
+    path: '/speak-up/mine',
+    summary: 'Progress of my own named concerns',
+    response: list(MySpeakUpDto),
+  },
+  speakUpList: {
+    method: 'get',
+    path: '/speak-up',
+    summary: 'Speak-up concerns (handlers only)',
+    response: list(SpeakUpDto),
+  },
+  speakUpGet: {
+    method: 'get',
+    path: '/speak-up/{id}',
+    summary: 'One concern with its notes (audited)',
+    response: SpeakUpDto,
+  },
+  speakUpRecord: {
+    method: 'post',
+    path: '/speak-up/record',
+    summary: 'Record a concern received in person, by phone, email or letter',
+    response: SpeakUpDto,
+  },
+  speakUpAcknowledge: {
+    method: 'post',
+    path: '/speak-up/{id}/acknowledge',
+    summary: 'Acknowledge a concern and name who handles it',
+    response: SpeakUpDto,
+  },
+  speakUpStart: {
+    method: 'post',
+    path: '/speak-up/{id}/start',
+    summary: 'Start looking into a concern',
+    response: SpeakUpDto,
+  },
+  speakUpNote: {
+    method: 'post',
+    path: '/speak-up/{id}/notes',
+    summary: 'Add a note, feedback given, or a detriment check (never edited)',
+    response: SpeakUpDto,
+  },
+  speakUpClose: {
+    method: 'post',
+    path: '/speak-up/{id}/close',
+    summary: 'Close a concern with its outcome (named concerns need feedback first)',
+    response: SpeakUpDto,
+  },
+  harassmentAssessments: {
+    method: 'get',
+    path: '/harassment/assessments',
+    summary: 'Sexual harassment risk assessments, newest first',
+    response: list(HarassmentAssessmentDto),
+  },
+  harassmentAssessmentCreate: {
+    method: 'post',
+    path: '/harassment/assessments',
+    summary: 'Start a draft risk assessment',
+    response: HarassmentAssessmentDto,
+  },
+  harassmentAssessmentPatch: {
+    method: 'patch',
+    path: '/harassment/assessments/{id}',
+    summary: 'Edit a draft risk assessment (If-Match)',
+    response: HarassmentAssessmentDto,
+  },
+  harassmentAssessmentApprove: {
+    method: 'post',
+    path: '/harassment/assessments/{id}/approve',
+    summary: 'Approve a draft (not by the person who prepared it)',
+    response: HarassmentAssessmentDto,
+  },
+  harassmentDuty: {
+    method: 'get',
+    path: '/harassment/duty',
+    summary: 'Prevention steps the hub can see (not a statement that the duty is met)',
+    response: HarassmentDutyDto,
+  },
+
+  // ---- task 21: registration history, rating display, fit and proper, meetings, notifications
+  registrationHistory: {
+    method: 'get',
+    path: '/registration/history',
+    summary: 'Every saved version of the registration record, newest first',
+    response: list(RegistrationHistoryDto),
+  },
+  cqcRatingList: {
+    method: 'get',
+    path: '/cqc-ratings',
+    summary: 'Ratings as CQC published them, and where they are displayed (reg 20A)',
+    response: list(CqcRatingDto),
+  },
+  cqcRatingRecord: {
+    method: 'post',
+    path: '/cqc-ratings',
+    summary: 'Record a rating CQC has published (never a predicted rating)',
+    response: CqcRatingDto,
+  },
+  cqcRatingDisplay: {
+    method: 'patch',
+    path: '/cqc-ratings/{id}',
+    summary: 'Record where and when the rating is displayed (If-Match)',
+    response: CqcRatingDto,
+  },
+  fitAndProperList: {
+    method: 'get',
+    path: '/fit-and-proper',
+    summary: "Directors' fit and proper person checks, latest per director (audited)",
+    response: zz.object({ directors: zz.array(FppDirectorDto), checks: zz.array(FppCheckDto) }),
+  },
+  fitAndProperRecord: {
+    method: 'post',
+    path: '/fit-and-proper',
+    summary: "Record a director's fit and proper person check (append-only)",
+    response: FppCheckDto,
+  },
+  meetingList: {
+    method: 'get',
+    path: '/governance-meetings',
+    summary: 'Governance meetings with their actions',
+    response: list(MeetingDto),
+  },
+  meetingGet: {
+    method: 'get',
+    path: '/governance-meetings/{id}',
+    summary: 'One governance meeting',
+    response: MeetingDto,
+  },
+  meetingPack: {
+    method: 'get',
+    path: '/governance-meetings/pack',
+    summary: 'Meeting pack figures from live records since the last meeting (audited)',
+    response: MeetingPackDto,
+  },
+  meetingRecord: {
+    method: 'post',
+    path: '/governance-meetings',
+    summary: 'Record a meeting and its draft minutes',
+    response: MeetingDto,
+  },
+  meetingEdit: {
+    method: 'patch',
+    path: '/governance-meetings/{id}',
+    summary: 'Edit draft minutes (If-Match); the editor cannot then approve them',
+    response: MeetingDto,
+  },
+  meetingApprove: {
+    method: 'post',
+    path: '/governance-meetings/{id}/approve',
+    summary: 'Approve minutes at a later meeting (not by their author; then locked)',
+    response: MeetingDto,
+  },
+  meetingAction: {
+    method: 'post',
+    path: '/governance-meetings/{id}/actions',
+    summary: 'Raise an action agreed at the meeting',
+    response: ActionDto,
+  },
+  cqcNotificationList: {
+    method: 'get',
+    path: '/cqc-notifications',
+    summary: 'Drafts of CQC statutory notifications (the hub never sends them)',
+    response: list(CqcNotificationDto),
+  },
+  cqcNotificationSuggestions: {
+    method: 'get',
+    path: '/cqc-notifications/suggestions',
+    summary: 'Recent events that may need a notification and have none',
+    response: list(NotificationSuggestionDto),
+  },
+  cqcNotificationDraft: {
+    method: 'post',
+    path: '/cqc-notifications',
+    summary: 'Draft a notification (no patient identifiers)',
+    response: CqcNotificationDto,
+  },
+  cqcNotificationEdit: {
+    method: 'patch',
+    path: '/cqc-notifications/{id}',
+    summary: 'Edit a draft (If-Match); the editor becomes its preparer',
+    response: CqcNotificationDto,
+  },
+  cqcNotificationTransition: {
+    method: 'post',
+    path: '/cqc-notifications/{id}/transition',
+    summary: 'Review, return, record submission to CQC, or mark not required (If-Match)',
+    response: CqcNotificationDto,
+  },
+
+  // ---- task 22: NHS contracts -------------------------------------------------------------------
+  nhsContractList: {
+    method: 'get',
+    path: '/nhs-contracts',
+    summary: 'NHS contracts held, and the status of NHS contract items (from the requirements)',
+    response: NhsContractsDto,
+  },
+  nhsContractRecord: {
+    method: 'post',
+    path: '/nhs-contracts',
+    summary: 'Record an NHS contract (commissioner, dates, notice, contract manager)',
+    response: NhsContractDto,
+  },
+  nhsContractEdit: {
+    method: 'patch',
+    path: '/nhs-contracts/{id}',
+    summary: 'Update an NHS contract (If-Match)',
+    response: NhsContractDto,
+  },
+
+  // ---- email and push delivery of escalations (self-scoped) -------------------------------------
+  myPushDeviceList: {
+    method: 'get',
+    path: '/me/push-devices',
+    summary: 'Your live push registrations in this organisation (tokens are never returned)',
+    response: list(PushDeviceDto),
+  },
+  myPushDeviceRegister: {
+    method: 'post',
+    path: '/me/push-devices',
+    summary: 'Register this device or browser for escalation pushes (Expo token or Web Push)',
+    response: PushDeviceDto,
+  },
+  myPushDeviceRemove: {
+    method: 'delete',
+    path: '/me/push-devices/{id}',
+    summary: 'Stop pushes to one of your devices',
+    response: PushDeviceDto,
+  },
+  myNotificationPreferences: {
+    method: 'get',
+    path: '/me/notification-preferences',
+    summary: 'Your email and push switches, and the organisation channel switches',
+    response: NotificationPreferencesDto,
+  },
+  myNotificationPreferencesUpdate: {
+    method: 'put',
+    path: '/me/notification-preferences',
+    summary: 'Turn escalation email or push on or off for yourself',
+    response: NotificationPreferencesDto,
+  },
+  ...peopleRoutes,
 };
 
 export function buildOpenApi(version = '0.0.0') {

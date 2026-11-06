@@ -7,6 +7,10 @@ export class ApiError extends Error {
     public readonly code: string,
     /** Server-written explanation (problem+json `detail`); never contains personal data. */
     public readonly detail: string | null = null,
+    /** Field problems from request validation (path + message, no payload values). */
+    public readonly errors: { path: string; message: string }[] = [],
+    /** Structured reasons (failed checks, missing requirements): codes and plain text only. */
+    public readonly checks: Record<string, unknown>[] = [],
   ) {
     super(`API ${status} ${code}`);
   }
@@ -18,7 +22,7 @@ export interface ApiClient {
   /** Generic authenticated calls for the admin screens (responses are validated by the caller). */
   get(path: string, orgId: string | null): Promise<unknown>;
   send(
-    method: 'POST' | 'PATCH',
+    method: 'POST' | 'PATCH' | 'DELETE',
     path: string,
     orgId: string | null,
     body: unknown,
@@ -26,6 +30,15 @@ export interface ApiClient {
   ): Promise<unknown>;
   /** Authenticated file download (CSV exports, evidence packs). */
   download?(path: string, orgId: string | null): Promise<Blob>;
+  /**
+   * Follows the organisation's live changes stream until it ends. Uses fetch, not EventSource,
+   * because the token goes in a header and never in a URL.
+   */
+  watchChanges?(
+    orgId: string,
+    onEvent: (event: 'ready' | 'change') => void,
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 export function createApiClient(auth: AuthClient, baseUrl = ''): ApiClient {
@@ -51,8 +64,11 @@ export function createApiClient(auth: AuthClient, baseUrl = ''): ApiClient {
         res.status,
         parsed.success ? parsed.data.code : 'INTERNAL',
         parsed.success ? (parsed.data.detail ?? null) : null,
+        parsed.success ? (parsed.data.errors ?? []) : [],
+        parsed.success ? (parsed.data.checks ?? []) : [],
       );
     }
+    if (res.status === 204) return null;
     return res.json();
   }
   return {
@@ -67,6 +83,26 @@ export function createApiClient(auth: AuthClient, baseUrl = ''): ApiClient {
       const res = await fetch(`${baseUrl}${path}`, { headers });
       if (!res.ok) throw new ApiError(res.status, 'DOWNLOAD_FAILED');
       return res.blob();
+    },
+    async watchChanges(orgId, onEvent, signal) {
+      const res = await fetch(`${baseUrl}/api/v1/live/changes`, {
+        headers: { authorization: `Bearer ${await auth.getToken()}`, 'x-org-id': orgId },
+        signal,
+      });
+      if (!res.ok || !res.body) throw new ApiError(res.status, 'LIVE_UNAVAILABLE');
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += value;
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) {
+          if (frame.startsWith('event: ready')) onEvent('ready');
+          else if (frame.startsWith('event: change')) onEvent('change');
+        }
+      }
     },
   };
 }

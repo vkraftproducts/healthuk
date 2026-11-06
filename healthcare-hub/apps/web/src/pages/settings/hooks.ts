@@ -34,3 +34,16 @@ export function useOne<T = Record<string, unknown>>(path: string | null, enabled
     retry: false,
   });
 }
+
+export interface Person {
+  id: string;
+  displayName: string;
+  roleKeys: string[];
+  roleNames: string[];
+  locationIds: string[];
+}
+/** Active members of the organisation for owner and assignee pickers. */
+export function usePeople(enabled = true) {
+  const q = useOne<{ data: Person[] }>('/api/v1/admin/people', enabled);
+  return q.data?.data ?? [];
+}

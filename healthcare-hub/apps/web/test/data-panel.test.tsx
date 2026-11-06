@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ const me = (permissions: string[]): MeResponse => ({
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'X',
       roleName: 'X',
@@ -52,7 +52,7 @@ const preview = {
     },
   ],
 };
-const item = {
+const item: Record<string, unknown> & { id: string } = {
   id: '01900000-0000-7000-8000-0000000009b1',
   sheet: 'Safe',
   rowNo: 3,
@@ -106,8 +106,42 @@ describe('import and export settings [PRD 4.12]', () => {
     expect(await screen.findByText('Unresolved: [ENTER PRACTICE NAME]')).toBeInTheDocument();
     const table = screen.getByRole('table', { name: 'Staged workbook rows' });
     expect(within(table).getByText('Compliant')).toBeInTheDocument();
-    expect(within(table).getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(
+      within(table).getByRole('button', { name: 'Approve mapping: Safe row 3 P-01' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Import from CSV')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Request full export' })).toBeNull();
+  });
+
+  it('a reject needs a reason and sends it as the decision note', async () => {
+    const sent = renderAt(['admin.requirements.publish']);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Import and export' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject mapping: Safe row 3 P-01' }));
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: 'Reject mapping' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/Why is it rejected\?/), {
+      target: { value: 'Wrong subject' },
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(sent).toContain(`/api/v1/workbook-items/${item.id}/decision`));
+  });
+
+  it('the proposer cannot decide their own mapping', async () => {
+    item.proposedBy = '01900000-0000-7000-8000-000000000101';
+    item.proposedByName = 'Dev';
+    try {
+      renderAt(['admin.requirements.publish']);
+      fireEvent.click(await screen.findByRole('tab', { name: 'Import and export' }));
+      expect(
+        await screen.findByText('You proposed this; someone else decides.'),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Proposed by Dev')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Approve mapping/ })).toBeNull();
+    } finally {
+      delete item.proposedBy;
+      delete item.proposedByName;
+    }
   });
 });

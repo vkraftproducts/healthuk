@@ -24,6 +24,7 @@ import {
   DefectCreate,
   DefectListQuery,
   DefectPatch,
+  DefectReopen,
   ExpenseCreate,
   ExpenseDecision,
   ExpenseQuery,
@@ -44,7 +45,8 @@ import {
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { toCsv } from '../../common/csv.js';
 import { DB } from '../../db.provider.js';
-import { day, toDefectDto, toExpenseDto } from './fleet.mapper.js';
+import { userNames } from '../evidence/evidence.mapper.js';
+import { day, defectDto, defectDtos, toExpenseDto } from './fleet.mapper.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
 
@@ -61,18 +63,25 @@ export class DefectsController {
   async list(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<{ data: DefectDto[] }> {
     requireAny(hub, 'fleet.vehicle.view', 'fleet.defect.manage');
     const f = body(DefectListQuery, q);
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.defect.findMany({
-        where: {
-          ...(f.status === 'ACTIVE' ? { status: { not: 'RELEASED' } } : { status: f.status }),
-          ...(f.vehicleId ? { vehicleId: f.vehicleId } : {}),
-        },
-        include: { release: true },
-        orderBy: [{ stopUse: 'desc' }, { discoveredAt: 'desc' }],
-        take: 500,
-      }),
+    const data = await this.db.withTenant(tenantOf(hub), async (tx) =>
+      defectDtos(
+        tx,
+        await tx.defect.findMany({
+          where: {
+            ...(f.status === 'ACTIVE' ? { status: { not: 'RELEASED' } } : { status: f.status }),
+            ...(f.vehicleId ? { vehicleId: f.vehicleId } : {}),
+            ...(f.severity ? { severity: f.severity } : {}),
+          },
+          include: { release: true },
+          orderBy:
+            f.status === 'RELEASED'
+              ? [{ updatedAt: 'desc' }]
+              : [{ stopUse: 'desc' }, { discoveredAt: 'desc' }],
+          take: 500,
+        }),
+      ),
     );
-    return { data: rows.map((d) => toDefectDto(d)) };
+    return { data };
   }
 
   @RequirePermission('fleet.defect.create')
@@ -96,7 +105,7 @@ export class DefectsController {
               409,
               'That submission id was used for a different report',
             );
-          return { ...toDefectDto(prior), replayed: true }; // offline retry: exactly one defect
+          return { ...(await defectDto(tx, prior)), replayed: true }; // offline retry: exactly one defect
         }
       }
       await ownEvidence(tx, hub, input.photoEvidenceItemIds);
@@ -130,7 +139,7 @@ export class DefectsController {
         entityId: d.id,
         summary: { severity: d.severity, stopUse, vehicleId: d.vehicleId, assetId: d.assetId },
       });
-      return toDefectDto(d, affected);
+      return defectDto(tx, d, affected);
     });
   }
 
@@ -143,7 +152,7 @@ export class DefectsController {
       const canSeeAll =
         hub.permissions.has('fleet.vehicle.view') || hub.permissions.has('fleet.defect.manage');
       if (!d || (!canSeeAll && d.reportedBy !== hub.user.id)) throw notFound();
-      return toDefectDto(d);
+      return defectDto(tx, d);
     });
   }
 
@@ -162,6 +171,26 @@ export class DefectsController {
       if (!d) throw notFound();
       if (d.status === 'RELEASED')
         throw new HubError('CONFLICT', 409, 'The defect has been released');
+      if (
+        input.repairJobSheetEvidenceItemId &&
+        !(await tx.evidenceItem.count({ where: { id: input.repairJobSheetEvidenceItemId } }))
+      )
+        throw new HubError('VALIDATION_FAILED', 400, 'Upload the job sheet first');
+      const escalationOnly =
+        input.status === undefined &&
+        input.repairNotes === undefined &&
+        input.repairDeadline === undefined &&
+        input.repairJobSheetEvidenceItemId === undefined &&
+        (input.severity === undefined || input.severity === 'CRITICAL');
+      // A signed-off repair is a record: only making it more serious is allowed afterwards.
+      if (d.status === 'REPAIRED' && !escalationOnly)
+        throw new HubError(
+          'CONFLICT',
+          409,
+          'The repair has been signed off. Return it to service, or send it back for repair.',
+        );
+      if (input.status === 'REPAIRED' && !(input.repairNotes ?? d.repairNotes)?.trim())
+        throw new HubError('VALIDATION_FAILED', 400, 'Say what was repaired before signing it off');
       const severity = input.severity ?? d.severity;
       const stopUse = d.stopUse || input.stopUse === true || severity === 'CRITICAL';
       if (d.stopUse && input.severity && input.severity !== 'CRITICAL' && d.severity === 'CRITICAL')
@@ -184,7 +213,12 @@ export class DefectsController {
           stopUse,
           ...(input.severity || input.repairDeadline ? { classifiedBy: hub.user.id } : {}),
           ...(input.repairDeadline ? { repairDeadline: day(input.repairDeadline) } : {}),
-          ...(input.repairNotes ? { repairNotes: input.repairNotes } : {}),
+          ...(input.repairNotes
+            ? { repairNotes: appendNote(d.repairNotes, input.repairNotes) }
+            : {}),
+          ...(input.repairJobSheetEvidenceItemId
+            ? { repairJobSheetEvidenceItemId: input.repairJobSheetEvidenceItemId }
+            : {}),
           ...(input.status ? { status: input.status } : {}),
           ...(input.status === 'REPAIRED' ? { repairedAt: now, repairedBy: hub.user.id } : {}),
         },
@@ -204,7 +238,47 @@ export class DefectsController {
         entityId: id,
         summary: { status: u.status, severity: u.severity, stopUse: u.stopUse },
       });
-      return toDefectDto(u, affected);
+      return defectDto(tx, u, affected);
+    });
+  }
+
+  /** The person checking the repair is not satisfied: back to REPAIRING, block and alert stay. */
+  @RequirePermission('fleet.return_to_service')
+  @Post(':id/reopen')
+  async reopen(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<DefectDto> {
+    const input = body(DefectReopen, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const d = await tx.defect.findUnique({ where: { id } });
+      if (!d) throw notFound();
+      if (d.status !== 'REPAIRED')
+        throw new HubError('CONFLICT', 409, 'Only a signed-off repair can be sent back');
+      await tx.defect.update({
+        where: { id },
+        data: {
+          status: 'REPAIRING',
+          repairedAt: null,
+          repairedBy: null,
+          repairNotes: appendNote(
+            d.repairNotes,
+            `Sent back for repair on ${londonDate(new Date())}: ${input.reason}`,
+          ),
+        },
+      });
+      if (d.vehicleId) await refreshVehicleStatus(tx, d.vehicleId);
+      await audit(this.db, tx, hub, {
+        action: 'fleet.defect.reopen',
+        entity: 'defect',
+        entityId: id,
+        summary: { vehicleId: d.vehicleId, assetId: d.assetId, previousRepairer: d.repairedBy },
+      });
+      return defectDto(
+        tx,
+        await tx.defect.findUniqueOrThrow({ where: { id }, include: { release: true } }),
+      );
     });
   }
 
@@ -220,6 +294,9 @@ export class DefectsController {
       const d = await tx.defect.findUnique({ where: { id } });
       if (!d) throw notFound();
       if (d.status === 'RELEASED') throw new HubError('CONFLICT', 409, 'Already released');
+      // D4: no release without a repair record (what was repaired, signed off by the repairer).
+      if (d.status === 'REPAIRED' && !d.repairNotes?.trim())
+        throw new HubError('OVERRIDE_NOT_PERMITTED', 422, 'Record the repair before release');
       const ok = canReleaseVehicle({
         repairCompleted: d.status === 'REPAIRED',
         hasReturnToServicePermission: true,
@@ -257,11 +334,18 @@ export class DefectsController {
         entityId: id,
         summary: { vehicleId: d.vehicleId, assetId: d.assetId },
       });
-      return toDefectDto(
+      return defectDto(
+        tx,
         await tx.defect.findUniqueOrThrow({ where: { id }, include: { release: true } }),
       );
     });
   }
+}
+
+/** Repair notes are a running log; the column holds 2000 characters, so keep the newest. */
+function appendNote(existing: string | null, note: string): string {
+  const all = existing ? `${existing}\n\n${note}` : note;
+  return all.length > 2000 ? all.slice(all.length - 2000) : all;
 }
 
 async function subjectOf(
@@ -292,8 +376,8 @@ export class ExpensesController {
   async list(@Hub() hub: HubRequestContext, @Query() q: unknown): Promise<{ data: ExpenseDto[] }> {
     requireAny(hub, 'fleet.expense.approve', 'fleet.expense.submit');
     const f = body(ExpenseQuery, q);
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.fuelExpense.findMany({
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.fuelExpense.findMany({
         where: {
           ...this.scope(hub),
           ...(f.status ? { status: f.status } : {}),
@@ -309,9 +393,21 @@ export class ExpensesController {
         },
         orderBy: [{ spentOn: 'desc' }, { createdAt: 'desc' }],
         take: 500,
-      }),
-    );
-    return { data: rows.map(toExpenseDto) };
+        include: { vehicle: { select: { callsign: true, registration: true } } },
+      });
+      const names = await userNames(
+        tx,
+        rows.flatMap((e) => [e.submittedBy, e.decidedBy]),
+      );
+      return {
+        data: rows.map(({ vehicle, ...e }) => ({
+          ...toExpenseDto(e),
+          vehicleLabel: `${vehicle.callsign} (${vehicle.registration})`,
+          submittedByName: names.get(e.submittedBy) ?? null,
+          decidedByName: e.decidedBy ? (names.get(e.decidedBy) ?? null) : null,
+        })),
+      };
+    });
   }
 
   @RequirePermission('fleet.expense.submit')
@@ -338,13 +434,21 @@ export class ExpensesController {
       const v = await tx.vehicle.findUnique({ where: { id: input.vehicleId } });
       if (!v) throw notFound();
       if (input.receiptEvidenceItemId) await ownEvidence(tx, hub, [input.receiptEvidenceItemId]);
+      // D7: a possible duplicate is the same receipt, or the same vehicle, date, amount and type.
       const dup = await tx.fuelExpense.findFirst({
         where: {
-          vehicleId: v.id,
-          spentOn: day(input.spentOn),
-          amountPence: input.amountPence,
-          category: input.category,
           status: { not: 'REJECTED' },
+          OR: [
+            {
+              vehicleId: v.id,
+              spentOn: day(input.spentOn),
+              amountPence: input.amountPence,
+              category: input.category,
+            },
+            ...(input.receiptEvidenceItemId
+              ? [{ receiptEvidenceItemId: input.receiptEvidenceItemId }]
+              : []),
+          ],
         },
         select: { id: true },
       });

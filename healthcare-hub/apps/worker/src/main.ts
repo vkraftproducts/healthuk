@@ -3,12 +3,21 @@ import pino from 'pino';
 import { createDb } from '@hub/db';
 import {
   breachClockAlerts,
+  EmailSender,
+  escalationsAll,
+  ExpoPushTransport,
+  OutboxEmailTransport,
+  OutboxPushTransport,
+  PushSender,
+  WebPushTransport,
+  type PushTransport,
   ExpoPushSender,
   LocalBlobStore,
   MemoryPushSender,
   pushAll,
   jobTimingAll,
   notifyAll,
+  recheckAll,
   reconcileAll,
   runRetention,
   runPendingExports,
@@ -16,7 +25,7 @@ import {
   verifyAuditChains,
 } from '@hub/domain';
 import { loadConfig } from './config.js';
-import { logMailer } from './mailer.js';
+import { logMailer, smtpMailer } from './mailer.js';
 
 const LONDON = 'Europe/London';
 const QUEUES = [
@@ -29,12 +38,14 @@ const QUEUES = [
   'send-push',
   'retention',
   'breach-clock',
+  'deliver-escalations',
 ] as const;
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = pino({ level: config.LOG_LEVEL });
   const log = (msg: string, ctx: object): void => logger.warn(ctx, msg);
+  const debug = (msg: string, ctx: object): void => logger.debug(ctx, msg);
   const db = createDb(config.DATABASE_URL);
   const boss = new PgBoss(config.QUEUE_DATABASE_URL);
   boss.on('error', (e: Error) => logger.error({ error: e.message }, 'queue error'));
@@ -68,6 +79,9 @@ async function main(): Promise<void> {
   await boss.work('job-timing', async () => {
     const r = await jobTimingAll(db, new Date(), log);
     if (r.raised > 0 || r.failed > 0) logger.info(r, 'job timing alerts');
+    // E3: jobs that no longer pass their checks are flagged red to control.
+    const c = await recheckAll(db, new Date(), log);
+    if (c.flagged > 0 || c.failed > 0) logger.info(c, 'allocation recheck');
   });
 
   const push =
@@ -89,6 +103,38 @@ async function main(): Promise<void> {
     if (n > 0) logger.info({ changed: n }, 'breach clock alerts');
   });
 
+  // Escalations to the lead and registered manager by email and push (generic text, opaque link).
+  const email = new EmailSender(
+    config.EMAIL_TRANSPORT === 'smtp' && config.SMTP_URL
+      ? smtpMailer(config.SMTP_URL, config.EMAIL_FROM)
+      : new OutboxEmailTransport(debug),
+  );
+  const pushTransports: Partial<Record<'EXPO' | 'WEB_PUSH', PushTransport>> = {};
+  if (config.PUSH_TRANSPORT.includes('outbox')) {
+    const outbox = new OutboxPushTransport(debug);
+    pushTransports.EXPO = outbox;
+    pushTransports.WEB_PUSH = outbox;
+  }
+  if (config.PUSH_TRANSPORT.includes('expo'))
+    pushTransports.EXPO = new ExpoPushTransport(fetch, config.EXPO_ACCESS_TOKEN);
+  if (
+    config.PUSH_TRANSPORT.includes('webpush') &&
+    config.VAPID_PUBLIC_KEY &&
+    config.VAPID_PRIVATE_KEY &&
+    config.VAPID_SUBJECT
+  )
+    pushTransports.WEB_PUSH = new WebPushTransport({
+      subject: config.VAPID_SUBJECT,
+      publicKey: config.VAPID_PUBLIC_KEY,
+      privateKey: config.VAPID_PRIVATE_KEY,
+    });
+  const escalationSenders = { email, push: new PushSender(pushTransports) };
+  await boss.work('deliver-escalations', async () => {
+    const r = await escalationsAll(db, new Date(), escalationSenders, config.WEB_ORIGIN, log);
+    if (r.created > 0 || r.sent > 0 || r.retrying > 0 || r.failed > 0 || r.cancelled > 0)
+      logger.info(r, 'escalation deliveries');
+  });
+
   // 15-minute incremental reconcile; the 02:00 Europe/London run also snapshots and verifies.
   await boss.schedule('reconcile-statuses', '*/15 * * * *', undefined, { tz: LONDON });
   await boss.schedule('send-notifications', '*/5 * * * *', undefined, { tz: LONDON });
@@ -101,6 +147,8 @@ async function main(): Promise<void> {
   await boss.schedule('send-push', '* * * * *', undefined, { tz: LONDON });
   await boss.schedule('retention', '15 3 * * *', undefined, { tz: LONDON });
   await boss.schedule('breach-clock', '*/15 * * * *', undefined, { tz: LONDON });
+  // Escalation stages are whole UK days, so planning is cheap; every 5 minutes keeps retries prompt.
+  await boss.schedule('deliver-escalations', '*/5 * * * *', undefined, { tz: LONDON });
   logger.info('worker started');
 
   const stop = async (): Promise<void> => {

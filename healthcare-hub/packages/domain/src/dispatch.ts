@@ -1,6 +1,9 @@
-import { SYSTEM_USER_ID, type TenantTx } from '@hub/db';
+import { SYSTEM_USER_ID, type Db, type TenantTx } from '@hub/db';
 import {
+  drivingCategoryFor,
   evaluateShiftGate,
+  formatDate,
+  londonTime,
   summariseReadiness,
   validateAllocation,
   type AllocationResult,
@@ -30,6 +33,26 @@ export function allocationWindow(job: { plannedStart: Date; plannedEnd: Date }, 
   };
 }
 
+/** Competence codes that count as the emergency (blue-light) driving qualification. */
+const EMERGENCY_DRIVING = ['EMERGENCY_DRIVING', 'BLUE_LIGHT', 'BLUE_LIGHT_DRIVING'];
+const hasEmergencyDriving = (held: Set<string> | undefined) =>
+  EMERGENCY_DRIVING.some((c) => held?.has(c));
+
+/**
+ * E3: driving licence failures in the doc's words ("Driving licence not verified", "Licence
+ * does not cover C1 vehicle", photocard dates in London format).
+ */
+export function plainLicenceWords(r: Readiness, needed: string): void {
+  for (const c of r.checks) {
+    if (c.group !== 'LICENCE' || c.result !== 'FAIL') continue;
+    if (c.code === 'LICENCE_CATEGORY') c.reasonText = `Licence does not cover ${needed} vehicle`;
+    else if (c.code === 'LICENCE_NOT_VERIFIED' || /No verified evidence/i.test(c.reasonText))
+      c.reasonText = 'Driving licence not verified';
+    else if (c.code === 'LICENCE_EXPIRY')
+      c.reasonText = c.reasonText.replace(/\d{4}-\d{2}-\d{2}/, (d) => formatDate(d));
+  }
+}
+
 export interface Validation extends AllocationResult {
   crew: { staffId: string; role: string; state: string }[];
   window: { start: string; end: string };
@@ -56,32 +79,63 @@ export async function validateJobOnShift(
     },
   });
 
-  // Skills the job needs must be held by at least one crew member.
+  // Skills the job needs must be held by at least one crew member. Competence comes from the
+  // staff COMPETENCY records (in date for the whole job); there is no shared competency-rules
+  // export in @hub/rules yet.
   const staffResults: { id: string; role: string; readiness: Readiness }[] = [];
   const held = new Set<string>();
+  const heldBy = new Map<string, Set<string>>();
   for (const c of crew) {
     const comps = await tx.staffRecord.findMany({
       where: { staffId: c.staffId, kind: 'COMPETENCY', supersededBy: null },
     });
+    const mine = new Set<string>();
     for (const r of comps) {
       const d = r.data as { code: string; outcome: string; expiresOn?: string };
       if (
         d.outcome === 'COMPETENT' &&
         (!d.expiresOn || d.expiresOn >= window.end.toISOString().slice(0, 10))
-      )
+      ) {
         held.add(d.code);
+        mine.add(d.code);
+      }
     }
+    heldBy.set(c.staffId, mine);
   }
   const missingSkills = job.requiredSkills.filter((s) => !held.has(s));
+  const needed = drivingCategoryFor(vehicle.licenceCategory, vehicle.grossWeightKg);
+  const names = new Map(
+    (
+      await tx.staff.findMany({
+        where: { id: { in: crew.map((c) => c.staffId) } },
+        select: { id: true, displayName: true },
+      })
+    ).map((s) => [s.id, s.displayName]),
+  );
   for (const [i, c] of crew.entries()) {
     const r = await staffReadinessFor(tx, {
       staffId: c.staffId,
       role: c.role,
       window,
       licenceCategory: c.role === 'DRIVER' ? vehicle.licenceCategory : undefined,
+      vehicleGrossWeightKg: vehicle.grossWeightKg,
       competencies: i === 0 ? missingSkills : [],
       now: a.now,
     });
+    if (c.role === 'DRIVER') {
+      plainLicenceWords(r, needed);
+      // E3: a blue-light job needs the emergency driving qualification.
+      if (job.blueLights && !hasEmergencyDriving(heldBy.get(c.staffId))) {
+        r.checks.push({
+          code: 'EMERGENCY_DRIVING',
+          group: 'LICENCE',
+          result: 'FAIL',
+          reasonText: 'No emergency driving qualification for a blue-light job',
+          overridable: false,
+        });
+        r.state = 'BLOCKED';
+      }
+    }
     staffResults.push({ id: c.staffId, role: c.role, readiness: r });
   }
   const crewProblems: Check[] = [];
@@ -122,8 +176,12 @@ export async function validateJobOnShift(
   // Other jobs on this shift (with travel buffer), and crew double-booked elsewhere.
   const buffer = await travelBufferMinutes(tx, job.organisationId);
   const w = allocationWindow(job, buffer);
-  const conflicts: { resourceType: 'STAFF' | 'VEHICLE'; resourceId: string; otherJobId: string }[] =
-    [];
+  const conflicts: {
+    resourceType: 'STAFF' | 'VEHICLE';
+    resourceId: string;
+    otherJobId: string;
+    text: string;
+  }[] = [];
   const overlapping = await tx.jobAllocation.findMany({
     where: {
       shiftId: shift.id,
@@ -133,19 +191,26 @@ export async function validateJobOnShift(
       endsAt: { gt: w.start },
       ...(a.ignoreAllocationId ? { id: { not: a.ignoreAllocationId } } : {}),
     },
-    include: { job: { select: { code: true } } },
+    include: { job: { select: { code: true, plannedStart: true, plannedEnd: true } } },
   });
+  // E3: plain words naming the vehicle and the times; travel time is part of the window.
   for (const o of overlapping)
     conflicts.push({
       resourceType: 'VEHICLE',
       resourceId: vehicle.callsign,
       otherJobId: o.job.code,
+      text:
+        `${vehicle.callsign} is already on ${o.job.code} from ${londonTime(o.job.plannedStart)} ` +
+        `to ${londonTime(o.job.plannedEnd)}, with ${buffer} minutes' travel either side`,
     });
   if (job.plannedStart < shift.startsAt || job.plannedEnd > shift.endsAt)
     conflicts.push({
       resourceType: 'VEHICLE',
       resourceId: vehicle.callsign,
       otherJobId: 'outside the shift hours',
+      text:
+        `The job runs outside the ${vehicle.callsign} shift ` +
+        `(${londonTime(shift.startsAt)} to ${londonTime(shift.endsAt)})`,
     });
 
   const vdi = await tx.vdi.findFirst({
@@ -166,17 +231,32 @@ export async function validateJobOnShift(
     expiresAt: e.expiresAt,
   }));
 
+  // Permitted load: the stretcher's safe working load for stretcher work, and the vehicle's
+  // bariatric limit where one is recorded. A bariatric job needs a recorded bariatric limit.
+  const onStretcher = job.mobility === 'STRETCHER' || job.mobility === 'BARIATRIC';
+  const inWheelchair = job.mobility === 'WHEELCHAIR' || job.mobility === 'OWN_WHEELCHAIR';
+  const limits = [
+    ...(onStretcher ? stretcherSwl : []),
+    ...(vehicle.bariatricLimitKg ? [vehicle.bariatricLimitKg] : []),
+  ];
+  const loadKg = onStretcher || limits.length ? (job.weightKg ?? 0) : 0;
   const result = validateAllocation({
     now: a.now,
     job: {
       start: job.plannedStart,
       seatsNeeded: 1 + job.escorts,
-      wheelchairsNeeded: job.mobility === 'WHEELCHAIR' ? 1 : 0,
-      stretchersNeeded: job.mobility === 'STRETCHER' ? 1 : 0,
-      loadKg: job.mobility === 'STRETCHER' ? (job.weightKg ?? 0) : 0,
+      wheelchairsNeeded: inWheelchair ? 1 : 0,
+      stretchersNeeded: onStretcher ? 1 : 0,
+      bariatric: job.mobility === 'BARIATRIC',
+      loadKg,
       requiredEquipment: job.requiredEquipment,
+      blueLights: job.blueLights,
     },
-    staff: staffResults.map((s) => ({ id: s.id, readiness: s.readiness })),
+    staff: staffResults.map((s) => ({
+      id: s.id,
+      name: s.id === 'shift' ? undefined : names.get(s.id),
+      readiness: s.readiness,
+    })),
     vehicle: {
       id: vehicle.id,
       readiness: vr,
@@ -184,7 +264,9 @@ export async function validateJobOnShift(
         seats: vehicle.seats,
         wheelchairs: cap.wheelchairCapacity,
         stretchers: cap.stretcher ? 1 : 0,
-        maxLoadKg: stretcherSwl.length ? Math.min(...stretcherSwl) : 1000,
+        maxLoadKg: limits.length ? Math.min(...limits) : 1000,
+        blueLightAuthorised: vehicle.blueLightAuthorised,
+        bariatricLimitKg: vehicle.bariatricLimitKg,
       },
       equipmentPresent: [...new Set(assets.map((x) => x.category))],
       quarantinedEquipment: [
@@ -205,6 +287,7 @@ export async function validateJobOnShift(
       vdi: vdi ? (failedCritical ? 'FAIL' : 'PASS') : 'PENDING',
       cleaning: cleaned > 0 ? 'CONFIRMED' : 'NOT_CONFIRMED',
       shiftStart: shift.startsAt,
+      started: shift.state !== 'PLANNED',
     },
     exceptions,
   });
@@ -232,14 +315,16 @@ export async function shiftGateFor(tx: TenantTx, shiftId: string, staffId: strin
     where: { shiftId, type: 'PRE_SHIFT' },
     orderBy: { capturedAt: 'desc' },
   });
+  const driven =
+    assignment?.role === 'DRIVER'
+      ? await tx.vehicle.findUniqueOrThrow({ where: { id: shift.vehicleId } })
+      : null;
   const readiness = await staffReadinessFor(tx, {
     staffId,
     role: assignment?.role ?? 'OTHER',
     window: { start: now > shift.startsAt ? now : shift.startsAt, end: shift.endsAt },
-    licenceCategory:
-      assignment?.role === 'DRIVER'
-        ? (await tx.vehicle.findUniqueOrThrow({ where: { id: shift.vehicleId } })).licenceCategory
-        : undefined,
+    licenceCategory: driven?.licenceCategory,
+    vehicleGrossWeightKg: driven?.grossWeightKg ?? null,
     now,
   });
   return evaluateShiftGate({
@@ -428,6 +513,145 @@ export async function jobTimingAlerts(
     data: { state: 'RESOLVED', resolvedAt: now },
   });
   return raised;
+}
+
+/**
+ * E3: allocations are checked again as things change (a defect, an expiry, a licence lapse).
+ * A job that no longer passes is flagged red to control with the first failing reason; the
+ * allocation stays so control decides. The shift gate is left to shift start.
+ */
+export async function recheckAllocations(
+  tx: TenantTx,
+  orgId: string,
+  now: Date,
+  opts: { shiftId?: string; horizonHours?: number } = {},
+): Promise<{ jobId: string; code: string; reasonText: string }[]> {
+  const horizon = new Date(now.getTime() + (opts.horizonHours ?? 24) * 3_600_000);
+  const allocations = await tx.jobAllocation.findMany({
+    where: {
+      active: true,
+      endsAt: { gt: now },
+      ...(opts.shiftId ? { shiftId: opts.shiftId } : { startsAt: { lt: horizon } }),
+      job: { state: { in: ['ALLOCATED', 'OFFERED', 'ACKNOWLEDGED'] } },
+    },
+    include: { job: { select: { code: true } } },
+  });
+  const flagged: { jobId: string; code: string; reasonText: string }[] = [];
+  for (const al of allocations) {
+    const v = await validateJobOnShift(tx, {
+      jobId: al.jobId,
+      shiftId: al.shiftId,
+      now,
+      ignoreAllocationId: al.id,
+    });
+    const failing = v.checks.find(
+      (c) => c.result === 'FAIL' && !c.excepted && c.code !== 'SHIFT_GATE',
+    );
+    if (!failing) continue;
+    flagged.push({ jobId: al.jobId, code: al.job.code, reasonText: failing.reasonText });
+    // Job code and the check only: no patient details in alerts.
+    await upsertJobAlert(tx, {
+      orgId,
+      jobId: al.jobId,
+      reasonCode: 'JOB_NEEDS_REASSIGNMENT',
+      severity: 'CRITICAL',
+      text: `${al.job.code} no longer passes its checks: ${failing.reasonText}`,
+    });
+  }
+  return flagged;
+}
+
+/** Worker body for `recheckAllocations`, one tenant transaction per organisation. */
+export async function recheckAll(
+  db: Db,
+  now: Date,
+  log?: (msg: string, ctx: object) => void,
+): Promise<{ organisations: number; flagged: number; failed: number }> {
+  const orgs = await db.listOrganisations();
+  const out = { organisations: orgs.length, flagged: 0, failed: 0 };
+  for (const orgId of orgs) {
+    try {
+      out.flagged += (
+        await db.withTenant({ orgId, userId: SYSTEM_USER_ID }, (tx) =>
+          recheckAllocations(tx, orgId, now),
+        )
+      ).length;
+    } catch (e) {
+      out.failed += 1;
+      log?.('allocation recheck failed', {
+        orgId,
+        error: e instanceof Error ? e.message : 'unknown',
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * E2: who or what is already booked over a time, in plain words, e.g. "Sam Taylor is already on
+ * AMB-02 from 07:00 to 19:00". Null when nothing overlaps.
+ */
+export async function overlapText(
+  tx: TenantTx,
+  r: {
+    resourceType: 'STAFF' | 'VEHICLE';
+    resourceId: string;
+    start: Date;
+    end: Date;
+    ignoreShiftId?: string;
+  },
+): Promise<string | null> {
+  const clash = await tx.resourceBooking.findFirst({
+    where: {
+      resourceType: r.resourceType,
+      resourceId: r.resourceId,
+      active: true,
+      startsAt: { lt: r.end },
+      endsAt: { gt: r.start },
+    },
+    orderBy: { startsAt: 'asc' },
+  });
+  if (!clash) return null;
+  const shiftId =
+    clash.sourceType === 'SHIFT'
+      ? clash.sourceId
+      : (await tx.crewAssignment.findUnique({ where: { id: clash.sourceId } }))?.shiftId;
+  if (shiftId && shiftId === r.ignoreShiftId) return null;
+  const shift = shiftId ? await tx.shift.findUnique({ where: { id: shiftId } }) : null;
+  const callsign = shift
+    ? (await tx.vehicle.findUnique({ where: { id: shift.vehicleId } }))?.callsign
+    : null;
+  const times = `from ${londonTime(clash.startsAt)} to ${londonTime(clash.endsAt)}`;
+  if (r.resourceType === 'VEHICLE')
+    return `${callsign ?? 'That vehicle'} is already on another shift ${times}`;
+  const person = await tx.staff.findUnique({ where: { id: r.resourceId } });
+  const who = person?.displayName ?? 'That person';
+  return `${who} is already on ${callsign ?? 'another shift'} ${times}`;
+}
+
+/**
+ * E1: the highest permitted load of any vehicle in service (bariatric limit or stretcher safe
+ * working load). Null when no vehicle records one, so no warning can be given.
+ */
+export async function highestPermittedLoad(tx: TenantTx): Promise<number | null> {
+  const vehicles = await tx.vehicle.findMany({
+    where: { status: { not: 'OFF_ROAD' } },
+    select: { bariatricLimitKg: true },
+  });
+  const stretchers = await tx.equipmentAsset.findMany({
+    where: {
+      capability: 'STRETCHER',
+      status: 'AVAILABLE',
+      vehicleId: { not: null },
+      swlKg: { not: null },
+    },
+    select: { swlKg: true },
+  });
+  const all = [
+    ...vehicles.flatMap((v) => (v.bariatricLimitKg ? [v.bariatricLimitKg] : [])),
+    ...stretchers.map((s) => Number(s.swlKg)),
+  ];
+  return all.length ? Math.max(...all) : null;
 }
 
 /** Future work affected by a stop-use defect on a vehicle (released for reassignment). */

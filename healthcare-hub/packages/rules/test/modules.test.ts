@@ -337,6 +337,12 @@ describe('readiness', () => {
     expect(R.vehicleReadiness({ ...v, openCriticalDefect: true }, win).state).toBe('BLOCKED');
     expect(R.vehicleReadiness({ ...v, quarantined: true }, win).state).toBe('BLOCKED');
     expect(R.vehicleReadiness({ ...v, maintenanceOverdue: true }, win).state).toBe('BLOCKED');
+    const overdueBy = (by: R.VehicleInput['maintenanceOverdueBy']) =>
+      R.vehicleReadiness({ ...v, maintenanceOverdue: true, maintenanceOverdueBy: by }, win)
+        .checks[2]!.reasonText;
+    expect(overdueBy('MILEAGE')).toBe('Maintenance overdue by mileage');
+    expect(overdueBy('DATE')).toBe('Maintenance overdue by date');
+    expect(overdueBy(null)).toBe('Maintenance overdue by date or mileage');
     const e: R.EquipmentInput = {
       quarantined: false,
       requirements: [{ code: 'LOLER', group: 'EQUIPMENT', result: green }],
@@ -437,6 +443,19 @@ describe('maintenance and defects', () => {
         openStopUseDefects: 0,
       }),
     ).toEqual({ ok: true, reason: null });
+  });
+  it('repairDueState uses London dates and stops counting once the repair is signed off', () => {
+    const now = new Date('2026-11-10T23:30:00Z'); // 23:30 GMT on 10 Nov
+    const open = (repairDeadline: string | null) =>
+      R.repairDueState({ status: 'OPEN', repairDeadline }, now);
+    expect(open(null)).toEqual({ state: 'NONE', daysLeft: null });
+    expect(open('2026-11-10')).toEqual({ state: 'DUE_TODAY', daysLeft: 0 });
+    expect(open('2026-11-09')).toEqual({ state: 'OVERDUE', daysLeft: -1 });
+    expect(open('2026-11-15').state).toBe('DUE_SOON');
+    expect(open('2026-12-15').state).toBe('DUE');
+    expect(R.repairDueState({ status: 'REPAIRED', repairDeadline: '2026-11-01' }, now).state).toBe(
+      'DONE',
+    );
   });
 });
 
@@ -630,6 +649,221 @@ describe('allocation validation', () => {
     expect(
       gate({ vdi: 'PASS', cleaning: 'NOT_CONFIRMED', shiftStart: at('2026-12-01T00:00:00Z') }),
     ).toBe('PENDING');
+    // Finding 71 (6 Nov 2026): past its start time a shift nobody has started fails the gate.
+    const late = {
+      vdi: 'PENDING',
+      cleaning: 'NOT_CONFIRMED',
+      shiftStart: at('2026-10-01T00:00:00Z'),
+    } as const;
+    expect(gate({ ...late, started: false })).toBe('FAIL');
+    expect(
+      R.validateAllocation(mk({ shiftGate: { ...late, started: false } })).checks.at(-1)!
+        .reasonText,
+    ).toBe('Shift has not been started');
+    expect(gate({ ...late, started: true })).toBe('FAIL');
+    expect(gate({ ...late, started: false, vdi: 'FAIL' })).toBe('FAIL');
+  });
+  it('E3: plain conflict text, stretcher wording and a fix for each failure', () => {
+    const c = R.validateAllocation(
+      mk({
+        conflicts: [
+          {
+            resourceType: 'STAFF',
+            resourceId: 's1',
+            otherJobId: 'j9',
+            text: 'Sam Taylor is already on AMB-02 from 07:00 to 19:00',
+          },
+        ],
+      }),
+    );
+    expect(c.checks[6]).toMatchObject({
+      reasonText: 'Sam Taylor is already on AMB-02 from 07:00 to 19:00',
+      fix: { action: 'SHIFT_ACTIONS' },
+    });
+    const veh = mk().vehicle;
+    const s = R.validateAllocation(
+      mk({
+        job: { ...mk().job, stretchersNeeded: 1 },
+        vehicle: { ...veh, capacity: { ...veh.capacity, stretchers: 0 } },
+      }),
+    );
+    expect(s.checks[4]!.reasonText).toBe('No in-date stretcher on this vehicle');
+    const bariatric = (limit: number | null) =>
+      R.validateAllocation(
+        mk({
+          job: { ...mk().job, bariatric: true },
+          vehicle: { ...veh, capacity: { ...veh.capacity, bariatricLimitKg: limit } },
+        }),
+      ).checks[4]!;
+    expect(bariatric(null)).toMatchObject({
+      result: 'FAIL',
+      reasonText: 'Vehicle has no bariatric limit recorded',
+    });
+    expect(bariatric(250).result).toBe('PASS');
+    const crew: R.Readiness = {
+      state: 'BLOCKED',
+      checks: [
+        {
+          code: 'CREW_SIZE',
+          group: 'CLEARANCE',
+          result: 'FAIL',
+          reasonText: 'Job needs 2 crew',
+          overridable: false,
+        },
+      ],
+    };
+    const small = R.validateAllocation(mk({ staff: [{ id: 'shift', readiness: crew }] }));
+    expect(small.checks[0]!.fix).toEqual({
+      text: 'Add a second crew member to this shift',
+      action: 'SHIFT_ACTIONS',
+    });
+    expect(R.validateAllocation(mk()).checks[0]!.fix).toBeNull();
+  });
+  it('any other staff clearance failure is fixed on the staff record or by swapping the person', () => {
+    const r = R.validateAllocation(mk({ staff: [{ id: 'st1', readiness: failing('CLEARANCE') }] }));
+    expect(r.checks[0]).toMatchObject({
+      result: 'FAIL',
+      fix: {
+        text: 'Clear the person on their staff record, or swap them off this shift',
+        action: 'STAFF',
+      },
+    });
+  });
+  it('a shift with no approved driver is fixed by adding one to the shift', () => {
+    const noDriver: R.Readiness = {
+      state: 'BLOCKED',
+      checks: [
+        {
+          code: 'NO_DRIVER',
+          group: 'CLEARANCE',
+          result: 'FAIL',
+          reasonText: 'No approved driver on the shift',
+          overridable: false,
+        },
+      ],
+    };
+    const r = R.validateAllocation(mk({ staff: [{ id: 'shift', readiness: noDriver }] }));
+    expect(r.checks[0]!.fix).toEqual({
+      text: 'Add an approved driver to this shift',
+      action: 'SHIFT_ACTIONS',
+    });
+  });
+  it('a blue-light job needs a vehicle authorised for blue lights; unknown authorisation does not block', () => {
+    const veh = mk().vehicle;
+    const blue = (blueLightAuthorised: boolean | undefined) =>
+      R.validateAllocation(
+        mk({
+          job: { ...mk().job, blueLights: true },
+          vehicle: { ...veh, capacity: { ...veh.capacity, blueLightAuthorised } },
+        }),
+      ).checks[4]!;
+    expect(blue(false)).toMatchObject({
+      result: 'FAIL',
+      overridable: false,
+      reasonText: 'Vehicle is not authorised for blue-light driving',
+      details: ['not authorised for blue-light driving'],
+    });
+    expect(blue(true).result).toBe('PASS');
+    expect(blue(undefined).result).toBe('PASS');
+  });
+  it('D2: says which maintenance limit comes first from recent mileage', () => {
+    const now = at('2026-11-06T12:00:00Z');
+    const fast = R.firstLimit(
+      {
+        dueDate: '2027-11-01',
+        dueOdometer: 22000,
+        readings: [
+          { reading: 10000, on: '2026-10-07' },
+          { reading: 13000, on: '2026-11-06' },
+        ],
+      },
+      now,
+    );
+    expect(fast.first).toBe('MILEAGE');
+    expect(fast.mileageDueOn).toBe('2027-02-04');
+    const slow = R.firstLimit(
+      {
+        dueDate: '2026-12-01',
+        dueOdometer: 22000,
+        readings: [
+          { reading: 10000, on: '2026-10-07' },
+          { reading: 10300, on: '2026-11-06' },
+        ],
+      },
+      now,
+    );
+    expect(slow.first).toBe('DATE');
+    expect(R.firstLimit({ dueDate: '2026-12-01', dueOdometer: 1, readings: [] }, now).first).toBe(
+      null,
+    );
+  });
+  it('D2: a plan with only one kind of limit says so', () => {
+    const now = at('2026-11-06T12:00:00Z');
+    expect(
+      R.firstLimit({ dueDate: '2027-01-01', dueOdometer: null, readings: [] }, now),
+    ).toMatchObject({ first: 'DATE', mileageDueOn: null, text: 'Date limit only' });
+    expect(R.firstLimit({ dueDate: null, dueOdometer: null, readings: [] }, now)).toMatchObject({
+      first: null,
+      text: 'No limit set',
+    });
+    expect(R.firstLimit({ dueDate: null, dueOdometer: 50000, readings: [] }, now)).toMatchObject({
+      first: 'MILEAGE',
+      mileageDueOn: null,
+      text: 'Mileage limit only',
+    });
+  });
+  it('D1: MOT from three years old, licence needed, document wording', () => {
+    expect(R.motRequired({ firstRegisteredOn: '2024-01-10' }, '2026-11-06')).toBe(false);
+    expect(R.motRequired({ firstRegisteredOn: '2023-11-01' }, '2026-11-06')).toBe(true);
+    expect(R.motRequired({ year: 2025 }, '2026-11-06')).toBe(false);
+    expect(R.motRequired({}, '2026-11-06')).toBe(true);
+    expect(R.licenceNeededText('B', 4200)).toBe('Needs C1');
+    const check = (reasonText: string): R.Check => ({
+      code: 'X',
+      group: 'ROADWORTHY',
+      result: 'FAIL',
+      reasonText,
+      overridable: false,
+    });
+    expect(
+      R.vehicleDocumentText('Insurance', check('No verified evidence on record'), {
+        status: 'GREY',
+        expiryDate: null,
+      }),
+    ).toBe('Insurance not verified');
+    expect(
+      R.vehicleDocumentText('MOT', check('Expired on 2 Nov 2026'), {
+        status: 'RED',
+        expiryDate: '2026-11-02',
+      }),
+    ).toBe('MOT expired on 2 Nov 2026');
+    expect(
+      R.vehicleHeadline({
+        offRoad: true,
+        quarantined: false,
+        statusReason: 'Awaiting parts',
+        expectedReturnOn: '2026-11-20',
+        failing: [],
+      }),
+    ).toEqual({ status: 'OFF_ROAD', reason: 'Awaiting parts; expected back 20 Nov 2026' });
+    expect(
+      R.expenseDuplicate(
+        { vehicleId: 'v', incurredOn: '2026-11-01', amountPence: 100, receiptEvidenceId: 'e1' },
+        [{ vehicleId: 'w', incurredOn: '2026-10-01', amountPence: 5, receiptEvidenceId: 'e1' }],
+      ),
+    ).toBe(true);
+  });
+  it('staff details name the person in plain words, never ids or check codes', () => {
+    const r = R.validateAllocation(
+      mk({ staff: [{ id: 'st1', name: 'Sam Driver', readiness: failing('LICENCE') }] }),
+    );
+    expect(r.checks[1]!.details).toHaveLength(1);
+    expect(r.checks[1]!.details[0]).toMatch(/^Sam Driver: /);
+    expect(r.checks[1]!.details[0]).not.toContain('st1');
+    const anon = R.validateAllocation(
+      mk({ staff: [{ id: 'shift', readiness: failing('LICENCE') }] }),
+    );
+    expect(anon.checks[1]!.details).toEqual(['bad']);
   });
 });
 

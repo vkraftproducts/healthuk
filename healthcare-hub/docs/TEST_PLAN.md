@@ -14,7 +14,7 @@
 
 ## 1. Seed data
 
-`pnpm db:seed` creates "Example organisation" with Watford location matching wireframes:
+`pnpm db:seed` creates "Exora International Ltd" (trading as Exora Medical) with a London location matching wireframes:
 staff Alex Morgan (ST-0042, licence due 12 Nov 2026), Sam Taylor, Jordan, Lee; vehicles
 AMB-01..03 (AMB-03 critical ramp defect); jobs J-104, J-105, J-108, J-112, J-117; audit
 AUD-102 with AC-07, ACT-218, ACT-219; plus a second org "Other organisation" for isolation

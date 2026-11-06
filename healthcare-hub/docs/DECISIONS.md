@@ -2,13 +2,14 @@
 
 ## ADR index (`docs/adr/`)
 
-| ADR  | Decision                                                                                   |
-| ---- | ------------------------------------------------------------------------------------------ |
-| 0001 | Modular monolith on Azure Container Apps (cost, simplicity)                                |
-| 0002 | Postgres RLS + app-level scoping for tenant isolation                                      |
-| 0003 | Entra External ID for identity; authorisation in-app                                       |
-| 0004 | pg-boss instead of Service Bus/Functions for background jobs                               |
-| 0005 | Expo React Native for the crew app (not PWA) — offline + device storage + push reliability |
+| ADR  | Decision                                                                                                                                       |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0001 | Modular monolith on Azure Container Apps (cost, simplicity)                                                                                    |
+| 0002 | Postgres RLS + app-level scoping for tenant isolation                                                                                          |
+| 0003 | Entra External ID for identity; authorisation in-app                                                                                           |
+| 0004 | pg-boss instead of Service Bus/Functions for background jobs                                                                                   |
+| 0005 | Expo React Native for the crew app (not PWA) — offline + device storage + push reliability                                                     |
+| 0006 | Local username + password sign-in (`AUTH_MODE=local`): approved exception to ADR 0003 for local/pilot use; Entra remains the production target |
 
 ## Baseline assumptions (from brief; confirm in discovery)
 
@@ -34,6 +35,19 @@
 8. Custom domain and branding?
 
 ## Agent assumptions (append as you go: date, context, decision, reason)
+
+### 2026-11-06 · A6/A7 · Email and push delivery of escalations
+
+- **Who an escalation reaches.** The lead role for the item kind at the lead stage, and the
+  registered manager at the manager stage. This applies even when item rules already name the
+  lead "from the start", because that only shows the item in the alerts centre. The owner is not
+  emailed (they already have it).
+- **No announcements for old escalations.** A stage reached more than 7 days ago is not sent, so
+  turning the feature on does not email a backlog.
+- **Web Push without a payload.** Nothing about the item reaches the browser vendor's push
+  service, and no encryption dependency is needed. The service worker shows fixed text.
+- **nodemailer only for SMTP.** It is loaded at runtime, only when `EMAIL_TRANSPORT=smtp`.
+  Development uses the outbox transport, and the outbox row is the record of what was sent.
 
 ### 2026-10-30 · M0 · Build environment and library choices
 
@@ -91,6 +105,8 @@
 - **Build – `@hub/db` lint/typecheck/test wait for its own build** (package `turbo.json`), because parallel `prisma generate` runs raced on the generated client.
 
 - **M4 – return to service is by a different person from the one who signed off the repair** (422 `SELF_APPROVAL`). FLT-06 asks for a separate authorised step; separating the two people is the safer reading.
+- **Task 7 – defect repair and release.** Signing off a repair needs repair notes (400 otherwise). Once signed off, the defect is locked: only making it more serious (critical or stop-use) is allowed, so the sign-off record cannot be edited after the fact. Repair notes are a running log: new notes are added to the old ones, never replace them (2,000-character column, newest kept). Someone with `fleet.return_to_service` who finds the repair not good enough uses `POST /defects/:id/reopen` with a reason. This clears the sign-off, adds a dated "Sent back for repair" note, and keeps the block and the control alert. Any return-to-service holder may send a repair back, including the person who did it, because sending back can never make anything safer-looking. The repair deadline is shown as due, due soon (within 7 days), due today or overdue, using London dates (`repairDueState` in `packages/rules`). The workflows doc was not readable in this session, so this follows RULES_ENGINE §6 and FLT-06; check it against workflow D when the owner reviews.
+- **Task 9 – audit template activation.** Activation is the management approval that lets a template be scheduled, so it is refused for the author of the published version (FOUR_EYES_REQUIRED), the same rule as publishing. Starter templates have no author, so any holder of `compliance.requirement.manage` may activate them. Who activated a template is kept only in the audit log, not in a new column, because no migration could be run in this session. The workflows doc was not readable, so this follows AUD-01/AUD-02 and DECISIONS A8; check it against the audit workflow.
 - **M4 – VDI failures create defects automatically**: a failed _critical_ item is a CRITICAL stop-use defect (vehicle BLOCKED, control alert); a failed non-critical item is a MINOR defect that needs classifying with a repair deadline. Amending an item back to PASS never releases a defect.
 - **M4 – offline submissions** (VDI, cleaning) are accepted up to 7 days after capture and never with a capture time in the future (5-minute clock slack). A reused clientSubmissionId by a different person or for a different vehicle is a 409.
 - **M4 – odometer plausibility**: a reading lower than the last good one, or a jump above 2,000 + 1,000 miles per elapsed day, is recorded with a flag and ignored for maintenance.
@@ -140,7 +156,7 @@
 - **M8 – import rollback withdraws, it never deletes** (history is immutable): within 7 days, imported staff still at candidate stage (no user link, records or role approvals) become leavers, and untouched vehicles (no edits, checks, defects, shifts or mileage) are taken off the road, both with "Import IMP-n rolled back". Anything used since the import is kept and listed with the reason.
 - **M8 – compliance workbook staging takes each sheet as CSV** (Excel "Save as CSV") with the code, text, status and KLOE columns named at upload, rather than adding a spreadsheet-parsing dependency; the original workbook was not available to design against. Rows keep sheet, row number and prompt code; rows without a code are headers (structure); placeholders (`ENTER`, `[ENTER …]`, `Default Image`) are listed as unresolved; source statuses are kept as text only and never set a requirement status; legacy KLOE codes are kept as references.
 - **M8 – workbook mappings**: anyone with `admin.import.manage` classifies a row (shared, ambulance, dental, care home, GP, out of scope) and proposes code, title and subject; a different person with `admin.requirements.publish` approves or rejects. Only approved mappings publish, and only as a DRAFT organisation template (framework references `WORKBOOK` sheet!row:code and `CQC_KLOE_LEGACY`) that goes live through the normal version approval and publishing flow. Titles with unresolved placeholders cannot be published.
-- **M8 – full export** (`admin.export.full`) is a ZIP built by the worker with the requester's permissions: one JSON file per table (70 tables) with stable UUIDs, clean evidence files under their version id with a manifest, and a README. Push tokens, storage keys and identity-provider subjects are left out; fields encrypted at rest are exported as stored (encrypted).
+- **M8 – full export** (`admin.export.full`) is a ZIP built by the worker with the requester's permissions: one JSON file per table (every organisation table, 113 as of migration 0041) with stable UUIDs, clean evidence files under their version id with a manifest, and a README. Operational plumbing (idempotency keys, counters, export jobs, push devices and messages, the notification outbox, deliveries and preferences) is not exported. Push tokens, storage keys, identity-provider subjects and speak-up progress code hashes are left out; fields encrypted at rest are exported as stored (encrypted).
 - **M8 – new permission `privacy.manage`** (registered manager, director, governance lead; never for dispatch- or crew-derived roles) for retention, legal holds, subject requests, disclosures and breaches. Those tables are restricted to it by row-level security as well as the API.
 - **M8 – retention defaults are placeholders** ("requires approval", basis text starting "Placeholder") shown on first visit; a rule cannot be approved until the organisation records the basis from its approved schedule, and any change needs approval again. Only patient contact details can be acted on automatically (anonymised: name replaced, phone removed, by a narrowly scoped database function); every other category raises a review alert with the count past its cutoff. Journeys, staff files, events and the audit log are never deleted by the system. Every run is written to an immutable retention log.
 - **M8 – legal holds** (organisation, staff, job, event or vehicle) block retention for their scope; an organisation-wide hold stops all retention. Releasing a hold needs a reason; holds are never deleted.
@@ -156,3 +172,6 @@
 - **M8 – deployment gaps found while writing the evidence were closed**: Defender for Storage malware scanning on upload (Bicep), the web app on Static Web Apps with security headers (`staticwebapp.config.json`; Static Web Apps has no UK region, and serves static assets only), Dockerfiles for the API and worker, and Dependabot with a 14-day cooldown. None of these could be built or deployed here (no Docker or Azure CLI).
 - **M8 – known product gap**: there is no web screen yet for adopting and publishing requirement library items; the admin guide gives the API calls. A library screen is the first follow-up.
 - **Post-M8 – web sign-in page and wireframe styling.** The web app now opens on a sign-in page instead of silently signing in. Development builds list the seeded synthetic users (mock OIDC); production builds show "Sign in with Microsoft", which reports "not configured" until the Entra External ID tenant exists. Tokens stay in memory only; in development the chosen user _name_ is kept in sessionStorage so a reload stays signed in (the token is re-minted). Sign-out clears the query cache. The layout and components now follow the wireframe styling (navy sidebar, teal active item and primary buttons, breadcrumb bar, navy table headers with row strips, outlined status badges that keep icon + word). The dashboard shows the 8 most urgent actions with "View all (n)". axe: no violations on 13 screens including sign-in.
+- **Post-M8 – live updates.** Screens update without a reload. A statement trigger on every organisation table (`0013_live_changes.sql`) sends `pg_notify` with only the organisation id; the API holds one `LISTEN` connection and streams `change` to that organisation's screens over server-sent events (`GET /live/changes`); screens then refetch through the normal endpoints, so what anyone sees is still decided there. Chosen over WebSockets (one-way is all that is needed, and it adds no dependency) and over polling (slower, and more load). `fetch`, not `EventSource`, because the token must stay out of URLs. Streams end after five minutes so a reconnect passes the access checks again. A new tenant table needs the trigger (`test/live.test.ts` fails otherwise). A managed connection pooler in transaction mode cannot carry `LISTEN`: production needs `DATABASE_URL` to reach Postgres directly, or a separate direct URL. Writes made outside a tenant context (for example by hand in `psql`) do not signal.
+- **Post-M8 – demo data goes through the API.** `pnpm demo:data` creates a working day through the public API, not SQL, so every status, gate and audit event comes from the real rules. It stays out of `pnpm db:seed` because the tests rely on the seed's exact contents.
+- **Draft sector packs and mock integrations.** Dental and care-home content is synthetic and labelled draft in the data itself; adoption is gated on the organisation enabling the pack and naming a specialist, because the spec (section 7, Phase 4) requires specialist validation. Audit templates for the mock organisations are inactive with a proposed cadence only. Integrations run against deterministic synthetic feeds because API access is unconfirmed (INT-01); the connection `mode` column only allows MOCK and a LIVE request returns 409. Inbound data never verifies anything: telematics readings go through the normal plausibility flags, FleetX items arrive as submitted expenses for someone else to approve, and training completions are stored unverified with no requirement link. Outbound exports carry hours and shift times only. A sync that hits a database error rolls back whole and logs no run (the failure shows as an error to the caller).

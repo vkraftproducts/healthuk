@@ -7,5 +7,7 @@ export { PrismaClient };
 export * from './generated/client.js';
 
 export function createRawClient(connectionString: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString, options: '-c TimeZone=UTC' }),
+  });
 }

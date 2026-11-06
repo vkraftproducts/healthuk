@@ -1,10 +1,33 @@
 import pg from 'pg';
 import type { TestProject } from 'vitest/node';
-import { bootstrap, migrate, seed } from '@hub/db/admin';
+import { bootstrap, migrate, seed, SEED_IDS } from '@hub/db/admin';
 
 declare module 'vitest' {
   export interface ProvidedContext {
     urls: { superuser: string; admin: string; app: string };
+  }
+}
+
+/** Test-only ORG_ADMIN (dev|admin): the dev seed has no user with this role. */
+async function addOrgAdmin(adminUrl: string): Promise<void> {
+  const c = new pg.Client({ connectionString: adminUrl });
+  await c.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`SELECT set_config('app.org_id', $1, true)`, [SEED_IDS.orgExample]);
+    await c.query(
+      `INSERT INTO app_user (id, idp_subject, email, display_name, status)
+       VALUES ('01900000-0000-7000-8000-000000000106', 'dev|admin', 'admin@example.test', 'Test Org Admin', 'ACTIVE')`,
+    );
+    await c.query(
+      `INSERT INTO membership (organisation_id, user_id, role_id, valid_from)
+       SELECT $1, '01900000-0000-7000-8000-000000000106', id, now() - interval '1 day'
+         FROM role WHERE organisation_id IS NULL AND key = 'ORG_ADMIN'`,
+      [SEED_IDS.orgExample],
+    );
+    await c.query('COMMIT');
+  } finally {
+    await c.end();
   }
 }
 
@@ -29,6 +52,7 @@ export default async function setup(project: TestProject) {
   await bootstrap({ superuserUrl: base, adminUrl: urls.admin, appUrl: urls.app });
   await migrate(urls.admin);
   await seed(urls.admin);
+  await addOrgAdmin(urls.admin);
   project.provide('urls', urls);
   return async () => {
     const c = new pg.Client({ connectionString: base });

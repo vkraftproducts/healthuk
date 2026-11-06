@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 // DEV-ONLY mock OIDC provider: publishes a JWKS and mints tokens for the seeded dev users.
 // Refuses to start when NODE_ENV=production. Never deploy this.
+// Mints nothing when AUTH_MODE=local (username + password sign-in, ADR 0006).
 //   GET /.well-known/jwks.json
 //   GET /token?user=manager|other-manager&mfa=1   ->  { access_token }
 import { createServer } from 'node:http';
@@ -58,6 +59,13 @@ createServer(async (req, res) => {
     return;
   }
   if (url.pathname === '/token') {
+    // Local password sign-in is on: the API trusts only its own tokens, so mint nothing here
+    // rather than hand out tokens that look like a way around the password check.
+    if (process.env.AUTH_MODE === 'local') {
+      res.statusCode = 403;
+      res.end('AUTH_MODE=local: sign in with a username and password instead');
+      return;
+    }
     const name = url.searchParams.get('user') ?? 'manager';
     // Any seeded dev user (dev|hr, dev|dispatcher, dev|crew, ...); the API still decides access.
     const sub = USERS[name] ?? (/^[a-z0-9-]{1,40}$/.test(name) ? `dev|${name}` : undefined);

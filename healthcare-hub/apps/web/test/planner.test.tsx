@@ -15,7 +15,7 @@ const me = (permissions: string[]): MeResponse => ({
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'DISPATCHER',
       roleName: 'Dispatcher',
@@ -153,7 +153,7 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     });
   });
 
-  it('a policy failure offers an exception only to approvers', async () => {
+  it('a policy failure lets a dispatcher ask; only approvers record one directly', async () => {
     const v = {
       allowed: false,
       checks: [check('COMPETENCE', 'FAIL', true, 'Bariatric competence missing')],
@@ -162,7 +162,10 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     await userEvent.click(await screen.findByRole('button', { name: /J-117/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Check J-117 on AMB-01' }));
     await screen.findByText('Bariatric competence missing');
-    expect(screen.queryByRole('button', { name: 'Request exception' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Ask for an exception for Competence' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Approve an exception/ })).toBeNull();
   });
 
   it('when every check passes, allocates then notifies the crew', async () => {
@@ -194,10 +197,63 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
   });
 
+  it('manage shift: takes a not-started job off the shift with a reason (task 26)', async () => {
+    const { send } = renderPlanner(DISPATCH, {});
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage shift for AMB-01' }));
+    const jobs = await screen.findByRole('table', { name: 'Jobs on AMB-01' });
+    expect(within(jobs).getByRole('row', { name: /J-105/ })).toHaveTextContent('Under way');
+    expect(within(jobs).queryByRole('button', { name: 'Cancel J-105' })).toBeNull();
+    await userEvent.click(within(jobs).getByRole('button', { name: 'Take J-104 off this shift' }));
+    const dialog = screen.getByRole('dialog', { name: 'Take J-104 off this shift' });
+    const confirm = within(dialog).getByRole('button', { name: 'Take off shift' });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Patient not ready until later');
+    await userEvent.click(confirm);
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'POST',
+        '/api/v1/jobs/j104/status',
+        ORG,
+        expect.objectContaining({ state: 'REASSIGNED', reason: 'Patient not ready until later' }),
+      ),
+    );
+  });
+
+  it('manage shift: stands down crew and cancels a planned shift (task 26)', async () => {
+    const { send } = renderPlanner(DISPATCH, {});
+    await userEvent.click(await screen.findByRole('button', { name: 'Manage shift for AMB-01' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Stand down Alex Driver' }));
+    let dialog = screen.getByRole('dialog', { name: 'Stand down Alex Driver' });
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Called in sick');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Stand down' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('POST', `/api/v1/shifts/${S1}/crew/${S1}a/end`, ORG, {
+        reason: 'Called in sick',
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel shift on AMB-01' }));
+    dialog = screen.getByRole('dialog', { name: 'Cancel shift on AMB-01' });
+    expect(dialog).toHaveTextContent('2 jobs on this shift go back to the planner');
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Vehicle needed elsewhere');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel shift' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('POST', `/api/v1/shifts/${S1}/cancel`, ORG, {
+        reason: 'Vehicle needed elsewhere',
+      }),
+    );
+  });
+
+  it('people without allocation rights cannot manage shifts (task 26)', async () => {
+    renderPlanner(['jobs.job.view'], {});
+    expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Manage shift for AMB-01' })).toBeNull();
+  });
+
   it('people without job access are told so', async () => {
     renderPlanner(['dashboard.view'], {});
-    expect(
-      await screen.findByText('You do not have permission to view the work planner.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your role does not give access to this page.',
+    );
+    expect(screen.queryByRole('link', { name: 'Work planner' })).toBeNull();
   });
 });

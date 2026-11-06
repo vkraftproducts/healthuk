@@ -11,6 +11,7 @@ export const ReportId = z.enum([
   'POLICY_ACK',
   'PREMISES',
   'JOURNEYS',
+  'NHS_KPI',
 ]);
 export type ReportIdT = z.infer<typeof ReportId>;
 

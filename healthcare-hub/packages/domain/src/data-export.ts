@@ -6,15 +6,26 @@ import type { BlobStore } from './storage.js';
  * Full organisation export (PRD 4.12 "full export with attachments and stable IDs"). One JSON file
  * per table with every row the requester may see (row-level security applies), clean attachments
  * under their evidence version id, and a manifest. Secrets and device tokens are left out.
+ *
+ * Every organisation table belongs here except operational plumbing that holds no business record
+ * or holds secrets: idempotency_key, org_counter, export_job, push_device, push_message,
+ * notification_outbox, notification_delivery and notification_preference.
  */
 const TABLES = [
   'organisation',
   'location',
+  'serviceType',
+  'registeredActivity',
+  'serviceLocation',
   'membership',
   'role',
+  'supportAccessGrant',
+  'supportAccessEnd',
   'requirementTemplate',
   'requirementTemplateVersion',
+  'requirementTemplateRetirement',
   'requirementInstance',
+  'statusSnapshot',
   'applicabilityDecision',
   'dueDateChange',
   'evidenceItem',
@@ -29,12 +40,19 @@ const TABLES = [
   'staffRecord',
   'roleRequirement',
   'staffCorrectionRequest',
+  'staffSelfRequest',
+  'staffRecordAck',
+  'trainingCourse',
+  'supervisionBooking',
   'vehicle',
   'vehicleLocationHistory',
+  'vehicleStatusChange',
   'odometerReading',
+  'odometerReview',
   'maintenancePlan',
   'maintenanceEvent',
   'equipmentAsset',
+  'equipmentStatusChange',
   'inspectionRegime',
   'vdiTemplate',
   'vdi',
@@ -50,21 +68,39 @@ const TABLES = [
   'auditSample',
   'auditResponse',
   'auditFinding',
+  'auditReview',
   'action',
   'actionHistory',
   'policyDocument',
   'policyVersion',
   'policyAcknowledgement',
   'risk',
+  'riskReview',
   'registrationRecord',
+  'registrationLocation',
+  'registrationHistory',
+  'cqcRatingRecord',
+  'cqcNotification',
+  'directorFppCheck',
+  'governanceMeeting',
+  'nhsContract',
   'regulatoryCorrespondence',
   'event',
   'eventTransition',
   'reportingObligation',
   'candourAssessment',
+  'eventCandourStep',
   'complaintDetail',
   'safeguardingCase',
+  'speakUpConcern',
+  'speakUpNote',
+  'speakUpProgress',
+  'harassmentRiskAssessment',
   'premisesItem',
+  'premisesItemHistory',
+  'feedbackItem',
+  'integrationConnection',
+  'integrationRun',
   'booking',
   'job',
   'patientContact',
@@ -73,15 +109,29 @@ const TABLES = [
   'resourceBooking',
   'jobAllocation',
   'allocationException',
+  'allocationExceptionRequest',
   'jobStatusEvent',
   'shiftChange',
   'auditLog',
   'importBatch',
+  'importRow',
   'workbookItem',
+  'retentionRule',
+  'retentionReview',
+  'retentionDecision',
+  'retentionLog',
+  'legalHold',
+  'subjectRequest',
+  'disclosure',
+  'breachRecord',
+  'dpComplaint',
 ] as const;
 
-/** Columns never exported (credentials, push tokens, internal storage keys). */
-const DROP = new Set(['pushToken', 'blobKey', 'idpSubject']);
+/**
+ * Columns never exported (credentials, push tokens, internal storage keys, and the speak-up
+ * progress code hash, which would let a short anonymous code be guessed offline).
+ */
+const DROP = new Set(['pushToken', 'blobKey', 'idpSubject', 'codeHash']);
 
 const replacer = (k: string, v: unknown) =>
   DROP.has(k)
@@ -146,7 +196,8 @@ export async function buildFullExport(
       'Times are UTC (ISO 8601); date-only fields are London dates.',
       'Fields encrypted at rest by the application (e.g. DBS certificate numbers) are exported as',
       'stored, encrypted; your organisation key holder can decrypt them.',
-      'Push tokens, storage keys and identity-provider subjects are not exported.',
+      'Push tokens, storage keys, identity-provider subjects and speak-up progress code hashes',
+      'are not exported.',
       '',
       `Rows per table: ${JSON.stringify(counts)}`,
     ].join('\n'),

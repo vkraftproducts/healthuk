@@ -14,8 +14,10 @@ import {
   VdiAmendInput,
   VdiSubmit,
   VdiTemplateInput,
+  VdiTemplateQuery,
   type VdiDto,
 } from '@hub/contracts';
+import { userNames } from '../evidence/evidence.mapper.js';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
 import { assertNotFuture, audit, body, requireAny } from '../../common/http.js';
@@ -43,19 +45,27 @@ export class InspectionsController {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   // ---- templates --------------------------------------------------------------
+  /** Crews get published checklists only; vehicle managers can ask for every version. */
   @OrgMember()
   @Get('vdi-templates')
-  async templates(@Hub() hub: HubRequestContext) {
+  async templates(@Hub() hub: HubRequestContext, @Query() q: unknown) {
     requireAny(hub, 'fleet.vdi.submit', 'fleet.vdi.view', 'fleet.vehicle.manage');
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.vdiTemplate.findMany({
-        where: { active: true },
+    const { all } = body(VdiTemplateQuery, q);
+    const everything = all && hub.permissions.has('fleet.vehicle.manage');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.vdiTemplate.findMany({
+        where: everything ? {} : { active: true, status: 'PUBLISHED' },
         orderBy: [{ name: 'asc' }, { version: 'desc' }],
-      }),
-    );
-    return { data: rows.map(tplDto) };
+      });
+      const names = await userNames(tx, [
+        ...rows.map((r) => r.createdBy),
+        ...rows.map((r) => r.publishedBy),
+      ]);
+      return { data: rows.map((r) => tplDto(r, names)) };
+    });
   }
 
+  /** D6: the Fleet lead drafts a version; it is not used until someone else publishes it. */
   @RequirePermission('fleet.vehicle.manage')
   @Post('vdi-templates')
   async createTemplate(@Hub() hub: HubRequestContext, @Body() raw: unknown) {
@@ -65,12 +75,6 @@ export class InspectionsController {
         where: { name: input.name },
         orderBy: { version: 'desc' },
       });
-      // Publishing a new version retires the previous one: new inspections use the new list.
-      if (last)
-        await tx.vdiTemplate.updateMany({
-          where: { name: input.name, active: true },
-          data: { active: false },
-        });
       const t = await tx.vdiTemplate.create({
         data: {
           organisationId: hub.orgId as string,
@@ -78,16 +82,64 @@ export class InspectionsController {
           version: (last?.version ?? 0) + 1,
           vehicleType: input.vehicleType ?? null,
           items: input.items as Prisma.InputJsonArray,
+          active: false,
+          status: 'DRAFT',
           createdBy: hub.user.id,
         },
       });
       await audit(this.db, tx, hub, {
-        action: 'fleet.vdi_template.publish',
+        action: 'fleet.vdi_template.draft',
         entity: 'vdi_template',
         entityId: t.id,
         summary: { version: t.version },
       });
-      return tplDto(t);
+      return tplDto(t, await userNames(tx, [t.createdBy]));
+    });
+  }
+
+  /**
+   * D6: a second person publishes the draft. Publishing retires the previous version of the same
+   * checklist and any other published checklist for the same vehicle type (one per type).
+   */
+  @RequirePermission('fleet.vehicle.manage')
+  @Post('vdi-templates/:id/publish')
+  async publishTemplate(@Hub() hub: HubRequestContext, @Param('id', idPipe) id: string) {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const t = await tx.vdiTemplate.findUnique({ where: { id } });
+      if (!t) throw notFound();
+      if (t.status !== 'DRAFT')
+        throw new HubError('CONFLICT', 409, 'Only a draft checklist can be published');
+      if (t.createdBy === hub.user.id)
+        throw new HubError(
+          'SELF_APPROVAL',
+          403,
+          'Someone other than the person who drafted this checklist must publish it',
+        );
+      const now = new Date();
+      const older = await tx.vdiTemplate.findMany({
+        where: {
+          status: 'PUBLISHED',
+          id: { not: id },
+          OR: [{ name: t.name }, ...(t.vehicleType ? [{ vehicleType: t.vehicleType }] : [])],
+        },
+        select: { id: true },
+      });
+      if (older.length)
+        await tx.vdiTemplate.updateMany({
+          where: { id: { in: older.map((o) => o.id) } },
+          data: { active: false, status: 'RETIRED' },
+        });
+      const u = await tx.vdiTemplate.update({
+        where: { id },
+        data: { active: true, status: 'PUBLISHED', publishedBy: hub.user.id, publishedAt: now },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'fleet.vdi_template.publish',
+        entity: 'vdi_template',
+        entityId: id,
+        summary: { version: u.version, retired: older.length },
+      });
+      return tplDto(u, await userNames(tx, [u.createdBy, u.publishedBy]));
     });
   }
 
@@ -97,13 +149,18 @@ export class InspectionsController {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const t = await tx.vdiTemplate.findUnique({ where: { id } });
       if (!t) throw notFound();
-      const u = await tx.vdiTemplate.update({ where: { id }, data: { active: false } });
+      if (t.status === 'RETIRED')
+        throw new HubError('CONFLICT', 409, 'This checklist is already retired');
+      const u = await tx.vdiTemplate.update({
+        where: { id },
+        data: { active: false, status: 'RETIRED' },
+      });
       await audit(this.db, tx, hub, {
         action: 'fleet.vdi_template.retire',
         entity: 'vdi_template',
         entityId: id,
       });
-      return tplDto(u);
+      return tplDto(u, await userNames(tx, [u.createdBy, u.publishedBy]));
     });
   }
 
@@ -387,14 +444,8 @@ export class InspectionsController {
   }
 }
 
-function tplDto(t: {
-  id: string;
-  name: string;
-  version: number;
-  vehicleType: string | null;
-  items: unknown;
-  active: boolean;
-}) {
+function tplDto(t: Prisma.VdiTemplateGetPayload<object>, names: Map<string, string>) {
+  const name = (id: string | null) => (id ? (names.get(id) ?? null) : null);
   return {
     id: t.id,
     name: t.name,
@@ -406,6 +457,12 @@ function tplDto(t: {
       critical: !!i.critical,
     })),
     active: t.active,
+    status: t.status as 'DRAFT' | 'PUBLISHED' | 'RETIRED',
+    createdBy: t.createdBy,
+    createdByName: name(t.createdBy),
+    publishedBy: t.publishedBy,
+    publishedByName: name(t.publishedBy),
+    publishedAt: t.publishedAt ? t.publishedAt.toISOString() : null,
   };
 }
 

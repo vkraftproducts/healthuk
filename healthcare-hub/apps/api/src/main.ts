@@ -2,12 +2,17 @@ import 'reflect-metadata';
 import { createRemoteJWKSet } from 'jose';
 import { createDb } from '@hub/db';
 import { createApp } from './app.js';
+import { switchOffMfaForDevelopment } from './auth/mfa.js';
 import { loadConfig } from './config.js';
 import { createLogger } from './logger.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.LOG_LEVEL);
+  if (config.DEV_DISABLE_MFA) {
+    switchOffMfaForDevelopment();
+    logger.warn('DEV_DISABLE_MFA is on: privileged roles sign in without an authenticator code');
+  }
   const db = createDb(config.DATABASE_URL);
   const app = await createApp({
     config,

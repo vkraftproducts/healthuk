@@ -11,25 +11,36 @@ import {
 } from '@nestjs/common';
 import type { Db, Prisma, TenantTx } from '@hub/db';
 import { createAction, nextCode, queuePush } from '@hub/domain';
-import { ackState, isOverdue, londonDate, riskRating } from '@hub/rules';
+import {
+  ackState,
+  isOverdue,
+  londonDate,
+  notificationTargetDate,
+  riskBandText,
+  riskRating,
+} from '@hub/rules';
 import {
   AckInput,
   CorrespondenceInput,
   CorrespondencePatch,
   EventActionInput,
   PolicyCreate,
+  PolicyReadersInput,
   PolicyTransitionInput,
   PolicyVersionInput,
   RegistrationInput,
+  RegistrationLocationInput,
   RiskInput,
   RiskPatch,
   type PolicyDto,
+  type PolicyReadersDto,
 } from '@hub/contracts';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
 import { audit, body, ifMatchVersion, requireAny, staleOrNotFound } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
+import { userNames } from '../evidence/evidence.mapper.js';
 import { toActionDto } from './audits.controller.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
@@ -50,6 +61,22 @@ async function assertMember(tx: TenantTx, userId: string): Promise<void> {
     !(await tx.membership.count({ where: { userId, validTo: null, user: { status: 'ACTIVE' } } }))
   )
     throw new HubError('VALIDATION_FAILED', 400, 'The person is not an active member');
+}
+
+type ReaderGroups = {
+  readerRoles: string[];
+  readerLocationIds: string[];
+  readerEveryone: boolean;
+};
+/** Required readers (G4): everyone, or members in a reader role or at a reader location. */
+function readerWhere(d: ReaderGroups): Prisma.MembershipWhereInput {
+  if (d.readerEveryone || (!d.readerRoles.length && !d.readerLocationIds.length)) return {};
+  return {
+    OR: [
+      ...(d.readerRoles.length ? [{ role: { key: { in: d.readerRoles } } }] : []),
+      ...(d.readerLocationIds.length ? [{ locationId: { in: d.readerLocationIds } }] : []),
+    ],
+  };
 }
 
 /** Policies and SOPs with versioned acknowledgement; risk register; registration record. */
@@ -97,6 +124,8 @@ export class PoliciesController {
           category: input.category,
           ownerUserId: input.ownerUserId,
           readerRoles: input.readerRoles,
+          readerLocationIds: input.readerLocationIds,
+          readerEveryone: input.readerEveryone,
           createdBy: hub.user.id,
         },
       });
@@ -201,6 +230,12 @@ export class PoliciesController {
             422,
             'The author cannot approve their own version',
           );
+        if (!hub.permissions.has('compliance.policy.approve'))
+          throw new HubError(
+            'FORBIDDEN',
+            403,
+            'Policies are approved by the registered manager (or a director)',
+          );
         data.approvedBy = hub.user.id;
         data.approvedAt = now;
       }
@@ -221,10 +256,7 @@ export class PoliciesController {
         // Readers must (re-)acknowledge: a generic push to everyone in the reader roles.
         const doc = await tx.policyDocument.findUniqueOrThrow({ where: { id } });
         const readers = await tx.membership.findMany({
-          where: {
-            validTo: null,
-            ...(doc.readerRoles.length ? { role: { key: { in: doc.readerRoles } } } : {}),
-          },
+          where: { validTo: null, ...readerWhere(doc) },
           select: { userId: true },
         });
         await queuePush(tx, {
@@ -259,7 +291,14 @@ export class PoliciesController {
       const current = await tx.policyVersion.findFirst({
         where: { documentId: id, status: 'PUBLISHED' },
       });
-      if (!current || !(await this.isReader(tx, hub, d.readerRoles))) throw notFound();
+      if (!current || !(await this.isReader(tx, hub, d))) throw notFound();
+      const critical = d.category === 'CRITICAL_INSTRUCTION';
+      if (critical && input.confirmCritical !== true)
+        throw new HubError(
+          'VALIDATION_FAILED',
+          400,
+          'Confirm you have read and understood this critical instruction',
+        );
       const existing = await tx.policyAcknowledgement.findFirst({
         where: { policyVersionId: current.id, userId: hub.user.id },
       });
@@ -276,9 +315,140 @@ export class PoliciesController {
           action: 'compliance.policy.acknowledge',
           entity: 'policy_version',
           entityId: current.id,
+          summary: { critical },
         });
       }
       return this.dto(tx, hub, id);
+    });
+  }
+
+  @RequirePermission(MANAGE)
+  @Get('policies/:id/readers')
+  async readers(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+  ): Promise<PolicyReadersDto> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const d = await tx.policyDocument.findUnique({
+        where: { id },
+        include: { versions: { orderBy: { version: 'desc' } } },
+      });
+      if (!d) throw notFound();
+      const chain = this.ackChain(d.versions);
+      const acks = await tx.policyAcknowledgement.findMany({
+        where: { policyVersionId: { in: chain.map((c) => c.id) } },
+      });
+      const members = await tx.membership.findMany({
+        where: { validTo: null, user: { status: 'ACTIVE' }, ...readerWhere(d) },
+        select: {
+          userId: true,
+          user: { select: { displayName: true } },
+          role: { select: { name: true } },
+        },
+      });
+      const people = new Map<string, { displayName: string; roleNames: string[] }>();
+      for (const m of members) {
+        const p = people.get(m.userId) ?? { displayName: m.user.displayName, roleNames: [] };
+        if (!p.roleNames.includes(m.role.name)) p.roleNames.push(m.role.name);
+        people.set(m.userId, p);
+      }
+      const data = [...people.entries()].map(([userId, p]) => {
+        const mine = acks.filter((a) => a.userId === userId);
+        const state = ackState(chain, new Set(mine.map((a) => a.policyVersionId)));
+        const latest = mine.sort((a, b) => b.at.getTime() - a.at.getTime())[0];
+        return {
+          userId,
+          ...p,
+          state,
+          acknowledgedAt:
+            state === 'CURRENT' || state === 'CARRIED_FORWARD'
+              ? (latest?.at.toISOString() ?? null)
+              : null,
+        };
+      });
+      // People who still need to read it come first.
+      data.sort(
+        (a, b) =>
+          Number(a.state !== 'REQUIRED') - Number(b.state !== 'REQUIRED') ||
+          a.displayName.localeCompare(b.displayName),
+      );
+      return { data };
+    });
+  }
+
+  /** Change who must read the policy: roles, locations or everyone (G4). */
+  @RequirePermission(MANAGE)
+  @Patch('policies/:id/readers')
+  async setReaders(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<PolicyDto> {
+    const input = body(PolicyReadersInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      if (!(await tx.policyDocument.count({ where: { id } }))) throw notFound();
+      if (input.readerLocationIds?.length) {
+        const n = await tx.location.count({ where: { id: { in: input.readerLocationIds } } });
+        if (n !== new Set(input.readerLocationIds).size) throw notFound();
+      }
+      await tx.policyDocument.update({ where: { id }, data: input });
+      await audit(this.db, tx, hub, {
+        action: 'compliance.policy.readers',
+        entity: 'policy_document',
+        entityId: id,
+        summary: { fields: Object.keys(input).join(',') },
+      });
+      return this.dto(tx, hub, id);
+    });
+  }
+
+  /** Reminds everyone who has not acknowledged the current version (outstanding list). */
+  @RequirePermission(MANAGE)
+  @Post('policies/:id/chase')
+  async chase(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+  ): Promise<{ chased: number }> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const d = await tx.policyDocument.findUnique({
+        where: { id },
+        include: { versions: { orderBy: { version: 'desc' } } },
+      });
+      if (!d) throw notFound();
+      const current = d.versions.find((v) => v.status === 'PUBLISHED');
+      if (!current)
+        throw new HubError('CONFLICT', 409, 'There is no published version to acknowledge');
+      const chain = this.ackChain(d.versions);
+      const acks = await tx.policyAcknowledgement.findMany({
+        where: { policyVersionId: { in: chain.map((c) => c.id) } },
+      });
+      const members = await tx.membership.findMany({
+        where: { validTo: null, user: { status: 'ACTIVE' }, ...readerWhere(d) },
+        select: { userId: true },
+        distinct: ['userId'],
+      });
+      const outstanding = members
+        .map((m) => m.userId)
+        .filter((u) => {
+          const mine = new Set(acks.filter((a) => a.userId === u).map((a) => a.policyVersionId));
+          return ackState(chain, mine) === 'REQUIRED';
+        });
+      if (outstanding.length)
+        await queuePush(tx, {
+          orgId: d.organisationId,
+          userIds: outstanding,
+          kind: 'POLICY_ACK',
+          refId: current.id,
+          // At most one reminder per person per day.
+          event: `reminder-${londonDate(new Date())}`,
+        });
+      await audit(this.db, tx, hub, {
+        action: 'compliance.policy.chase',
+        entity: 'policy_version',
+        entityId: current.id,
+        summary: { chased: outstanding.length },
+      });
+      return { chased: outstanding.length };
     });
   }
 
@@ -287,11 +457,10 @@ export class PoliciesController {
   @Get('risks')
   async risks(@Hub() hub: HubRequestContext) {
     requireAny(hub, 'compliance.risk.manage', 'compliance.audit.view');
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.risk.findMany({ orderBy: [{ status: 'asc' }, { reviewDate: 'asc' }] }),
-    );
-    const now = new Date();
-    return { data: rows.map((r) => riskDto(r, now)) };
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.risk.findMany({ orderBy: [{ status: 'asc' }, { reviewDate: 'asc' }] });
+      return { data: await riskDtos(tx, rows) };
+    });
   }
 
   @RequirePermission('compliance.risk.manage')
@@ -317,7 +486,7 @@ export class PoliciesController {
         entityId: r.id,
         summary: { residual: riskRating(r.residualLikelihood, r.residualImpact).score },
       });
-      return riskDto(r, new Date());
+      return (await riskDtos(tx, [r]))[0]!;
     });
   }
 
@@ -330,22 +499,56 @@ export class PoliciesController {
     @Body() raw: unknown,
   ) {
     const expected = ifMatchVersion(req);
-    const input = body(RiskPatch, raw);
+    const { reason, ...input } = body(RiskPatch, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const before = await tx.risk.findUnique({ where: { id } });
+      if (!before) throw notFound();
+      if (before.status !== 'OPEN' && (!input.status || input.status !== 'OPEN'))
+        throw new HubError('CONFLICT', 409, 'Reopen the risk before changing it');
       if (input.ownerUserId) await assertMember(tx, input.ownerUserId);
       await this.assertRiskRefs(tx, input);
+      const closing = input.status === 'CLOSED' || input.status === 'ARCHIVED';
       const r = await tx.risk.updateMany({
         where: { id, version: expected },
-        data: { ...input, ...(input.reviewDate ? { reviewDate: day(input.reviewDate) } : {}) },
+        data: {
+          ...input,
+          ...(input.reviewDate ? { reviewDate: day(input.reviewDate) } : {}),
+          ...(closing
+            ? { closedReason: reason ?? null, closedAt: new Date(), closedBy: hub.user.id }
+            : {}),
+          ...(input.status === 'OPEN'
+            ? { closedReason: null, closedAt: null, closedBy: null }
+            : {}),
+        },
       });
-      if (r.count === 0) throw staleOrNotFound((await tx.risk.count({ where: { id } })) > 0);
+      if (r.count === 0) throw staleOrNotFound(true);
+      const after = await tx.risk.findUniqueOrThrow({ where: { id } });
+      // Every change to the residual scores, controls or review date is kept as a review (H4).
+      if (
+        after.residualLikelihood !== before.residualLikelihood ||
+        after.residualImpact !== before.residualImpact ||
+        after.controls !== before.controls ||
+        after.reviewDate.getTime() !== before.reviewDate.getTime()
+      )
+        await tx.riskReview.create({
+          data: {
+            organisationId: after.organisationId,
+            riskId: id,
+            residualLikelihood: after.residualLikelihood,
+            residualImpact: after.residualImpact,
+            controls: after.controls,
+            note: reason ?? null,
+            nextReviewOn: after.reviewDate,
+            reviewedBy: hub.user.id,
+          },
+        });
       await audit(this.db, tx, hub, {
-        action: 'compliance.risk.update',
+        action: closing ? 'compliance.risk.close' : 'compliance.risk.update',
         entity: 'risk',
         entityId: id,
-        summary: { fields: Object.keys(input).join(',') },
+        summary: { fields: Object.keys(input).join(','), status: input.status ?? before.status },
       });
-      return riskDto(await tx.risk.findUniqueOrThrow({ where: { id } }), new Date());
+      return (await riskDtos(tx, [await tx.risk.findUniqueOrThrow({ where: { id } })]))[0]!;
     });
   }
 
@@ -396,24 +599,145 @@ export class PoliciesController {
   @RequirePermission('compliance.registration.manage')
   @Post('registration')
   async saveRegistration(@Hub() hub: HubRequestContext, @Body() raw: unknown) {
-    const input = body(RegistrationInput, raw);
+    const { reason, effectiveFrom, insuranceExpiresOn, bcpReviewedOn, bcpNextReviewOn, ...input } =
+      body(RegistrationInput, raw);
+    const dates = {
+      ...(insuranceExpiresOn !== undefined
+        ? { insuranceExpiresOn: insuranceExpiresOn ? day(insuranceExpiresOn) : null }
+        : {}),
+      ...(bcpReviewedOn !== undefined
+        ? { bcpReviewedOn: bcpReviewedOn ? day(bcpReviewedOn) : null }
+        : {}),
+      ...(bcpNextReviewOn !== undefined
+        ? { bcpNextReviewOn: bcpNextReviewOn ? day(bcpNextReviewOn) : null }
+        : {}),
+    };
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       if (input.registeredManagerUserId) await assertMember(tx, input.registeredManagerUserId);
       for (const k of ['statementOfPurposeItemId', 'insuranceItemId', 'bcpItemId'] as const)
         await this.assertItem(tx, input[k] ?? undefined);
       const orgId = hub.orgId as string;
-      await tx.registrationRecord.upsert({
+      const before = await tx.registrationRecord.findUnique({ where: { organisationId: orgId } });
+      // Changing the registered manager or nominated individual is a change CQC must hear of.
+      const keyChange =
+        !!before &&
+        ((input.registeredManagerUserId !== undefined &&
+          input.registeredManagerUserId !== before.registeredManagerUserId) ||
+          (input.nominatedIndividual !== undefined &&
+            input.nominatedIndividual !== before.nominatedIndividual));
+      const saved = await tx.registrationRecord.upsert({
         where: { organisationId: orgId },
-        create: { organisationId: orgId, ...input, updatedBy: hub.user.id },
-        update: { ...input, updatedBy: hub.user.id },
+        create: { organisationId: orgId, ...input, ...dates, updatedBy: hub.user.id },
+        update: { ...input, ...dates, updatedBy: hub.user.id },
+      });
+      const changed = [
+        ...(Object.keys(input) as (keyof typeof input)[]).filter(
+          (k) => (before?.[k] ?? null) !== (saved[k] ?? null),
+        ),
+        ...(Object.keys(dates) as (keyof typeof dates)[]).filter(
+          (k) => (before?.[k]?.getTime() ?? null) !== (saved[k]?.getTime() ?? null),
+        ),
+      ];
+      let notificationDraftId: string | null = null;
+      if (keyChange) {
+        const on = effectiveFrom ?? londonDate(new Date());
+        const n = await tx.cqcNotification.create({
+          data: {
+            organisationId: orgId,
+            code: await nextCode(tx, orgId, 'NTF'),
+            kind: 'CHANGE_OF_DETAILS',
+            occurredOn: day(on),
+            dueOn: day(notificationTargetDate('CHANGE_OF_DETAILS', on)),
+            summary:
+              'Change of registered manager or nominated individual recorded in the hub. ' +
+              'Check the details and submit the statutory notification to CQC.',
+            preparedBy: hub.user.id,
+          },
+        });
+        notificationDraftId = n.id;
+      }
+      await tx.registrationHistory.create({
+        data: {
+          organisationId: orgId,
+          snapshot: {
+            providerRef: saved.providerRef,
+            registeredManagerUserId: saved.registeredManagerUserId,
+            nominatedIndividual: saved.nominatedIndividual,
+            conditions: saved.conditions,
+            statementOfPurposeItemId: saved.statementOfPurposeItemId,
+            insuranceItemId: saved.insuranceItemId,
+            bcpItemId: saved.bcpItemId,
+            insuranceExpiresOn: iso(saved.insuranceExpiresOn),
+            bcpReviewedOn: iso(saved.bcpReviewedOn),
+            bcpNextReviewOn: iso(saved.bcpNextReviewOn),
+            effectiveFrom: effectiveFrom ?? londonDate(new Date()),
+          },
+          changedFields: changed,
+          reason: reason ?? null,
+          changedBy: hub.user.id,
+        },
       });
       await audit(this.db, tx, hub, {
         action: 'compliance.registration.update',
         entity: 'registration_record',
         entityId: orgId,
-        summary: { fields: Object.keys(input).join(',') },
+        summary: { fields: changed.join(','), notificationDraft: !!notificationDraftId },
       });
-      return this.regDto(tx, orgId);
+      return { ...(await this.regDto(tx, orgId)), notificationDraftId };
+    });
+  }
+
+  /** A registered location's manager, activities and conditions from a date (append-only). */
+  @RequirePermission('compliance.registration.manage')
+  @Post('registration/locations')
+  async saveRegistrationLocation(@Hub() hub: HubRequestContext, @Body() raw: unknown) {
+    const input = body(RegistrationLocationInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const orgId = hub.orgId as string;
+      if (!(await tx.location.findUnique({ where: { id: input.locationId } }))) throw notFound();
+      if (input.registeredManagerUserId) await assertMember(tx, input.registeredManagerUserId);
+      const prior = await tx.registrationLocation.findFirst({
+        where: { locationId: input.locationId },
+        orderBy: [{ effectiveFrom: 'desc' }, { recordedAt: 'desc' }],
+      });
+      const row = await tx.registrationLocation.create({
+        data: {
+          organisationId: orgId,
+          locationId: input.locationId,
+          cqcLocationId: input.cqcLocationId ?? null,
+          registeredManagerUserId: input.registeredManagerUserId ?? null,
+          managerStartOn: input.managerStartOn ? day(input.managerStartOn) : null,
+          activities: input.activities,
+          conditions: input.conditions ?? null,
+          effectiveFrom: day(input.effectiveFrom),
+          reason: input.reason,
+          recordedBy: hub.user.id,
+        },
+      });
+      let notificationDraftId: string | null = null;
+      if (prior && (input.registeredManagerUserId ?? null) !== prior.registeredManagerUserId) {
+        const n = await tx.cqcNotification.create({
+          data: {
+            organisationId: orgId,
+            code: await nextCode(tx, orgId, 'NTF'),
+            kind: 'CHANGE_OF_DETAILS',
+            occurredOn: day(input.effectiveFrom),
+            dueOn: day(notificationTargetDate('CHANGE_OF_DETAILS', input.effectiveFrom)),
+            summary:
+              'Change of registered manager at a location recorded in the hub. ' +
+              'Check the details and submit the statutory notification to CQC.',
+            preparedBy: hub.user.id,
+          },
+        });
+        notificationDraftId = n.id;
+      }
+      await audit(this.db, tx, hub, {
+        action: 'compliance.registration.location',
+        entity: 'registration_location',
+        entityId: row.id,
+        summary: { locationId: input.locationId, notificationDraft: !!notificationDraftId },
+      });
+      return { ...(await this.regDto(tx, orgId)), notificationDraftId };
     });
   }
 
@@ -499,9 +823,15 @@ export class PoliciesController {
 
   private async assertRiskRefs(
     tx: TenantTx,
-    i: { locationId?: string; linkedEventIds?: string[] },
+    i: { locationId?: string; linkedEventIds?: string[]; linkedAuditRunIds?: string[] },
   ) {
     if (i.locationId && !(await tx.location.findUnique({ where: { id: i.locationId } })))
+      throw notFound();
+    if (
+      i.linkedAuditRunIds?.length &&
+      (await tx.auditRun.count({ where: { id: { in: i.linkedAuditRunIds } } })) !==
+        new Set(i.linkedAuditRunIds).size
+    )
       throw notFound();
     if (
       i.linkedEventIds?.length &&
@@ -511,13 +841,27 @@ export class PoliciesController {
       throw notFound();
   }
 
-  private async isReader(tx: TenantTx, hub: HubRequestContext, roles: string[]): Promise<boolean> {
-    if (roles.length === 0) return true;
-    const m = await tx.membership.findMany({
-      where: { userId: hub.user.id, validTo: null },
-      include: { role: { select: { key: true } } },
+  private async isReader(tx: TenantTx, hub: HubRequestContext, d: ReaderGroups): Promise<boolean> {
+    const where = readerWhere(d);
+    if (!where.OR) return true;
+    const n = await tx.membership.count({
+      where: { userId: hub.user.id, validTo: null, ...where },
     });
-    return m.some((x) => roles.includes(x.role.key));
+    return n > 0;
+  }
+
+  /** Every version that has been published, newest first, up to the current one (for `ackState`). */
+  private ackChain(versions: Prisma.PolicyVersionGetPayload<object>[]) {
+    const current = versions.find((v) => v.status === 'PUBLISHED') ?? null;
+    return versions
+      .filter(
+        (v) =>
+          v.status === 'PUBLISHED' ||
+          v.status === 'SUPERSEDED' ||
+          (v.status === 'ARCHIVED' && v.publishedAt),
+      )
+      .filter((v) => !current || v.version <= current.version)
+      .map((v) => ({ id: v.id, material: v.material }));
   }
 
   private async dto(tx: TenantTx, hub: HubRequestContext, id: string): Promise<PolicyDto> {
@@ -525,16 +869,21 @@ export class PoliciesController {
       where: { id },
       include: { versions: { orderBy: { version: 'desc' } } },
     });
-    const published = d.versions.filter(
-      (v) =>
-        v.status === 'PUBLISHED' ||
-        v.status === 'SUPERSEDED' ||
-        (v.status === 'ARCHIVED' && v.publishedAt),
-    );
     const current = d.versions.find((v) => v.status === 'PUBLISHED') ?? null;
-    const chain = published
-      .filter((v) => !current || v.version <= current.version)
-      .map((v) => ({ id: v.id, material: v.material }));
+    const chain = this.ackChain(d.versions);
+    const names = await userNames(tx, [
+      d.ownerUserId,
+      ...d.versions.flatMap((v) => [v.createdBy, v.approvedBy]),
+    ]);
+    const name = (u: string | null) => (u ? (names.get(u) ?? null) : null);
+    const currentReview = iso(current?.reviewDate ?? null);
+    const file = current?.evidenceItemId
+      ? await tx.evidenceVersion.findFirst({
+          where: { itemId: current.evidenceItemId, uploadedAt: { not: null } },
+          orderBy: { versionNo: 'desc' },
+          select: { id: true },
+        })
+      : null;
     const acks = await tx.policyAcknowledgement.findMany({
       where: { policyVersionId: { in: chain.map((c) => c.id) } },
     });
@@ -542,11 +891,7 @@ export class PoliciesController {
     for (const a of acks)
       byUser.set(a.userId, (byUser.get(a.userId) ?? new Set()).add(a.policyVersionId));
     const members = await tx.membership.findMany({
-      where: {
-        validTo: null,
-        user: { status: 'ACTIVE' },
-        ...(d.readerRoles.length ? { role: { key: { in: d.readerRoles } } } : {}),
-      },
+      where: { validTo: null, user: { status: 'ACTIVE' }, ...readerWhere(d) },
       select: { userId: true },
       distinct: ['userId'],
     });
@@ -555,21 +900,27 @@ export class PoliciesController {
       ? members.filter((m) => okStates.has(ackState(chain, byUser.get(m.userId) ?? new Set())))
           .length
       : 0;
-    const reader = await this.isReader(tx, hub, d.readerRoles);
+    const reader = await this.isReader(tx, hub, d);
     return {
       id: d.id,
       code: d.code,
       title: d.title,
       category: d.category,
       ownerUserId: d.ownerUserId,
+      ownerName: name(d.ownerUserId),
       readerRoles: d.readerRoles,
+      readerLocationIds: d.readerLocationIds,
+      readerEveryone: d.readerEveryone,
       currentVersion: current
         ? {
             id: current.id,
             version: current.version,
             effectiveFrom: iso(current.effectiveFrom),
-            reviewDate: iso(current.reviewDate),
+            reviewDate: currentReview,
+            reviewOverdue: !!currentReview && isOverdue(currentReview, new Date()),
             material: current.material,
+            evidenceItemId: current.evidenceItemId,
+            documentEvidenceVersionId: file?.id ?? null,
           }
         : null,
       versions: d.versions.map((v) => ({
@@ -578,8 +929,14 @@ export class PoliciesController {
         status: v.status,
         summary: v.summary,
         material: v.material,
+        evidenceItemId: v.evidenceItemId,
+        reviewDate: iso(v.reviewDate),
+        effectiveFrom: iso(v.effectiveFrom),
         createdBy: v.createdBy,
+        createdByName: name(v.createdBy),
         approvedBy: v.approvedBy,
+        approvedByName: name(v.approvedBy),
+        approvedAt: v.approvedAt?.toISOString() ?? null,
         publishedAt: v.publishedAt?.toISOString() ?? null,
       })),
       acknowledgement: { acknowledged, required: current ? members.length : 0 },
@@ -592,7 +949,41 @@ export class PoliciesController {
   private async regDto(tx: TenantTx, orgId: string) {
     const r = await tx.registrationRecord.findUnique({ where: { organisationId: orgId } });
     const acts = await tx.registeredActivity.findMany({ where: { archivedAt: null } });
+    const today = day(londonDate(new Date()));
+    const entries = await tx.registrationLocation.findMany({
+      where: { effectiveFrom: { lte: today } },
+      orderBy: [{ effectiveFrom: 'desc' }, { recordedAt: 'desc' }],
+    });
+    const current = [...new Map(entries.reverse().map((e) => [e.locationId, e])).values()];
+    const locs = await tx.location.findMany({
+      where: { id: { in: current.map((e) => e.locationId) } },
+      select: { id: true, name: true },
+    });
+    const names = await userNames(tx, [
+      ...current.map((e) => e.registeredManagerUserId),
+      ...current.map((e) => e.recordedBy),
+    ]);
     return {
+      insuranceExpiresOn: iso(r?.insuranceExpiresOn ?? null),
+      bcpReviewedOn: iso(r?.bcpReviewedOn ?? null),
+      bcpNextReviewOn: iso(r?.bcpNextReviewOn ?? null),
+      locations: current.map((e) => ({
+        id: e.id,
+        locationId: e.locationId,
+        locationName: locs.find((l) => l.id === e.locationId)?.name ?? null,
+        cqcLocationId: e.cqcLocationId,
+        registeredManagerUserId: e.registeredManagerUserId,
+        registeredManagerName: e.registeredManagerUserId
+          ? (names.get(e.registeredManagerUserId) ?? null)
+          : null,
+        managerStartOn: iso(e.managerStartOn),
+        activities: e.activities,
+        conditions: e.conditions,
+        effectiveFrom: iso(e.effectiveFrom) as string,
+        reason: e.reason,
+        recordedByName: names.get(e.recordedBy) ?? null,
+        recordedAt: e.recordedAt.toISOString(),
+      })),
       providerRef: r?.providerRef ?? null,
       registeredManagerUserId: r?.registeredManagerUserId ?? null,
       nominatedIndividual: r?.nominatedIndividual ?? null,
@@ -606,7 +997,42 @@ export class PoliciesController {
   }
 }
 
-function riskDto(r: Prisma.RiskGetPayload<object>, now: Date) {
+type RiskRow = Prisma.RiskGetPayload<object>;
+type RiskCtx = {
+  names: Map<string, string>;
+  events: Map<string, { id: string; code: string; title: string }>;
+  open: Map<string, number>;
+  reviews: Prisma.RiskReviewGetPayload<object>[];
+};
+
+async function riskDtos(tx: TenantTx, rows: RiskRow[], now = new Date()) {
+  const ids = rows.map((r) => r.id);
+  const [events, open, reviews] = await Promise.all([
+    tx.event.findMany({
+      where: { id: { in: [...new Set(rows.flatMap((r) => r.linkedEventIds))] } },
+      select: { id: true, code: true, title: true },
+    }),
+    tx.action.groupBy({
+      by: ['sourceId'],
+      where: { sourceType: 'RISK', sourceId: { in: ids }, status: { not: 'VERIFIED' } },
+      _count: { _all: true },
+    }),
+    tx.riskReview.findMany({ where: { riskId: { in: ids } }, orderBy: { reviewedAt: 'desc' } }),
+  ]);
+  const names = await userNames(tx, [
+    ...rows.map((r) => r.ownerUserId),
+    ...reviews.map((v) => v.reviewedBy),
+  ]);
+  const ctx: RiskCtx = {
+    names,
+    events: new Map(events.map((e) => [e.id, e])),
+    open: new Map(open.map((o) => [o.sourceId, o._count._all])),
+    reviews,
+  };
+  return rows.map((r) => riskDto(r, now, ctx));
+}
+
+function riskDto(r: RiskRow, now: Date, ctx: RiskCtx) {
   const inh = riskRating(r.inherentLikelihood, r.inherentImpact);
   const res = riskRating(r.residualLikelihood, r.residualImpact);
   return {
@@ -618,11 +1044,32 @@ function riskDto(r: Prisma.RiskGetPayload<object>, now: Date) {
     residual: { likelihood: r.residualLikelihood, impact: r.residualImpact, ...res },
     controls: r.controls,
     ownerUserId: r.ownerUserId,
+    ownerName: ctx.names.get(r.ownerUserId) ?? null,
     reviewDate: iso(r.reviewDate) as string,
     reviewOverdue: r.status === 'OPEN' && isOverdue(iso(r.reviewDate) as string, now),
     locationId: r.locationId,
     status: r.status,
     linkedEventIds: r.linkedEventIds,
+    linkedEvents: r.linkedEventIds.flatMap((id) => {
+      const e = ctx.events.get(id);
+      return e ? [e] : [];
+    }),
+    openActions: ctx.open.get(r.id) ?? 0,
+    title: r.title,
+    category: r.category,
+    bandText: riskBandText(r.residualLikelihood, r.residualImpact),
+    linkedAuditRunIds: r.linkedAuditRunIds,
+    closedReason: r.closedReason,
+    closedAt: r.closedAt?.toISOString() ?? null,
+    reviews: ctx.reviews
+      .filter((v) => v.riskId === r.id)
+      .map((v) => ({
+        residualScore: riskRating(v.residualLikelihood, v.residualImpact).score,
+        bandText: riskBandText(v.residualLikelihood, v.residualImpact),
+        note: v.note ?? '',
+        byName: ctx.names.get(v.reviewedBy) ?? null,
+        at: v.reviewedAt.toISOString(),
+      })),
     version: r.version,
   };
 }

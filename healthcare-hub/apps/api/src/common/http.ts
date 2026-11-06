@@ -55,6 +55,16 @@ export function audit(db: Db, tx: TenantTx, hub: HubRequestContext, a: AuditArgs
   });
 }
 
+/**
+ * The database's clock. Membership validity is written with it (column default, invite_user,
+ * revoke), so it must be compared with it too: the API's clock can differ, which would briefly
+ * refuse a new member or keep a revoked one signed in.
+ */
+export async function dbNow(tx: TenantTx): Promise<Date> {
+  const [row] = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
+  return row!.now;
+}
+
 /** For routes open to several permissions (declared @OrgMember): at least one is required. */
 export function requireAny(hub: HubRequestContext, ...keys: string[]): void {
   if (!keys.some((k) => hub.permissions.has(k))) throw new HubError('FORBIDDEN', 403);

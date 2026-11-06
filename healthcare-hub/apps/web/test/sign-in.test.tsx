@@ -5,7 +5,12 @@ import type { MeResponse } from '@hub/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
-import { MockAuthClient, NotSignedInError, UnconfiguredEntraClient } from '../src/auth.js';
+import {
+  DEV_USERS,
+  MockAuthClient,
+  NotSignedInError,
+  UnconfiguredEntraClient,
+} from '../src/auth.js';
 
 const ORG = '01900000-0000-7000-8000-000000000001';
 const me: MeResponse = {
@@ -17,7 +22,7 @@ const me: MeResponse = {
   memberships: [
     {
       organisationId: ORG,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'HR_LEAD',
       roleName: 'HR lead',
@@ -45,6 +50,26 @@ beforeEach(() => sessionStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe('MockAuthClient', () => {
+  it('fetches a new token when the current one is about to expire, not only at sign-in', async () => {
+    let minted = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        minted += 1;
+        return new Response(JSON.stringify({ access_token: `t${minted}`, expires_in: 900 }));
+      }),
+    );
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const auth = new MockAuthClient('http://oidc.test');
+    await auth.signIn('manager');
+    expect(await auth.getToken()).toBe('t1');
+    now.mockReturnValue(1_000_000 + 10 * 60_000);
+    expect(await auth.getToken()).toBe('t1');
+    now.mockReturnValue(1_000_000 + 15 * 60_000);
+    expect(await auth.getToken()).toBe('t2');
+    now.mockRestore();
+  });
+
   it('needs a sign-in, keeps the token in memory and only the user name in session storage', async () => {
     tokenServer();
     const auth = new MockAuthClient('http://oidc.test');
@@ -96,13 +121,24 @@ describe('sign-in page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     const nav = await screen.findByRole('navigation', { name: 'Primary' });
-    expect(within(nav).getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByText('Hana Rowe')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('You have signed out.');
     expect(sessionStorage.getItem('hub.devUser')).toBeNull();
+  });
+
+  it('lists every test user, including the organisation admin and sector logins [9, 30]', () => {
+    renderWith(new MockAuthClient('http://oidc.test'));
+    const radios = screen.getAllByRole('radio');
+    expect(radios).toHaveLength(DEV_USERS.length);
+    for (const name of ['Olu Adeyemi', 'Audrey Ward', 'Dana Mock', 'Casey Mock'])
+      expect(screen.getByRole('radio', { name: new RegExp(name) })).toBeInTheDocument();
+    expect(DEV_USERS.map((u) => u.org)).toEqual(
+      expect.arrayContaining(['Exora', 'Dental', 'Care home']),
+    );
   });
 
   it('offers Microsoft sign-in in production and explains when it is not configured', async () => {

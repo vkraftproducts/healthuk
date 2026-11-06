@@ -12,6 +12,8 @@ FROM node:22.23-bookworm-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /out .
+# Evidence store mount point, owned by node so a fresh volume is writable.
+RUN mkdir -p /data/evidence && chown node:node /data/evidence
 USER node
 
 CMD ["node", "dist/main.js"]

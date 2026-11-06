@@ -2,7 +2,7 @@
 // via CSV import, and 500 journeys for today. Usage: node tests/load/seed-pilot.mjs
 import { call } from './lib.mjs';
 
-const loc = 'Watford';
+const loc = 'London';
 const run = Date.now().toString().slice(-4);
 const staff = ['Staff No,Display Name,Location,Job title'];
 for (let i = 0; i < 100; i++)
@@ -51,7 +51,7 @@ for (let i = 0; i < target; i++) {
         pickupTo: at(30),
         plannedStart: at(0),
         plannedEnd: at(60),
-        pickupAddress: `${i} Synthetic Road, Watford`,
+        pickupAddress: `${i} Synthetic Road, London`,
         destinationAddress: 'Synthetic General Hospital',
         patientRef: `LD${run}${i}`,
         mobility: i % 3 === 0 ? 'WHEELCHAIR' : 'WALKING',

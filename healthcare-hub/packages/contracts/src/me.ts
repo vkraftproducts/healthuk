@@ -8,6 +8,8 @@ export const MembershipDto = z.object({
   locationId: uuid.nullable(),
   roleKey: z.string(),
   roleName: z.string(),
+  /** The organisation's sector packs, so the web can hide modules the sector does not use. */
+  sectorPacks: z.array(z.string()).optional(),
 });
 export type MembershipDto = z.infer<typeof MembershipDto>;
 
@@ -18,5 +20,7 @@ export const MeResponse = z.object({
   permissions: z.array(z.string()),
   activeOrganisationId: uuid.nullable(),
   mfa: z.object({ required: z.boolean(), satisfied: z.boolean() }),
+  /** A4: present while the caller is using a support access grant. */
+  support: z.object({ endsAt: z.string() }).nullable().optional(),
 });
 export type MeResponse = z.infer<typeof MeResponse>;

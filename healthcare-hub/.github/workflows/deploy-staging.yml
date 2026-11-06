@@ -2,7 +2,7 @@ name: Deploy staging
 on:
   workflow_dispatch:
 permissions:
-  id-token: write   # OIDC federation to Azure: no stored secrets
+  id-token: write # OIDC federation to Azure: no stored secrets
   contents: read
 jobs:
   infra:

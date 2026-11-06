@@ -5,7 +5,7 @@ import type { Db } from '@hub/db';
 import { jobTimingAlerts, jobTimingAll } from '@hub/domain';
 import { addDays, londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -78,14 +78,8 @@ async function crewMember(
       body: { to, reason: `To ${to}` },
     });
   await move('CHECKS_IN_PROGRESS');
-  await move('READY_FOR_REVIEW');
-  for (const r of roles)
-    await call('POST', `/api/v1/staff/${s.body.id}/role-approvals`, {
-      sub: 'dev|hr',
-      body: { role: r, reason: 'Checks complete' },
-    });
-  await move('APPROVED_FOR_ROLE');
-  await move('ACTIVE');
+  await activateStaff(app, SEED_IDS.orgExample, s.body.id, roles);
+  if (roles.includes('DRIVER')) await addVerifiedLicence(app, SEED_IDS.orgExample, s.body.id);
   if (roles.includes('DRIVER'))
     await call('POST', `/api/v1/staff/${s.body.id}/licences`, {
       sub: 'dev|manager',
@@ -223,15 +217,29 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
   it('a critical defect (AMB-03) and an expired MOT block with no override; missing competence can be excepted by a named approver', async () => {
     const d = await crewMember();
     const a = await crewMember(['CARE_ASSISTANT']);
-    const blocked = await shift(
-      SEED_IDS.vehicleAmb3,
-      [
-        { staffId: d.staffId, role: 'DRIVER' },
-        { staffId: a.staffId, role: 'CARE_ASSISTANT' },
-      ],
-      10,
-      18,
-    );
+    const crew = [
+      { staffId: d.staffId, role: 'DRIVER' },
+      { staffId: a.staffId, role: 'CARE_ASSISTANT' },
+    ];
+    // A blocked vehicle cannot be put on a shift at all (finding 67)...
+    const refused = await call('POST', '/api/v1/shifts', {
+      body: {
+        locationId: SEED_IDS.locWatford,
+        vehicleId: SEED_IDS.vehicleAmb3,
+        startsAt: at(10),
+        endsAt: at(18),
+        crew,
+      },
+    });
+    expect([refused.status, refused.body.code]).toEqual([422, 'OVERRIDE_NOT_PERMITTED']);
+    // ...and one that becomes blocked after planning fails validation with no override.
+    const bv = await vehicle();
+    const blocked = await shift(bv, crew, 10, 18);
+    const defect = await call('POST', '/api/v1/defects', {
+      sub: 'dev|crew',
+      body: { vehicleId: bv, severity: 'CRITICAL', description: 'Brake warning light on' },
+    });
+    expect(defect.status).toBe(201);
     const [j] = await book(11);
     const r = await call('POST', `/api/v1/jobs/${j!.id}/allocate`, {
       body: { shiftId: blocked.id },
@@ -534,9 +542,12 @@ describe('shifts: double booking, swaps and the start gate [UAT-03, UAT-07]', ()
       8,
     );
     const [j] = await book(3);
-    expect(
-      (await call('POST', `/api/v1/jobs/${j!.id}/allocate`, { body: { shiftId: s.id } })).status,
-    ).toBe(409); // shift running without VDI: SHIFT_GATE fails
+    // Finding 71 (6 Nov 2026): past the start time a shift nobody has started fails the gate.
+    const pre = await call('POST', `/api/v1/jobs/${j!.id}/validate`, { body: { shiftId: s.id } });
+    expect(pre.body.checks.find((c: J) => c.code === 'SHIFT_GATE')).toMatchObject({
+      result: 'FAIL',
+      reasonText: 'Shift has not been started',
+    });
     const items = (await call('GET', '/api/v1/vdi-templates', { sub: d.sub })).body.data.find(
       (t: J) => t.id === SEED_IDS.vdiTemplate,
     ).items as J[];

@@ -36,7 +36,15 @@ Vehicles and assets:
 - Each vehicle shows its status, inspections, defects, maintenance and expenses.
 - **A critical or stop-use defect blocks the vehicle and sends its upcoming jobs back for
   reassignment.**
-- Returning a vehicle to service needs a second person.
+- Defects tab, step by step:
+  1. **Classify** a minor defect with a repair deadline. You can also make it stop-use.
+  2. **Start repair**, then **Sign off repair** and say what was repaired. Signing off does not
+     put the vehicle back into service.
+  3. Someone else with return-to-service rights checks the repair. They then either choose
+     **Return to service** and record what they checked, or choose **Send back for repair** and
+     say what is still wrong.
+- Each defect shows who reported it, who signed off the repair and who returned it to service.
+  Repair deadlines show as due soon or overdue. "Show: Returned to service" lists closed defects.
 
 ## Dispatch (Work planner)
 
@@ -51,10 +59,21 @@ Vehicles and assets:
 
 Compliance:
 
-- **Audits.** Answer each control. Failures create actions with owners and deadlines. **An action
-  closes only when someone else verifies its evidence.**
-- **Policies.** Publish versions, and staff acknowledge them. Critical instructions need explicit
-  confirmation.
+- **Audits.**
+  1. A template version is published by someone other than its author, then activated by
+     management (again not the author). "View controls" shows the questions.
+  2. Schedule an audit from an active template, naming the auditor, the owner and the due date.
+  3. In the audit, record the sample (pick the staff, vehicles, equipment or locations by name)
+     and a response for each control. Partial, non-compliant and not-applicable answers need a
+     note.
+  4. Submit for review. Responses are then fixed and a finding is worked out for each control.
+  5. Raise an action or a re-audit from each failed finding, or add an observation the questions
+     did not cover. **An action closes only when someone else verifies its evidence.**
+- **Policies.** Add a policy with its owner and the roles that must read it. Each version goes
+  draft → review → approved (by someone other than the author) → published. A material change
+  means everyone acknowledges again; a minor one carries acknowledgements forward. "Details" shows
+  the history and who still has to read it. Staff use "Read and acknowledge"; critical
+  instructions need an explicit "read and understood" tick.
 - **Events and complaints.** Each event moves step by step through triage, protect, assess,
   investigate, respond, actions and learning. Reporting duties and duty of candour are recorded.
 

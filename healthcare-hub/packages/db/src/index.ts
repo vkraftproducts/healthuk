@@ -62,10 +62,18 @@ export interface Db {
   close(): Promise<void>;
 }
 
+/**
+ * Every session runs in UTC: @prisma/adapter-pg misreads timestamptz text carrying a non-UTC
+ * offset (e.g. +05:30), which shifts now() and every stored instant on servers set to local time.
+ */
+export const UTC_SESSION = '-c TimeZone=UTC';
+
 /** Creates the scoped database facade. Connects as the (non-owner) application role. */
 export function createDb(connectionString: string): Db {
   // The raw client stays private to this module: callers only get scoped helpers.
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString, options: UTC_SESSION }),
+  });
   return {
     withTenant: (ctx, fn) => withTenant(prisma, ctx, fn),
     withIdentity: (userId, fn) => withIdentity(prisma, userId, fn),

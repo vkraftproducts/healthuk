@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { MeResponse } from '@hub/contracts';
 import type { ApiClient } from '../api.js';
+import type { LiveState } from './useLiveUpdates.js';
 
 export interface AppState {
   api: ApiClient;
@@ -11,6 +12,8 @@ export interface AppState {
   refresh: () => void;
   lastUpdated: Date | null;
   sourceOk: boolean;
+  /** Live updates connection; null when the app runs without one. */
+  live: LiveState | null;
   /** Ends the session (absent when the app is rendered without an auth client, e.g. tests). */
   signOut?: () => void;
 }

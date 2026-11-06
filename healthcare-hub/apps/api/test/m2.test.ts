@@ -701,6 +701,7 @@ describe('applicability, deadlines and alerts [UAT-01]', () => {
 
   it('due-date changes need a named approver with permission; expiry dates can never be edited', async () => {
     const dueT = await publishedTemplate({
+      basisType: 'ORG_POLICY',
       deadlineKind: 'DUE',
       recurrence: { type: 'COMPLETION_BASED', interval: { unit: 'MONTHS', every: 12 } },
       blocking: 'NONE',
@@ -737,7 +738,13 @@ describe('applicability, deadlines and alerts [UAT-01]', () => {
         })
       ).status,
     ).toBe(400);
+    // B8: nobody approves their own change; the named approver must be someone else.
+    expect(
+      (await call('POST', `/api/v1/requirements/instances/${inst.id}/due-date-change`, { body }))
+        .body.code,
+    ).toBe('SELF_APPROVAL');
     const ok = await call('POST', `/api/v1/requirements/instances/${inst.id}/due-date-change`, {
+      sub: 'dev|director',
       body,
     });
     expect(ok.status).toBe(201);
@@ -787,12 +794,22 @@ describe('applicability, deadlines and alerts [UAT-01]', () => {
     expect(
       (
         await call('POST', `/api/v1/alerts/${alert.id}/snooze`, {
-          body: { until: new Date(Date.now() + 90 * 86_400_000).toISOString() },
+          body: {
+            until: new Date(Date.now() + 90 * 86_400_000).toISOString(),
+            reason: 'Waiting for the course date',
+          },
         })
       ).status,
     ).toBe(400);
-    const snoozed = await call('POST', `/api/v1/alerts/${alert.id}/snooze`, { body: { until } });
+    // L2: a snooze needs a reason.
+    expect(
+      (await call('POST', `/api/v1/alerts/${alert.id}/snooze`, { body: { until } })).status,
+    ).toBe(400);
+    const snoozed = await call('POST', `/api/v1/alerts/${alert.id}/snooze`, {
+      body: { until, reason: 'Waiting for the course date' },
+    });
     expect(snoozed.body.snoozedUntil).toBe(until);
+    expect(snoozed.body.snoozeReason).toBe('Waiting for the course date');
     expect(await getInstance(inst.id)).toMatchObject({
       status: 'RED',
       reasonCode: 'OVERDUE',
@@ -962,7 +979,10 @@ describe('reconciler and notifications (domain)', () => {
       (a) => a.sourceId === inst.id,
     )!;
     await call('POST', `/api/v1/alerts/${alert.id}/snooze`, {
-      body: { until: new Date(Date.now() + 3 * 86_400_000).toISOString() },
+      body: {
+        until: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+        reason: 'Renewal booked',
+      },
     });
     const tomorrow = new Date(now.getTime() + 86_400_000);
     const before = await db.withTenant(sys, (tx) =>

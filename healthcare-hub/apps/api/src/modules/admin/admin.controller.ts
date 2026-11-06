@@ -1,8 +1,11 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import {
+  type PersonDto,
   ALL_PERMISSION_KEYS,
   AddMembership,
   InviteUser,
+  MembershipChange,
+  NON_INVITABLE_ROLE_KEYS,
   PERMISSIONS,
   RevokeUser,
   RoleCreate,
@@ -10,6 +13,7 @@ import {
   SettingsPatch,
   OrgSettings,
   SupportGrantCreate,
+  SupportGrantEnd,
   SELF_SERVICE_PERMISSIONS,
   type AdminUserDto,
   type RoleDto,
@@ -19,10 +23,12 @@ import {
 import type { Db, TenantTx } from '@hub/db';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
-import { audit, body, ifMatchVersion, staleOrNotFound } from '../../common/http.js';
+import { audit, body, dbNow, ifMatchVersion, staleOrNotFound } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { UserCache } from '../../auth/user-cache.js';
 import { DB } from '../../db.provider.js';
+import { userNames } from '../evidence/evidence.mapper.js';
+import { flagFutureShifts } from '../staff/control-flags.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidParam = (v: string) => {
@@ -77,6 +83,30 @@ export class AdminController {
     const input = body(InviteUser, raw);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       await this.assertGrantable(tx, hub, input.roleId);
+      // A3: someone who already has access is given a different role through Change access.
+      const current = await tx.membership.findFirst({
+        where: {
+          user: { email: input.email },
+          OR: [{ validTo: null }, { validTo: { gt: new Date() } }],
+        },
+        select: { userId: true },
+      });
+      if (current)
+        throw new HubError(
+          'CONFLICT',
+          409,
+          'This person already has access here. Use Change access to give them a different ' +
+            'role or location.',
+          [{ code: 'EXISTING_USER', userId: current.userId }],
+        );
+      const staff = input.staffId
+        ? await tx.staff.findUnique({ where: { id: input.staffId } })
+        : null;
+      if (input.staffId && !staff) throw notFound();
+      if (staff?.userId)
+        throw new HubError('CONFLICT', 409, 'That staff record already has a sign-in linked');
+      if (staff?.lifecycleState === 'LEAVER')
+        throw new HubError('CONFLICT', 409, 'That person has left; they cannot be invited');
       let id: string;
       try {
         const r = await tx.$queryRaw<{ invite_user: string }[]>`
@@ -87,11 +117,19 @@ export class AdminController {
           throw new HubError('NOT_FOUND', 404, 'Role or location not available');
         throw e;
       }
+      if (staff) {
+        if (await tx.staff.findFirst({ where: { userId: id }, select: { id: true } }))
+          throw new HubError('CONFLICT', 409, 'This sign-in is already linked to a staff record');
+        await tx.staff.update({
+          where: { id: staff.id },
+          data: { userId: id, updatedBy: hub.user.id },
+        });
+      }
       await audit(this.db, tx, hub, {
         action: 'admin.user.invite',
         entity: 'app_user',
         entityId: id,
-        summary: { roleId: input.roleId },
+        summary: { roleId: input.roleId, staffId: staff?.id ?? null },
       });
       return { id };
     });
@@ -110,6 +148,8 @@ export class AdminController {
       const member = await tx.membership.findFirst({ where: { userId: id } });
       if (!member) throw notFound();
       await this.assertGrantable(tx, hub, input.roleId);
+      if (id === hub.user.id)
+        throw new HubError('FORBIDDEN', 403, 'You cannot change your own access');
       const loc = input.locationId
         ? await tx.location.findUnique({ where: { id: input.locationId } })
         : true;
@@ -136,6 +176,64 @@ export class AdminController {
   }
 
   /**
+   * Changes a person's role or location. History is kept: the current membership ends now and a new
+   * one starts with the new role or location. Nobody can change their own access.
+   */
+  @RequirePermission('admin.users.manage')
+  @Patch('memberships/:id')
+  async changeMembership(
+    @Hub() hub: HubRequestContext,
+    @Param('id') rawId: string,
+    @Body() raw: unknown,
+  ): Promise<{ membershipId: string }> {
+    const id = uuidParam(rawId);
+    const input = body(MembershipChange, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const m = await tx.membership.findUnique({ where: { id } });
+      if (!m) throw notFound();
+      if (m.userId === hub.user.id)
+        throw new HubError('FORBIDDEN', 403, 'You cannot change your own role or location');
+      if (m.validTo && m.validTo <= new Date())
+        throw new HubError('CONFLICT', 409, 'This membership has already ended');
+      const roleId = input.roleId ?? m.roleId;
+      const locationId = input.locationId === undefined ? m.locationId : input.locationId;
+      if (roleId === m.roleId && locationId === m.locationId)
+        throw new HubError('VALIDATION_FAILED', 400, 'Nothing would change');
+      await this.assertGrantable(tx, hub, roleId);
+      if (roleId !== m.roleId) await this.assertNotLastManager(tx, m.userId, [m.id]);
+      if (locationId && !(await tx.location.findUnique({ where: { id: locationId } })))
+        throw new HubError('NOT_FOUND', 404, 'Role or location not available');
+      await tx.$executeRaw`
+        UPDATE membership SET valid_to = greatest(now(), valid_from + interval '1 millisecond'), updated_by = ${hub.user.id}::uuid
+        WHERE id = ${id}::uuid`;
+      const next = await tx.membership.create({
+        data: {
+          organisationId: hub.orgId as string,
+          userId: m.userId,
+          roleId,
+          locationId,
+          createdBy: hub.user.id,
+          updatedBy: hub.user.id,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'admin.membership.change',
+        entity: 'membership',
+        entityId: next.id,
+        summary: {
+          userId: m.userId,
+          from: id,
+          roleChanged: roleId !== m.roleId,
+          locationChanged: locationId !== m.locationId,
+          reasonLength: input.reason.length,
+        },
+      });
+      this.cache.evictUser(m.userId);
+      return { membershipId: next.id };
+    });
+  }
+
+  /**
    * Revokes a person's access to this organisation immediately: all current memberships end now and
    * their devices are revoked. Authorship of historic records is retained. The next API call by the
    * person returns 401 once they hold no access anywhere (US-SYS-1).
@@ -155,6 +253,7 @@ export class AdminController {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const exists = await tx.membership.findFirst({ where: { userId: id } });
       if (!exists) throw notFound();
+      await this.assertNotLastManager(tx, id, null);
       const memberships = await tx.$executeRaw`
         UPDATE membership SET valid_to = greatest(now(), valid_from + interval '1 millisecond'), updated_by = ${hub.user.id}::uuid
         WHERE user_id = ${id}::uuid AND (valid_to IS NULL OR valid_to > now())`;
@@ -162,11 +261,18 @@ export class AdminController {
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      // Local sign-in: their browser sessions cannot be refreshed any more (ADR 0006).
+      await tx.$queryRaw`SELECT revoke_local_refresh_tokens(${id}::uuid, 'ACCESS_ENDED')`;
+      // A3: their future shifts are flagged to control (the planner itself is not edited).
+      const staff = await tx.staff.findFirst({ where: { userId: id }, select: { id: true } });
+      const flagged = staff
+        ? await flagFutureShifts(tx, hub.orgId as string, staff.id, 'ACCESS_ENDED')
+        : 0;
       await audit(this.db, tx, hub, {
         action: 'admin.user.revoke',
         entity: 'app_user',
         entityId: id,
-        summary: { memberships, devices: devices.count, reasonLength: reason.length },
+        summary: { memberships, devices: devices.count, reason, futureBookingsFlagged: flagged },
       });
       this.cache.evictUser(id);
       return { revokedMemberships: memberships, revokedDevices: devices.count };
@@ -272,6 +378,48 @@ export class AdminController {
     });
   }
 
+  // ---- people directory (owner and assignee pickers) -------------------------
+  /**
+   * Active members of this organisation with their role names, for "assign to" pickers. Names only:
+   * no email or contact details, so any member may see it.
+   */
+  @OrgMember()
+  @Get('people')
+  async people(@Hub() hub: HubRequestContext): Promise<{ data: PersonDto[] }> {
+    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
+      tx.membership.findMany({
+        where: {
+          OR: [{ validTo: null }, { validTo: { gt: new Date() } }],
+          user: { status: 'ACTIVE' },
+        },
+        include: {
+          user: { select: { id: true, displayName: true } },
+          role: { select: { key: true, name: true } },
+        },
+      }),
+    );
+    const byUser = new Map<string, PersonDto>();
+    for (const m of rows) {
+      if (m.role.key === 'PLATFORM_SUPPORT') continue;
+      const p = byUser.get(m.userId) ?? {
+        id: m.user.id,
+        displayName: m.user.displayName,
+        roleKeys: [],
+        roleNames: [],
+        locationIds: [],
+      };
+      if (!p.roleKeys.includes(m.role.key)) {
+        p.roleKeys.push(m.role.key);
+        p.roleNames.push(m.role.name);
+      }
+      if (m.locationId && !p.locationIds.includes(m.locationId)) p.locationIds.push(m.locationId);
+      byUser.set(m.userId, p);
+    }
+    return {
+      data: [...byUser.values()].sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    };
+  }
+
   // ---- settings ------------------------------------------------------------
   @OrgMember()
   @Get('settings')
@@ -289,10 +437,28 @@ export class AdminController {
     @Req() req: HubRequest,
     @Body() raw: unknown,
   ): Promise<SettingsResponse> {
-    const patch = body(SettingsPatch, raw);
+    const parsed = body(SettingsPatch, raw);
+    // Only the keys actually sent change; a default never overwrites what is stored.
+    const sent = new Set(Object.keys((raw ?? {}) as object));
+    const patch = Object.fromEntries(Object.entries(parsed).filter(([k]) => sent.has(k)));
     const version = ifMatchVersion(req);
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const o = await tx.organisation.findUniqueOrThrow({ where: { id: hub.orgId as string } });
+      const people = [
+        ...(parsed.deputies ?? []).flatMap((d) => [d.leadUserId, d.deputyUserId]),
+        ...(parsed.speakUpGuardianUserId ? [parsed.speakUpGuardianUserId] : []),
+      ];
+      for (const userId of new Set(people)) {
+        const n = await tx.membership.count({
+          where: { userId, OR: [{ validTo: null }, { validTo: { gt: new Date() } }] },
+        });
+        if (n === 0)
+          throw new HubError(
+            'VALIDATION_FAILED',
+            400,
+            'Deputies, leads and the guardian must be current members of this organisation',
+          );
+      }
       const next = OrgSettings.parse({ ...(o.settings as object), ...patch });
       const r = await tx.organisation.updateMany({
         where: { id: o.id, version },
@@ -314,21 +480,82 @@ export class AdminController {
   @RequirePermission('admin.support.view')
   @Get('support-access-grants')
   async grants(@Hub() hub: HubRequestContext): Promise<{ data: SupportGrantDto[] }> {
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.supportAccessGrant.findMany({ orderBy: { startsAt: 'desc' }, take: 100 }),
-    );
-    const now = new Date();
-    return {
-      data: rows.map((g) => ({
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.supportAccessGrant.findMany({
+        orderBy: { startsAt: 'desc' },
+        take: 100,
+      });
+      const ends = await tx.supportAccessEnd.findMany({
+        where: { grantId: { in: rows.map((g) => g.id) } },
+      });
+      const names = await userNames(
+        tx,
+        rows.map((g) => g.approvedBy),
+      );
+      const now = new Date();
+      return {
+        data: rows.map((g) => {
+          const end = ends.find((e) => e.grantId === g.id) ?? null;
+          return {
+            id: g.id,
+            supportUserId: g.supportUserId,
+            supportUserName: 'Platform support',
+            approvedBy: g.approvedBy,
+            approvedByName: names.get(g.approvedBy) ?? 'Unknown',
+            reason: g.reason,
+            startsAt: g.startsAt.toISOString(),
+            endsAt: g.endsAt.toISOString(),
+            endedEarlyAt: end?.endedAt.toISOString() ?? null,
+            endedEarlyReason: end?.reason ?? null,
+            active: !end && g.startsAt <= now && g.endsAt > now,
+          };
+        }),
+      };
+    });
+  }
+
+  /** A4: end support access before its time is up. The grant itself is never edited. */
+  @RequirePermission('admin.support.approve')
+  @Post('support-access-grants/:id/end')
+  @HttpCode(200)
+  async endGrant(
+    @Hub() hub: HubRequestContext,
+    @Param('id') rawId: string,
+    @Body() raw: unknown,
+  ): Promise<SupportGrantDto> {
+    const id = uuidParam(rawId);
+    const { reason } = body(SupportGrantEnd, raw);
+    if (hub.support) throw new HubError('FORBIDDEN', 403);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const g = await tx.supportAccessGrant.findUnique({ where: { id } });
+      if (!g) throw notFound();
+      if (await tx.supportAccessEnd.findUnique({ where: { grantId: id } }))
+        throw new HubError('CONFLICT', 409, 'This support access has already been ended');
+      const now = await dbNow(tx);
+      if (g.endsAt <= now)
+        throw new HubError('CONFLICT', 409, 'This support access has already expired');
+      const end = await tx.supportAccessEnd.create({
+        data: { organisationId: g.organisationId, grantId: id, endedBy: hub.user.id, reason },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'admin.support.end',
+        entity: 'support_access_grant',
+        entityId: id,
+        summary: { reason },
+      });
+      this.cache.evictUser(g.supportUserId);
+      return {
         id: g.id,
         supportUserId: g.supportUserId,
         approvedBy: g.approvedBy,
         reason: g.reason,
         startsAt: g.startsAt.toISOString(),
         endsAt: g.endsAt.toISOString(),
-        active: g.startsAt <= now && g.endsAt > now,
-      })),
-    };
+        endedEarlyAt: end.endedAt.toISOString(),
+        endedEarlyReason: reason,
+        active: false,
+      };
+    });
   }
 
   @RequirePermission('admin.support.approve')
@@ -373,6 +600,31 @@ export class AdminController {
   }
 
   // ---- helpers -------------------------------------------------------------
+  /** A3: an organisation always keeps at least one registered manager. */
+  private async assertNotLastManager(
+    tx: TenantTx,
+    userId: string,
+    membershipIds: string[] | null,
+  ): Promise<void> {
+    const current = { OR: [{ validTo: null }, { validTo: { gt: new Date() } }] };
+    const managers = await tx.membership.findMany({
+      where: { ...current, role: { key: 'REGISTERED_MANAGER' } },
+      select: { id: true, userId: true },
+    });
+    const losing = managers.filter(
+      (m) => m.userId === userId && (membershipIds === null || membershipIds.includes(m.id)),
+    );
+    if (losing.length === 0) return;
+    const remaining = managers.filter((m) => !losing.some((l) => l.id === m.id));
+    if (remaining.length === 0)
+      throw new HubError(
+        'CONFLICT',
+        409,
+        'This is the only registered manager. ' +
+          'Give someone else the registered manager role first.',
+      );
+  }
+
   private assertKnownPermissions(keys: readonly string[]): void {
     const unknown = keys.filter((k) => !(ALL_PERMISSION_KEYS as readonly string[]).includes(k));
     if (unknown.length)
@@ -402,6 +654,12 @@ export class AdminController {
       include: { rolePermissions: true },
     });
     if (!role) throw new HubError('NOT_FOUND', 404, 'Role or location not available');
+    if (NON_INVITABLE_ROLE_KEYS.includes(role.key))
+      throw new HubError(
+        'FORBIDDEN',
+        403,
+        'Support access is granted for a limited time under Support access, not as a role',
+      );
     this.assertCanGrant(
       hub,
       role.rolePermissions.map((p) => p.permissionKey),

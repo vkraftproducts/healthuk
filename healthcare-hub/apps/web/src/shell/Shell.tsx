@@ -1,6 +1,9 @@
-import { Link, Outlet } from '@tanstack/react-router';
+import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
+import { supportBannerText } from '@hub/contracts';
 import { StatusBadge } from '@hub/ui';
-import { NAV_ITEMS } from '../nav.js';
+import { BrandMark } from '../brand.js';
+import { fmtDateTime } from '../components.js';
+import { NAV_ITEMS, canSee } from '../nav.js';
 import { useList, useOne } from '../pages/settings/hooks.js';
 import { useApp } from './AppContext.js';
 
@@ -17,31 +20,48 @@ const londonTime = new Intl.DateTimeFormat('en-GB', {
 const SERVICE_NAME: Record<string, string> = {
   ambulance: 'Ambulance service',
   dental: 'Dental practice',
-  'care-home': 'Care home',
+  care_home: 'Care home',
 };
 
-/** "Example organisation / Watford / Ambulance service" from the user's scope. */
+/** "Exora International Ltd / London / Ambulance service" from the user's scope. */
 function useScope(orgId: string | null) {
   const { me } = useApp();
-  const org = useOne<{ sectorPacks?: string[] }>(orgId ? `/api/v1/organisations/${orgId}` : null);
-  const locs = useList(orgId ? `/api/v1/organisations/${orgId}/locations` : '', !!orgId);
   const mine = me.memberships.filter((m) => m.organisationId === orgId);
+  const known = mine.find((m) => Array.isArray(m.sectorPacks))?.sectorPacks;
+  const org = useOne<{ sectorPacks?: string[] }>(
+    orgId && !known ? `/api/v1/organisations/${orgId}` : null,
+  );
+  const locs = useList(orgId ? `/api/v1/organisations/${orgId}/locations` : '', !!orgId);
   const list = Array.isArray(locs.data) ? (locs.data as { id: string; name: string }[]) : [];
   const allLocations = mine.some((m) => m.locationId === null);
   const visible = allLocations ? list : list.filter((l) => mine.some((m) => m.locationId === l.id));
   const location = visible.length === 1 ? visible[0]!.name : 'All locations';
-  const packs = Array.isArray(org.data?.sectorPacks) ? org.data.sectorPacks : [];
+  const packs = known ?? (Array.isArray(org.data?.sectorPacks) ? org.data.sectorPacks : []);
   const service = packs.length === 1 ? (SERVICE_NAME[packs[0]!] ?? 'All services') : 'All services';
-  return { location, service, role: mine[0]?.roleName ?? null };
+  return { location, service, role: mine[0]?.roleName ?? null, packs: known ?? null };
 }
 
 export function Shell() {
-  const { me, orgId, setOrgId, refresh, lastUpdated, sourceOk, signOut } = useApp();
+  const { me, orgId, setOrgId, refresh, lastUpdated, sourceOk, live, signOut } = useApp();
   const orgs = [
     ...new Map(me.memberships.map((m) => [m.organisationId, m.organisationName])).entries(),
   ];
   const activeOrg = orgs.find(([id]) => id === orgId)?.[1];
   const scope = useScope(orgId);
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const page = NAV_ITEMS.filter((n) => n.to !== '/').find(
+    (n) => path === n.to || path.startsWith(`${n.to}/`),
+  );
+  const crumbs = [activeOrg ?? 'No organisation', scope.location, scope.service];
+  if (page) crumbs.push(page.label);
+  const support = me.support ?? null;
+  const alerts = useOne<{ open: number; critical: number }>(
+    orgId && !support ? '/api/v1/alerts/count' : null,
+  );
+  const router = useRouter();
+  // Opened directly (nothing to go back to): the dashboard is the way out.
+  const goBack = () =>
+    router.history.canGoBack() ? router.history.back() : void router.navigate({ to: '/' });
 
   return (
     <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
@@ -52,11 +72,13 @@ export function Shell() {
         Skip to main content
       </a>
 
-      <aside className="on-dark flex shrink-0 flex-col bg-hub-navy text-white md:sticky md:top-0 md:h-screen md:w-60">
-        <div className="px-5 pb-3 pt-6 text-[15px] font-bold tracking-wide">HEALTHCARE HUB</div>
+      <aside className="on-dark flex shrink-0 flex-col bg-hub-navy text-white md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto">
+        <div className="px-5 pb-3 pt-6">
+          <BrandMark compact />
+        </div>
         <nav aria-label="Primary" className="px-3">
           <ul className="flex flex-wrap gap-1 md:block md:space-y-1.5">
-            {NAV_ITEMS.map((item) => (
+            {NAV_ITEMS.filter((item) => canSee(item, me.permissions, scope.packs)).map((item) => (
               <li key={item.to}>
                 <Link
                   to={item.to}
@@ -68,7 +90,9 @@ export function Shell() {
                     className: 'bg-hub-teal font-semibold text-white',
                   }}
                 >
-                  {item.label}
+                  {item.to === '/' && !me.permissions.includes('dashboard.view')
+                    ? 'Home'
+                    : item.label}
                 </Link>
               </li>
             ))}
@@ -112,15 +136,38 @@ export function Shell() {
       <div className="min-w-0 flex-1 space-y-5 p-4 md:p-6">
         <header className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-hub-line bg-white px-5 py-3.5">
           <nav aria-label="Breadcrumb">
-            <ol className="flex flex-wrap gap-x-3 font-semibold text-hub-navy">
-              <li>{activeOrg ?? 'No organisation'}</li>
-              <li aria-hidden="true">/</li>
-              <li>{scope.location}</li>
-              <li aria-hidden="true">/</li>
-              <li aria-current="page">{scope.service}</li>
-            </ol>
+            <button
+              type="button"
+              onClick={goBack}
+              title="Go back"
+              aria-label={`Go back: ${crumbs.join(' / ')}`}
+              className="flex flex-wrap gap-x-3 text-left font-semibold text-hub-navy underline-offset-2 hover:underline"
+            >
+              {crumbs.map((crumb, i) => (
+                <span key={crumb} className="flex gap-x-3">
+                  {i > 0 && <span aria-hidden="true">/</span>}
+                  {crumb}
+                </span>
+              ))}
+            </button>
           </nav>
           <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-hub-muted">
+            {typeof alerts.data?.open === 'number' && (
+              <>
+                <Link
+                  to="/alerts"
+                  className="font-medium text-hub-navy underline-offset-2 hover:underline"
+                  aria-label={
+                    `Alerts: ${alerts.data.open} open` +
+                    (alerts.data.critical ? `, ${alerts.data.critical} critical` : '')
+                  }
+                >
+                  Alerts {alerts.data.open}
+                  {alerts.data.critical > 0 && ` (${alerts.data.critical} critical)`}
+                </Link>
+                <span aria-hidden="true">|</span>
+              </>
+            )}
             <time dateTime={new Date().toISOString()}>{londonDate.format(new Date())}</time>
             <span aria-hidden="true">|</span>
             <button
@@ -132,6 +179,22 @@ export function Shell() {
             </button>
             <span aria-hidden="true">|</span>
             <span>Last updated {lastUpdated ? londonTime.format(lastUpdated) : '—'}</span>
+            {live && (
+              <>
+                <span aria-hidden="true">|</span>
+                <span data-testid="live-state" className="inline-flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
+                  />
+                  {live === 'live'
+                    ? 'Live'
+                    : live === 'connecting'
+                      ? 'Connecting…'
+                      : 'Reconnecting… figures may be out of date'}
+                </span>
+              </>
+            )}
             {sourceOk ? (
               <StatusBadge status="GREEN" reason="all sources available" />
             ) : (
@@ -139,6 +202,15 @@ export function Shell() {
             )}
           </div>
         </header>
+        {support && (
+          <div
+            role="status"
+            className="rounded-lg border border-amber-700 bg-amber-50 px-5 py-3 text-sm text-amber-950"
+          >
+            <strong>Support access, read-only.</strong>{' '}
+            {supportBannerText(fmtDateTime(support.endsAt))}
+          </div>
+        )}
         <main id="main" tabIndex={-1}>
           <Outlet />
         </main>

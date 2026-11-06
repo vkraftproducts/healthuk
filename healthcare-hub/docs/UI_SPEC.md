@@ -6,7 +6,7 @@ Desktop-first (1280–1920), usable at 1024; responsive down to tablet. WCAG 2.2
 ## Global layout
 
 - Left sidebar nav: Dashboard, Staff, Vehicles and assets, Compliance, Premises safety,
-  Work planner, Reports, Settings; organisation name at bottom ("Example organisation").
+  Work planner, Reports, Settings; organisation name at bottom ("Exora International Ltd").
 - Top bar: breadcrumb `Organisation / Location / Service` (each a switcher), current date,
   **Refresh** button, "Last updated HH:MM | All sources available" (or warning per source).
 - Footer label on every screen during pilot: none (wireframe footers are doc-only).

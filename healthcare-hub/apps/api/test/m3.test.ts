@@ -2,7 +2,16 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import pg from 'pg';
 import type { Db } from '@hub/db';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  completeChecks,
+  ensureRoleRequirement,
+  makeApp,
+  recordSchedule3,
+  sign,
+  uploadAndVerify,
+} from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -65,11 +74,8 @@ const approve = (id: string, role: string, sub = 'dev|hr') =>
 
 async function activeStaff(roles: string[] = ['DRIVER']): Promise<J> {
   const s = await newStaff();
-  for (const to of ['CHECKS_IN_PROGRESS', 'READY_FOR_REVIEW'])
-    expect((await move(s.id, to)).status).toBe(201);
-  for (const r of roles) expect((await approve(s.id, r)).status).toBe(201);
-  expect((await move(s.id, 'APPROVED_FOR_ROLE')).status).toBe(201);
-  expect((await move(s.id, 'ACTIVE')).status).toBe(201);
+  expect((await move(s.id, 'CHECKS_IN_PROGRESS')).status).toBe(201);
+  await activateStaff(app, ORG, s.id, roles);
   return s;
 }
 async function userId(email: string): Promise<string> {
@@ -160,7 +166,8 @@ describe('staff register and views [HR-01]', () => {
     const s = await newStaff({ jobTitle: 'Driver' });
     expect(s).toMatchObject({
       lifecycleState: 'CANDIDATE',
-      overallStatus: 'NOT_APPLICABLE',
+      overallStatus: 'GREY',
+      checksSetUp: false,
       version: 1,
     });
     const dup = await call('POST', '/api/v1/staff', {
@@ -240,12 +247,54 @@ describe('lifecycle [HR-01]', () => {
     const s = await newStaff();
     expect((await move(s.id, 'ACTIVE')).body.code).toBe('TRANSITION_NOT_ALLOWED');
     await move(s.id, 'CHECKS_IN_PROGRESS');
-    await move(s.id, 'READY_FOR_REVIEW');
+    // Nothing started yet: cannot be ready for review.
+    const early = await move(s.id, 'READY_FOR_REVIEW');
+    expect([early.status, early.body.detail]).toEqual([
+      422,
+      'Start checks for at least one role before moving to Ready for review.',
+    ]);
+    // Reg 19 gate: a role's checks must be verified before approval (finding 46).
+    await ensureRoleRequirement(app, ORG, 'CARE_ASSISTANT');
+    const started = await call('POST', `/api/v1/staff/${s.id}/role-checks`, {
+      sub: 'dev|hr',
+      body: { role: 'CARE_ASSISTANT' },
+    });
+    expect(started.status).toBe(201);
+    expect(started.body.blockers.length).toBeGreaterThan(0);
+    const unverified = await approve(s.id, 'CARE_ASSISTANT');
+    expect([unverified.status, unverified.body.code]).toEqual([422, 'TRANSITION_NOT_ALLOWED']);
+    expect(unverified.body.checks.length).toBe(started.body.blockers.length);
+    expect((await move(s.id, 'READY_FOR_REVIEW')).status).toBe(422);
+    await uploadAndVerify(
+      app,
+      ORG,
+      (started.body.blockers as J[]).map((b) => b.instanceId),
+    ); // HR uploads, manager verifies
+    expect((await move(s.id, 'READY_FOR_REVIEW')).status).toBe(201);
     const noRole = await move(s.id, 'APPROVED_FOR_ROLE');
     expect([noRole.status, noRole.body.code]).toEqual([422, 'TRANSITION_NOT_ALLOWED']);
     expect((await approve(s.id, 'CARE_ASSISTANT', 'dev|dispatcher')).status).toBe(403);
+    // Two-person rule: the manager verified everything, so cannot also approve.
+    expect((await approve(s.id, 'CARE_ASSISTANT', 'dev|manager')).body.code).toBe(
+      'FOUR_EYES_REQUIRED',
+    );
+    // Schedule 3: a regulated role also needs the full staff file before approval (task 18).
+    const noFile = await approve(s.id, 'CARE_ASSISTANT');
+    expect([noFile.status, noFile.body.code, noFile.body.detail]).toEqual([
+      422,
+      'TRANSITION_NOT_ALLOWED',
+      expect.stringMatching(/Schedule 3 staff file is incomplete/),
+    ]);
+    expect(noFile.body.checks.map((c: J) => c.code)).toContain('SCHEDULE3_DBS');
+    await recordSchedule3(app, ORG, s.id);
     expect((await approve(s.id, 'CARE_ASSISTANT')).status).toBe(201);
     expect((await approve(s.id, 'CARE_ASSISTANT')).status).toBe(409);
+    // A role with nothing set up can never be approved (nothing could be checked).
+    const unset = await approve(s.id, 'PARAMEDIC');
+    expect([unset.status, unset.body.detail]).toEqual([
+      422,
+      expect.stringMatching(/no requirements set up/),
+    ]);
     expect((await move(s.id, 'APPROVED_FOR_ROLE')).status).toBe(201);
     const active = await move(s.id, 'ACTIVE');
     expect(active.body.lifecycleState).toBe('ACTIVE');
@@ -381,20 +430,24 @@ describe('role requirements and recalculation [HR-03]', () => {
     const item = crew.requirements.find((r: J) => r.templateId === tid);
     expect(item).toMatchObject({ status: 'GREY', required: true, subjectId: SEED_IDS.staffCrew });
 
-    // A care assistant does not need it; approving them as a driver adds it (role change, HR-03).
+    // A care assistant does not need it; starting driver checks adds it (role change, HR-03).
     const s = await activeStaff(['CARE_ASSISTANT']);
-    expect((await call('GET', `/api/v1/staff/${s.id}`)).body.requirements).toHaveLength(0);
-    await approve(s.id, 'DRIVER');
+    const before = (await call('GET', `/api/v1/staff/${s.id}`)).body;
+    expect(before.requirements.some((r: J) => r.templateId === tid)).toBe(false);
+    await completeChecks(app, ORG, s.id, ['DRIVER']);
+    expect((await approve(s.id, 'DRIVER')).status).toBe(201);
     const after = (await call('GET', `/api/v1/staff/${s.id}`)).body;
-    expect(after.requirements.map((r: J) => r.templateId)).toEqual([tid]);
-    expect(after.overallStatus).toBe('GREY');
+    expect(after.requirements.find((r: J) => r.templateId === tid)).toMatchObject({
+      required: true,
+      status: 'GREEN',
+    });
 
     const m = (await call('GET', '/api/v1/staff/training-matrix?role=DRIVER')).body;
     expect(m.columns.some((c: J) => c.templateId === tid)).toBe(true);
     const row = m.rows.find((r: J) => r.staffId === s.id);
     expect(row.cells.find((c: J) => c.templateId === tid)).toMatchObject({
       required: true,
-      status: 'GREY',
+      status: 'GREEN',
     });
 
     // Revoking the role keeps the item on record but it stops counting.
@@ -405,8 +458,10 @@ describe('role requirements and recalculation [HR-03]', () => {
     });
     expect(rev.body).toMatchObject({ active: false, revokeReason: 'Stepped back from driving' });
     const revoked = (await call('GET', `/api/v1/staff/${s.id}`)).body;
-    expect(revoked.requirements[0]).toMatchObject({ templateId: tid, required: false });
-    expect(revoked.overallStatus).toBe('NOT_APPLICABLE');
+    expect(revoked.requirements.find((r: J) => r.templateId === tid)).toMatchObject({
+      required: false,
+    });
+    expect(revoked.checksSetUp).toBe(true); // still has care assistant checks
 
     const list = (await call('GET', '/api/v1/staff/role-requirements')).body.data as J[];
     const mapping = list.find((r) => r.templateId === tid)!;
@@ -454,6 +509,7 @@ describe('readiness for a job window [RULES_ENGINE §3]', () => {
       ).result,
     ).toBe('FAIL');
 
+    // A typed licence record alone is not proof (finding 66): blocked until verified.
     await call('POST', `/api/v1/staff/${s.id}/licences`, {
       body: {
         data: {
@@ -464,6 +520,20 @@ describe('readiness for a job window [RULES_ENGINE §3]', () => {
         },
       },
     });
+    const unverified = (await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body;
+    expect(unverified.state).toBe('BLOCKED');
+    expect(unverified.checks.find((c: J) => c.code === 'LICENCE_NOT_VERIFIED')).toMatchObject({
+      result: 'FAIL',
+      overridable: false,
+    });
+    const lic = await call('POST', '/api/v1/requirements/instances', {
+      body: {
+        templateId: await staffTemplate('DRIVING-LICENCE'),
+        subjectType: 'STAFF',
+        subjectId: s.id,
+      },
+    });
+    await uploadAndVerify(app, ORG, [lic.body.id]);
     expect((await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body.state).toBe('READY');
     const c1 = (await call('GET', `${base}&role=DRIVER&licenceCategory=C1`)).body;
     expect(c1.state).toBe('BLOCKED');

@@ -1,7 +1,7 @@
 # Run Healthcare Hub locally (Windows) and test M0–M7
 
 Everything here is local and synthetic: a Postgres container, a development-only sign-in
-server (mock OIDC) and the seeded "Example organisation / Watford" data. Commands are for
+server (mock OIDC) and the seeded "Exora International Ltd / London" data. Commands are for
 **PowerShell** in the repository folder:
 
 ```powershell
@@ -43,11 +43,11 @@ docker compose ps             # wait until postgres shows "healthy"
 pnpm build                    # builds the shared packages (and generates the Prisma client)
 pnpm db:bootstrap             # creates roles hub_app / hub_migrator; hands them the hub database
 pnpm db:migrate               # applies migrations 0001 … 0010
-pnpm db:seed                  # synthetic Example organisation / Watford
+pnpm db:seed                  # synthetic Exora International Ltd / London
 ```
 
 Expected: `bootstrap complete`, `applied: 0001_foundations.sql, … 0010_m7_crew.sql`, and
-`seeded Example organisation / Watford`. Re-running migrate or seed is safe.
+`seeded Exora International Ltd / London`. Re-running migrate or seed is safe.
 
 ## 4. Start the stack
 
@@ -67,7 +67,7 @@ Invoke-RestMethod http://localhost:4000/readyz      # status: ready, database: o
 ```
 
 Open **http://localhost:5173**. The sign-in page lists the seeded synthetic users: pick
-**Dev Manager** (registered manager) and select **Sign in**.
+**Manager** (registered manager) and select **Sign in**.
 
 ### Give the crew a shift for today
 
@@ -82,6 +82,20 @@ records a synthetic licence check for ST-0042, and books, allocates and offers o
 Expect `"allocated": true` and a job code such as `J-100`. Run it again on another day for a
 new shift (on the same day it is refused: no double booking).
 
+### Load a realistic working day
+
+With the API and mock sign-in running:
+
+```bash
+pnpm demo:data
+```
+
+This adds synthetic staff, vehicles, defects, requirements with verified evidence, shifts, today's jobs, risks and events through the real API, with dates relative to today. Running it again does nothing. To start again from empty: `docker compose down -v`, then repeat the database steps above.
+
+### Live updates
+
+The header shows **Live** while the screen is connected. Changes by anyone in the organisation appear within a couple of seconds, with no reload. If the connection drops, the header says so and it reconnects by itself.
+
 ### Sign in as someone else (web)
 
 Select **Sign out** at the bottom of the left-hand menu, then pick another user on the sign-in
@@ -89,15 +103,69 @@ page. Each browser tab keeps its own sign-in, so two tabs can be two different u
 
 | User            | Name                     | Role                            | Good for                         |
 | --------------- | ------------------------ | ------------------------------- | -------------------------------- |
-| `manager`       | Dev Manager              | Registered manager              | Everything; dashboard            |
-| `admin`         | Ola Admin                | Organisation admin              | Settings, users, roles (M1)      |
+| `manager`       | Manager                  | Registered manager              | Everything; dashboard            |
 | `hr`            | Hana Rowe                | HR lead                         | Staff, checks, verification (M3) |
 | `fleet`         | Finn Lee                 | Fleet lead                      | Vehicles, defects, VDIs (M4)     |
 | `governance`    | Gina Ode                 | Governance lead                 | Audits, policies, events (M5)    |
-| `dispatcher`    | Dev Dispatcher           | Dispatcher                      | Work planner, allocation (M6)    |
+| `dispatcher`    | Dispatcher               | Dispatcher                      | Work planner, allocation (M6)    |
 | `crew`/`crew2`  | Alex Morgan / Sam Taylor | Crew                            | Crew API and app (M7)            |
 | `auditor`       | Audrey Ward              | Auditor (read-only)             | Checking that read-only holds    |
 | `other-manager` | Other Manager            | Manager, **other organisation** | Tenant isolation checks          |
+
+### Username and password sign-in (`AUTH_MODE=local`)
+
+Instead of picking a user, you can sign in with a real username and password checked by the API
+(ADR 0006: an approved exception to ADR 0003 for local and pilot use; Entra remains the production
+target). Privileged roles also need a 6-digit code from an authenticator app.
+
+| Variable                 | Where                       | Value                                                                                     |
+| ------------------------ | --------------------------- | ----------------------------------------------------------------------------------------- |
+| `AUTH_MODE`              | `.env` (API)                | `dev` (default: mock sign-in), `local` (username + password), `entra` (production target) |
+| `VITE_AUTH_MODE`         | `apps\web\.env.local` (web) | Same values; must match `AUTH_MODE`. Unset = today's behaviour                            |
+| `LOCAL_AUTH_PRIVATE_KEY` | `.env` (API)                | PKCS#8 PEM (EC P-256 or RSA 2048+), `\n` allowed. Optional in dev; required in production |
+| `SEED_LOCAL_PASSWORD`    | `.env` (seed)               | Password given to every seeded user. Default `Hub-Dev-Password-2026!` (local dev only)    |
+
+1. Add `AUTH_MODE=local` to `.env` and `VITE_AUTH_MODE=local` to `apps\web\.env.local`.
+2. `pnpm db:migrate` (applies `0038_local_credentials.sql`), then `pnpm db:seed` and
+   `pnpm db:seed:sectors`. Seeding adds a credential for every seeded user that has none; it
+   never overwrites a changed password and does nothing when `NODE_ENV=production`.
+3. `pnpm dev`, open http://localhost:5173: the page says "Sign in with your organisation
+   account". The username is the email address below; the password is `SEED_LOCAL_PASSWORD`
+   (default `Hub-Dev-Password-2026!`).
+4. Users marked MFA see "Set up multi-factor sign-in" the first time: select **Show my set-up
+   key**, add the key (or the `otpauth://` link) to an authenticator app as a time-based key, and
+   enter the code. Later sign-ins ask for a code only.
+
+Notes: without `LOCAL_AUTH_PRIVATE_KEY` the API generates a signing key at start-up, so
+restarting the API signs everyone out. The token lives in memory only, so reloading the page (or
+15 minutes passing) means signing in again. In this mode the API accepts only its own tokens: the
+mock sign-in server refuses to mint any, and the crew app (which uses OIDC) cannot sign in. Five
+wrong passwords lock an account for 15 minutes; an administrator can issue a temporary password
+(`POST /api/v1/admin/users/{id}/reset-password`) that must be changed at the next sign-in.
+
+| Profile                      | Username                        | MFA needed |
+| ---------------------------- | ------------------------------- | ---------- |
+| Registered manager           | `manager@example.test`          | Yes        |
+| Director                     | `director@example.test`         | Yes        |
+| HR lead                      | `hr@example.test`               | Yes        |
+| Fleet lead                   | `fleet@example.test`            | No         |
+| Premises lead                | `premises@example.test`         | No         |
+| Organisation administrator   | `orgadmin@example.test`         | Yes        |
+| Governance lead              | `governance@example.test`       | Yes        |
+| Dispatcher                   | `dispatcher@example.test`       | No         |
+| Auditor (read only)          | `auditor@example.test`          | Yes        |
+| Crew                         | `crew@example.test`             | No         |
+| Crew                         | `crew2@example.test`            | No         |
+| Manager, other organisation  | `other.manager@example.test`    | Yes        |
+| Crew, other organisation     | `other.crew@example.test`       | No         |
+| Dental registered manager    | `dental-manager@example.test`   | Yes        |
+| Dental organisation admin    | `dental-admin@example.test`     | Yes        |
+| Care home registered manager | `carehome-manager@example.test` | Yes        |
+| Care home organisation admin | `carehome-admin@example.test`   | Yes        |
+
+Dental and care-home users exist after `pnpm db:seed:sectors`. If a seeded account gets locked
+or you forget a changed password locally, `docker compose down -v` and repeat section 3 (or ask
+an organisation administrator to reset it).
 
 ## 5. What to look at, milestone by milestone
 

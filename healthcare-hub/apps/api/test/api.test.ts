@@ -111,7 +111,7 @@ describe('/me and organisation selection', () => {
     expect(body.memberships).toEqual([
       expect.objectContaining({
         organisationId: SEED_IDS.orgExample,
-        organisationName: 'Example organisation',
+        organisationName: 'Exora International Ltd',
         roleKey: 'REGISTERED_MANAGER',
       }),
     ]);
@@ -284,5 +284,27 @@ describe('logging redaction (no PII in logs)', () => {
       expect(out).not.toContain(secret);
     }
     expect(out).toContain('/api/v1/jobs');
+  });
+});
+
+describe('browser access', () => {
+  it('lets the web app use every method the API serves, including the evidence upload PUT', async () => {
+    for (const method of ['PUT', 'PATCH', 'DELETE']) {
+      const res = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/v1/evidence/blob/token',
+        headers: { origin: 'http://localhost:5173', 'access-control-request-method': method },
+      });
+      expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+      expect(String(res.headers['access-control-allow-methods'])).toContain(method);
+    }
+  });
+  it('still refuses other origins', async () => {
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/v1/evidence/blob/token',
+      headers: { origin: 'https://attacker.example', 'access-control-request-method': 'PUT' },
+    });
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 });

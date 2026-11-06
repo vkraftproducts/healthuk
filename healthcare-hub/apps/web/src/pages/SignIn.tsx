@@ -1,20 +1,31 @@
+import { AUTH_MESSAGES } from '@hub/contracts';
 import { useState, type FormEvent } from 'react';
-import { DEV_USERS, type AuthClient } from '../auth.js';
+import { DEV_USERS, DEV_USER_GROUPS, LocalAuthClient, type AuthClient } from '../auth.js';
+import { BRAND, BrandMark } from '../brand.js';
+import { LocalSignIn } from './LocalSignIn.js';
 
-/**
- * Sign-in page. Production: Microsoft Entra External ID (ADR-0003). Development: pick one of the
- * seeded synthetic users; the mock sign-in server mints a token for them (never in production).
- */
-export function SignIn({
-  auth,
-  onSignedIn,
-  notice,
-}: {
+interface SignInProps {
   auth: AuthClient;
   onSignedIn: () => void;
   /** Why the user is here again, e.g. "Your session ended". */
   notice?: string | null;
-}) {
+}
+
+/**
+ * Sign-in page. Local mode (VITE_AUTH_MODE=local, ADR 0006): username and password checked by the
+ * API. Otherwise the existing Entra / development pick-a-user page below.
+ */
+export function SignIn(props: SignInProps) {
+  if (props.auth instanceof LocalAuthClient)
+    return <LocalSignIn auth={props.auth} onSignedIn={props.onSignedIn} notice={props.notice} />;
+  return <IdpSignIn {...props} />;
+}
+
+/**
+ * Production: Microsoft Entra External ID (ADR-0003). Development: pick one of the seeded
+ * synthetic users; the mock sign-in server mints a token for them (never in production).
+ */
+function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
   const [user, setUser] = useState<string>(DEV_USERS[0].key);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +38,11 @@ export function SignIn({
       await auth.signIn(auth.kind === 'dev' ? user : undefined);
       onSignedIn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed.');
+      const offline =
+        err instanceof TypeError || (typeof navigator !== 'undefined' && !navigator.onLine);
+      setError(
+        offline ? AUTH_MESSAGES.offline : err instanceof Error ? err.message : 'Sign-in failed.',
+      );
     } finally {
       setBusy(false);
     }
@@ -36,18 +51,20 @@ export function SignIn({
   return (
     <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
       <section
-        aria-label="About Healthcare Hub"
+        aria-label={`About ${BRAND.name}`}
         className="flex flex-col justify-between bg-hub-navy px-8 py-8 text-white md:w-[40%] md:px-12 md:py-12"
       >
-        <div className="text-[15px] font-bold tracking-wide">HEALTHCARE HUB</div>
-        <div className="my-10 max-w-md space-y-4">
-          <p className="text-3xl font-bold leading-tight">
-            Operations and compliance, in one place.
-          </p>
-          <p className="text-slate-200">
-            Staff readiness, vehicles, audits, premises safety and the work planner for your
-            service. Evidence counts only once it is verified.
-          </p>
+        <div>
+          <BrandMark />
+          <div className="mb-10 mt-6 max-w-sm space-y-4">
+            <p className="text-lg font-medium leading-snug text-slate-100">
+              Operations and compliance, in one place.
+            </p>
+            <p className="text-slate-200">
+              Staff readiness, vehicles, audits, premises safety and the work planner for your
+              service. Evidence counts only once it is verified.
+            </p>
+          </div>
         </div>
         <p className="text-xs text-slate-300">
           Internal measures are not CQC ratings. Access is logged.
@@ -98,31 +115,34 @@ export function SignIn({
                 <legend className="mb-2 text-sm font-semibold text-hub-navy">
                   Development sign-in: choose a synthetic user
                 </legend>
-                <div className="space-y-1.5">
-                  {DEV_USERS.map((u) => (
-                    <label
-                      key={u.key}
-                      className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-1.5 text-sm ${
-                        user === u.key
-                          ? 'border-hub-teal bg-teal-50 ring-1 ring-hub-teal'
-                          : 'border-hub-line hover:bg-hub-row'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="dev-user"
-                        value={u.key}
-                        checked={user === u.key}
-                        onChange={() => setUser(u.key)}
-                        className="accent-hub-teal"
-                      />
-                      <span className="flex flex-1 flex-wrap justify-between gap-x-3">
-                        <span className="font-semibold text-hub-navy">{u.name}</span>
-                        <span className="text-hub-muted">{u.role}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                {Object.entries(DEV_USER_GROUPS).map(([org, heading]) => (
+                  <div key={org} role="group" aria-label={heading} className="space-y-1.5">
+                    <p className="pt-2 text-xs font-semibold uppercase text-hub-muted">{heading}</p>
+                    {DEV_USERS.filter((u) => u.org === org).map((u) => (
+                      <label
+                        key={u.key}
+                        className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-1.5 text-sm ${
+                          user === u.key
+                            ? 'border-hub-teal bg-teal-50 ring-1 ring-hub-teal'
+                            : 'border-hub-line hover:bg-hub-row'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="dev-user"
+                          value={u.key}
+                          checked={user === u.key}
+                          onChange={() => setUser(u.key)}
+                          className="accent-hub-teal"
+                        />
+                        <span className="flex flex-1 flex-wrap justify-between gap-x-3">
+                          <span className="font-semibold text-hub-navy">{u.name}</span>
+                          <span className="text-hub-muted">{u.role}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
               </fieldset>
               <button
                 type="submit"
@@ -133,7 +153,8 @@ export function SignIn({
               </button>
               <p className="text-xs text-hub-muted">
                 Development only. Production uses Microsoft sign-in; these synthetic accounts come
-                from <code>pnpm db:seed</code>.
+                from <code>pnpm db:seed</code> (dental and care home users from{' '}
+                <code>pnpm db:seed:sectors</code>).
               </p>
             </form>
           )}

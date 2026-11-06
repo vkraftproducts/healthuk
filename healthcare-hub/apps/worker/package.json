@@ -15,6 +15,7 @@
     "@hub/config": "workspace:*",
     "@hub/db": "workspace:*",
     "@hub/domain": "workspace:*",
+    "nodemailer": "10.2.0",
     "pg-boss": "12.37.1",
     "pino": "10.4.0",
     "zod": "4.6.7"

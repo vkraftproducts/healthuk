@@ -1,11 +1,13 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { MeResponse } from '@hub/contracts';
+import { ALL_PERMISSION_KEYS, AUTH_MESSAGES, type MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ApiClient } from '../src/api.js';
+import { ApiError, type ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
 import { NAV_ITEMS } from '../src/nav.js';
+
+beforeEach(() => sessionStorage.clear());
 
 const ORG_A = '01900000-0000-7000-8000-000000000001';
 const ORG_B = '01900000-0000-7000-8000-000000000002';
@@ -14,12 +16,12 @@ const me = (orgId: string | null, permissions: string[]): MeResponse => ({
   user: {
     id: '01900000-0000-7000-8000-000000000101',
     email: 'm@example.test',
-    displayName: 'Dev Manager',
+    displayName: 'Manager',
   },
   memberships: [
     {
       organisationId: ORG_A,
-      organisationName: 'Example organisation',
+      organisationName: 'Meadowbank Patient Transport',
       locationId: null,
       roleKey: 'REGISTERED_MANAGER',
       roleName: 'Registered manager',
@@ -46,9 +48,9 @@ function renderApp(api: Pick<ApiClient, 'me' | 'readyz'> & Partial<ApiClient>, p
 }
 
 describe('web shell', () => {
-  it('shows every module in the left navigation', async () => {
+  it('shows every module in the left navigation to a role that can use them all', async () => {
     renderApp({
-      me: async (o) => me(o, ['dashboard.view']),
+      me: async (o) => me(o, [...ALL_PERMISSION_KEYS]),
       readyz: async () => ({ status: 'ready' }),
     });
     const nav = await screen.findByRole('navigation', { name: 'Primary' });
@@ -60,6 +62,53 @@ describe('web shell', () => {
     );
   });
 
+  it('shows each role only the pages it can use, and refuses the others [task 16]', async () => {
+    const crew = [
+      'crew.today.view',
+      'staff.self.view',
+      'staff.self.update',
+      'fleet.expense.submit',
+      'compliance.policy.acknowledge',
+      'speakup.raise',
+    ];
+    const shell = {
+      me: async (o: string | null) => me(o, crew),
+      readyz: async () => ({ status: 'ready' as const }),
+      get: async (path: string) =>
+        path === '/api/v1/staff/me'
+          ? {
+              profile: {
+                displayName: 'Alex Morgan',
+                staffNo: 'ST-1',
+                lifecycleState: 'ACTIVE',
+                roles: [],
+                activeRestrictions: [],
+              },
+              requirements: [],
+              corrections: [],
+            }
+          : { data: [] },
+    };
+    const view = renderApp(shell);
+    const nav = await screen.findByRole('navigation', { name: 'Primary' });
+    const names = within(nav)
+      .getAllByRole('link')
+      .map((l) => l.textContent);
+    // Crew submit expenses in the crew app, so Vehicles is not listed for them (finding 21).
+    expect(names).toEqual(expect.arrayContaining(['Home', 'My record', 'Compliance', 'Speak up']));
+    expect(names).not.toContain('Vehicles and assets');
+    // WORKFLOWS A1 and F0: crew land on their own record, with a pointer to the crew app.
+    expect(await screen.findByRole('heading', { name: 'My record' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Crew app' })).toHaveTextContent(
+      /crew app on your work phone/,
+    );
+    view.unmount();
+    renderApp(shell, '/settings');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your role does not give access to this page.',
+    );
+  });
+
   it("lists only the user's organisations and re-queries with the selected one", async () => {
     const meFn = vi.fn(async (o: string | null) => me(o, ['dashboard.view']));
     renderApp({ me: meFn, readyz: async () => ({ status: 'ready' }) });
@@ -68,7 +117,7 @@ describe('web shell', () => {
       within(select)
         .getAllByRole('option')
         .map((o) => o.textContent),
-    ).toEqual(['Example organisation', 'Second organisation']);
+    ).toEqual(['Meadowbank Patient Transport', 'Second organisation']);
     await userEvent.selectOptions(select, ORG_B);
     await waitFor(() => expect(meFn).toHaveBeenCalledWith(ORG_B));
   });
@@ -118,6 +167,179 @@ describe('web shell', () => {
     expect(screen.getByText(/not CQC ratings/)).toBeInTheDocument();
   });
 
+  it('goes back to the previous page from the breadcrumb, or home when there is none', async () => {
+    const shell = {
+      me: async (o: string | null) => me(o, ['premises.item.view', 'staff.profile.view_basic']),
+      readyz: async () => ({ status: 'ready' as const }),
+      get: async () => ({ data: [] }),
+    };
+    const current = (name: string) =>
+      expect(screen.getByRole('link', { name })).toHaveAttribute('aria-current', 'page');
+    const back = () => screen.findByRole('button', { name: /^Go back: / });
+
+    const view = renderApp(shell, '/premises');
+    await userEvent.click(await screen.findByRole('link', { name: 'Staff' }));
+    await waitFor(() => current('Staff'));
+    await userEvent.click(await back());
+    await waitFor(() => current('Premises safety'));
+    view.unmount();
+
+    renderApp(shell, '/staff');
+    await userEvent.click(await back());
+    await waitFor(() => current('Home'));
+  });
+
+  it('refetches what is on screen when the server signals a change, and says it is live', async () => {
+    let signal: (e: 'ready' | 'change') => void = () => {};
+    const get = vi.fn(async () => ({ data: [] }));
+    renderApp(
+      {
+        me: async (o) => me(o, []),
+        readyz: async () => ({ status: 'ready' }),
+        get,
+        watchChanges: (_org, onEvent, abort) =>
+          new Promise<void>((resolve) => {
+            signal = onEvent;
+            onEvent('ready');
+            abort.addEventListener('abort', () => resolve());
+          }),
+      },
+      '/staff',
+    );
+    await waitFor(() => expect(screen.getByTestId('live-state')).toHaveTextContent('Live'));
+    await waitFor(() => expect(get).toHaveBeenCalled());
+    const before = get.mock.calls.length;
+    signal('change');
+    await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('says when live updates are down rather than implying the figures are current', async () => {
+    renderApp({
+      me: async (o) => me(o, []),
+      readyz: async () => ({ status: 'ready' }),
+      watchChanges: async () => {
+        throw new Error('offline');
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('live-state')).toHaveTextContent(/Reconnecting.*out of date/),
+    );
+  });
+
+  it('links each action row to the page that deals with it', async () => {
+    const row = (item: string, module: string, link: Record<string, string>) => ({
+      key: item,
+      module,
+      item,
+      ownerUserId: null,
+      deadline: null,
+      status: 'RED',
+      reasonText: 'Needs action',
+      tiles: [],
+      link,
+    });
+    const rows = [
+      row('Vehicle', 'FLEET', { type: 'VEHICLE', id: 'v1' }),
+      row('Audit', 'COMPLIANCE', { type: 'AUDIT_RUN', id: 'a1' }),
+      row('Action', 'COMPLIANCE', { type: 'ACTION', id: 'x' }),
+      row('Event', 'EVENTS', { type: 'EVENT', id: 'x' }),
+      row('Job', 'JOBS', { type: 'JOB', id: 'x' }),
+      row('Staff check', 'STAFF', {
+        type: 'REQUIREMENT',
+        id: 'x',
+        subjectType: 'STAFF',
+        subjectId: 's1',
+      }),
+      row('Vehicle check', 'FLEET', {
+        type: 'REQUIREMENT',
+        id: 'x',
+        subjectType: 'VEHICLE',
+        subjectId: 'v2',
+      }),
+      row('Fire check', 'PREMISES', {
+        type: 'REQUIREMENT',
+        id: 'x',
+        subjectType: 'PREMISES',
+        subjectId: 'p1',
+      }),
+    ];
+    renderApp({
+      me: async (o) => me(o, ['dashboard.view']),
+      readyz: async () => ({ status: 'ready' }),
+      get: async (p: string) =>
+        p.startsWith('/api/v1/dashboard/summary')
+          ? {
+              tiles: {},
+              modules: [],
+              operations: {},
+              coverage: { percent: null },
+              lastRefreshedAt: '2026-10-30T09:00:00Z',
+              sources: [],
+            }
+          : { data: rows },
+    });
+    const expected: [string, string][] = [
+      ['Fleet: Vehicle', '/vehicles/v1'],
+      ['Compliance: Audit', '/compliance/audits/a1'],
+      ['Compliance: Action', '/compliance?tab=actions'],
+      ['Events: Event', '/compliance?tab=events'],
+      ['Jobs: Job', '/planner'],
+      ['Staff: Staff check', '/staff/s1'],
+      ['Fleet: Vehicle check', '/vehicles/v2'],
+      ['Premises: Fire check', '/premises'],
+    ];
+    for (const [name, href] of expected)
+      expect(await screen.findByRole('link', { name })).toHaveAttribute('href', href);
+  });
+
+  it('opens the Compliance tab named in the URL, unless the user may not see it', async () => {
+    const get = async () => ({ data: [] });
+    const readyz = async () => ({ status: 'ready' }) as const;
+    const view = renderApp(
+      { me: async (o) => me(o, ['compliance.audit.view']), readyz, get },
+      '/compliance?tab=actions',
+    );
+    expect(await screen.findByRole('tab', { name: 'Actions' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    view.unmount();
+    renderApp(
+      { me: async (o) => me(o, ['compliance.audit.view']), readyz, get },
+      '/compliance?tab=events',
+    );
+    expect(await screen.findByRole('tab', { name: 'Audits' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('selects a tab the role can open; no Audits tab without audit access [81, 90]', async () => {
+    const asked: string[] = [];
+    renderApp(
+      {
+        me: async (o) =>
+          me(o, ['compliance.requirement.view', 'compliance.policy.acknowledge', 'dashboard.view']),
+        readyz: async () => ({ status: 'ready' }) as const,
+        get: async (path: string) => {
+          asked.push(path);
+          return { data: [] };
+        },
+      },
+      '/compliance',
+    );
+    expect(await screen.findByRole('tab', { name: 'Policies' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.queryByRole('tab', { name: 'Audits' })).not.toBeInTheDocument();
+    expect(asked.some((p) => p.includes('/audits'))).toBe(false);
+    // The breadcrumb follows the page, not a fixed trail (finding 17).
+    expect(screen.getByRole('button', { name: /^Go back: / })).toHaveAccessibleName(
+      /Meadowbank Patient Transport \/ .* \/ Compliance$/,
+    );
+  });
+
   it('shows "source unavailable" rather than stale or zero figures when the dashboard cannot load', async () => {
     renderApp({
       me: async (o) => me(o, ['dashboard.view']),
@@ -129,7 +351,10 @@ describe('web shell', () => {
 
   it('hides dashboard content without the permission (server still enforces)', async () => {
     renderApp({ me: async (o) => me(o, []), readyz: async () => ({ status: 'ready' }) });
-    expect(await screen.findByRole('alert')).toHaveTextContent('do not have permission');
+    expect(await screen.findByText(/Your role has no pages on the web yet/)).toHaveAttribute(
+      'role',
+      'status',
+    );
     expect(screen.queryByText('Overdue tasks')).toBeNull();
   });
 
@@ -148,7 +373,124 @@ describe('web shell', () => {
       },
       readyz: async () => ({ status: 'ready' }),
     });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Source unavailable');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'We cannot reach the server. Try again.',
+    );
+  });
+
+  it('says no account was found for a sign-in with no Hub account [finding 92]', async () => {
+    renderApp({
+      me: async () => {
+        throw new ApiError(401, 'UNAUTHENTICATED', AUTH_MESSAGES.unknownAccount);
+      },
+      readyz: async () => ({ status: 'ready' }),
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'No account found for this sign-in. Ask your administrator to invite you.',
+    );
+  });
+
+  it('says access has ended for a deactivated account', async () => {
+    renderApp({
+      me: async () => {
+        throw new ApiError(401, 'USER_INACTIVE');
+      },
+      readyz: async () => ({ status: 'ready' }),
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your access to this organisation has ended.',
+    );
+  });
+
+  it('hides ambulance modules for a dental organisation [finding 95]', async () => {
+    const dental = (o: string | null): MeResponse => {
+      const base = me(o, [...ALL_PERMISSION_KEYS]);
+      return {
+        ...base,
+        memberships: base.memberships.map((m) => ({ ...m, sectorPacks: ['dental'] })),
+      };
+    };
+    renderApp({ me: async (o) => dental(o), readyz: async () => ({ status: 'ready' }) });
+    const nav = await screen.findByRole('navigation', { name: 'Primary' });
+    expect(within(nav).queryByRole('link', { name: 'Vehicles and assets' })).toBeNull();
+    expect(within(nav).queryByRole('link', { name: 'Work planner' })).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'Staff' })).toBeInTheDocument();
+  });
+
+  it('refuses an ambulance page opened directly in a dental organisation', async () => {
+    renderApp(
+      {
+        me: async (o) => {
+          const base = me(o, [...ALL_PERMISSION_KEYS]);
+          return {
+            ...base,
+            memberships: base.memberships.map((m) => ({ ...m, sectorPacks: ['dental'] })),
+          };
+        },
+        readyz: async () => ({ status: 'ready' }),
+      },
+      '/vehicles',
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your role does not give access to this page.',
+    );
+  });
+
+  it('shows only the tiles the server says the role may see [finding 23, 88]', async () => {
+    const summary = {
+      tiles: { overdue: 1, dueSoon: 0, blockedVehicles: 0, jobsToday: 0, unverified: 0 },
+      modules: [{ module: 'STAFF', status: 'AMBER', count: 1, label: 'unverified' }],
+      operations: { jobsAwaitingAllocation: 0, acknowledgementsDue: 0 },
+      criticalOpen: 0,
+      coverage: {
+        numerator: 1,
+        denominator: 2,
+        exclusions: 0,
+        percent: 50,
+        label: 'Internal measure — not a CQC rating',
+      },
+      lastRefreshedAt: '2026-10-30T09:00:00Z',
+      sources: [{ name: 'requirements', ok: true }],
+      visibleModules: ['STAFF'],
+      visibleTiles: ['overdue', 'dueSoon'],
+    };
+    renderApp({
+      me: async (o) => me(o, ['dashboard.view', 'staff.profile.view_basic']),
+      readyz: async () => ({ status: 'ready' }),
+      get: async (p: string) =>
+        p.startsWith('/api/v1/dashboard/summary') ? summary : { data: [] },
+    });
+    expect(await screen.findByLabelText('Overdue tasks: 1')).toBeInTheDocument();
+    const figures = screen.getByLabelText('Key figures');
+    expect(within(figures).queryByText('Blocked vehicles')).toBeNull();
+    expect(within(figures).queryByText('Jobs today')).toBeNull();
+    expect(screen.queryByText('Jobs awaiting allocation')).toBeNull();
+    expect(screen.getByText(/areas your role covers \(Registered manager\)/)).toBeInTheDocument();
+  });
+
+  it('says when a role has no dashboard figures at all', async () => {
+    renderApp({
+      me: async (o) => me(o, ['dashboard.view']),
+      readyz: async () => ({ status: 'ready' }),
+      get: async (p: string) =>
+        p.startsWith('/api/v1/dashboard/summary')
+          ? {
+              tiles: { overdue: 0, dueSoon: 0, blockedVehicles: 0, jobsToday: 0, unverified: 0 },
+              modules: [],
+              operations: { jobsAwaitingAllocation: 0, acknowledgementsDue: 0 },
+              criticalOpen: 0,
+              coverage: { numerator: 0, denominator: 0, exclusions: 0, percent: null, label: '' },
+              lastRefreshedAt: '2026-10-30T09:00:00Z',
+              sources: [],
+              visibleModules: [],
+              visibleTiles: [],
+            }
+          : { data: [] },
+    });
+    expect(
+      await screen.findByText(/Your role has no dashboard figures in this organisation/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Overdue tasks')).toBeNull();
   });
 });
 
@@ -185,7 +527,7 @@ describe('settings screens', () => {
   });
 
   it('lists locations and hides admin tabs and actions without permission', async () => {
-    renderApp(api(['dashboard.view']), '/settings');
+    renderApp(api(['dashboard.view', 'admin.audit.view']), '/settings');
     expect(
       await within(await screen.findByRole('main')).findByText('Watford', {}, { timeout: 4000 }),
     ).toBeTruthy();
@@ -211,5 +553,39 @@ describe('settings screens', () => {
       path: '/api/v1/admin/users',
       body: { email: 'new@example.test', roleId: 'r1' },
     });
+  });
+});
+
+describe('stored organisation selection (task 23)', () => {
+  const GONE = '01900000-0000-7000-8000-0000000000ff';
+  beforeEach(() => sessionStorage.clear());
+
+  it('drops a stored organisation that is not among the memberships', async () => {
+    sessionStorage.setItem('hub.orgId', GONE);
+    const asked: (string | null)[] = [];
+    renderApp({
+      me: async (o) => {
+        asked.push(o);
+        return { ...me(o === GONE ? null : o, ['dashboard.view']) };
+      },
+      readyz: async () => ({ status: 'ready' }),
+    });
+    expect(await screen.findByRole('navigation', { name: 'Primary' })).toBeTruthy();
+    await waitFor(() => expect(sessionStorage.getItem('hub.orgId')).toBe(ORG_A));
+    expect(asked.at(-1)).toBe(ORG_A);
+  });
+
+  it('recovers when the server refuses the stored organisation', async () => {
+    sessionStorage.setItem('hub.orgId', GONE);
+    renderApp({
+      me: async (o) => {
+        if (o === GONE) throw new ApiError(403, 'FORBIDDEN');
+        return me(o, ['dashboard.view']);
+      },
+      readyz: async () => ({ status: 'ready' }),
+    });
+    expect(await screen.findByRole('navigation', { name: 'Primary' })).toBeTruthy();
+    expect(screen.queryByText(/Your access to this organisation has ended/)).toBeNull();
+    await waitFor(() => expect(sessionStorage.getItem('hub.orgId')).toBe(ORG_A));
   });
 });

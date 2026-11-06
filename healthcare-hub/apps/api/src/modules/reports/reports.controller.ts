@@ -9,7 +9,7 @@ import {
   type ReportDataDto,
   type ReportDefinitionDto,
 } from '@hub/contracts';
-import { addDays, londonDate, monthPeriod, REPORTS, type ISODate } from '@hub/rules';
+import { addDays, canRunReport, londonDate, monthPeriod, REPORTS, type ISODate } from '@hub/rules';
 import { RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
 import { audit, body } from '../../common/http.js';
@@ -25,11 +25,16 @@ const MAX_DAYS = 366;
 export class ReportsController {
   constructor(@Inject(DB) private readonly db: Db) {}
 
+  /** Only the reports this role may run here: about areas it can see, in a sector that has them. */
   @RequirePermission('reports.view')
   @Get('reports')
-  list(): { data: ReportDefinitionDto[] } {
+  async list(@Hub() hub: HubRequestContext): Promise<{ data: ReportDefinitionDto[] }> {
+    const packs = await this.packs(hub);
     return {
-      data: REPORTS.map((r) => ({ ...r, measures: r.measures.map((m) => ({ ...m })) })),
+      data: REPORTS.filter((r) => canRunReport(r.id, hub.permissions, packs)).map((r) => ({
+        ...r,
+        measures: r.measures.map((m) => ({ ...m })),
+      })),
     };
   }
 
@@ -137,6 +142,12 @@ export class ReportsController {
   ): Promise<ReportData> {
     const id = ReportId.safeParse(rawId);
     if (!id.success) throw notFound();
+    if (!canRunReport(id.data, hub.permissions, await this.packs(hub)))
+      throw new HubError(
+        'FORBIDDEN',
+        403,
+        'Your role cannot see what this report covers in this organisation',
+      );
     const f = body(ReportQuery, q);
     const now = new Date();
     const today = londonDate(now);
@@ -164,5 +175,15 @@ export class ReportsController {
         });
       return d;
     });
+  }
+
+  private async packs(hub: HubRequestContext): Promise<string[] | null> {
+    const org = await this.db.withTenant(tenantOf(hub), (tx) =>
+      tx.organisation.findUnique({
+        where: { id: hub.orgId as string },
+        select: { sectorPacks: true },
+      }),
+    );
+    return org?.sectorPacks ?? null;
   }
 }

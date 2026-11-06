@@ -25,6 +25,7 @@
     "bootstrap": "tsx --env-file-if-exists=../../.env scripts/bootstrap.ts",
     "migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
     "seed": "tsx --env-file-if-exists=../../.env scripts/seed.ts",
+    "seed:sectors": "tsx --env-file-if-exists=../../.env scripts/seed-sectors.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

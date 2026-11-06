@@ -1,4 +1,7 @@
+import { daysUntil, type ISODate } from './dates.js';
+
 export type DefectSeverity = 'CRITICAL' | 'MAJOR' | 'MINOR';
+export type DefectStatus = 'OPEN' | 'REPAIRING' | 'REPAIRED' | 'RELEASED';
 
 export interface DefectEffects {
   blockVehicle: boolean;
@@ -39,4 +42,29 @@ export function canReleaseVehicle(i: {
   if (!i.repairCompleted) return { ok: false, reason: 'Repair is not complete' };
   if (i.openStopUseDefects > 0) return { ok: false, reason: 'Other stop-use defects remain open' };
   return { ok: true, reason: null };
+}
+
+export type RepairDueState = 'NONE' | 'DUE' | 'DUE_SOON' | 'DUE_TODAY' | 'OVERDUE' | 'DONE';
+
+/**
+ * Where a defect stands against its repair deadline (date-only, Europe/London, ALERT-01).
+ * Once the repair is signed off the deadline no longer applies; release is tracked separately.
+ */
+export function repairDueState(
+  d: { status: DefectStatus; repairDeadline: ISODate | null },
+  now: Date,
+  soonDays = 7,
+): { state: RepairDueState; daysLeft: number | null } {
+  if (d.status === 'REPAIRED' || d.status === 'RELEASED') return { state: 'DONE', daysLeft: null };
+  if (!d.repairDeadline) return { state: 'NONE', daysLeft: null };
+  const daysLeft = daysUntil(d.repairDeadline, now);
+  const state =
+    daysLeft < 0
+      ? 'OVERDUE'
+      : daysLeft === 0
+        ? 'DUE_TODAY'
+        : daysLeft <= soonDays
+          ? 'DUE_SOON'
+          : 'DUE';
+  return { state, daysLeft };
 }

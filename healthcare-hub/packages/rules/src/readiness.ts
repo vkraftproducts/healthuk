@@ -154,6 +154,8 @@ export interface VehicleInput {
   quarantined: boolean;
   openCriticalDefect: boolean;
   maintenanceOverdue: boolean;
+  /** D2: which limit was passed, so the reason says "by mileage" or "by date". */
+  maintenanceOverdueBy?: 'DATE' | 'MILEAGE' | null;
   requirements: RequirementEntry[];
 }
 
@@ -171,7 +173,15 @@ export function vehicleReadiness(input: VehicleInput, window: Window): Readiness
   );
   checks.push(
     input.maintenanceOverdue
-      ? fail('MAINTENANCE', 'ROADWORTHY', 'Maintenance overdue by date or mileage')
+      ? fail(
+          'MAINTENANCE',
+          'ROADWORTHY',
+          input.maintenanceOverdueBy === 'MILEAGE'
+            ? 'Maintenance overdue by mileage'
+            : input.maintenanceOverdueBy === 'DATE'
+              ? 'Maintenance overdue by date'
+              : 'Maintenance overdue by date or mileage',
+        )
       : pass('MAINTENANCE', 'ROADWORTHY', 'Maintenance in date'),
   );
   for (const e of input.requirements) checks.push(requirementCheck(e, window));

@@ -7,6 +7,7 @@ import {
   complaintTargets,
   needsAction,
   repeatedSelections,
+  riskBandText,
   riskRating,
   summariseControl,
 } from '../src/index.js';
@@ -143,6 +144,52 @@ describe('risk, policy, events', () => {
     expect(complaintTargets('2026-10-30', { acknowledgeDays: 3, respondDays: 28 })).toEqual({
       acknowledgeBy: '2026-11-02',
       respondBy: '2026-11-27',
+    });
+  });
+
+  it('shows the risk band in words with its score (H4)', () => {
+    expect(riskBandText(1, 3)).toBe('Low 3');
+    expect(riskBandText(1, 5)).toBe('Medium 5');
+    expect(riskBandText(4, 4)).toBe('High 16');
+    expect(riskBandText(4, 5)).toBe('Extreme 20');
+  });
+
+  describe('optional event gates (H1)', () => {
+    const base = {
+      pendingObligations: 0,
+      candourFlagged: false,
+      candourDecided: false,
+      openActions: 0,
+    };
+
+    it('cannot leave triage when triage is recorded as not done; unknown triage does not block', () => {
+      expect(checkEventTransition({ ...base, from: 'TRIAGE', to: 'PROTECT', triaged: false })).toBe(
+        'NOT_TRIAGED',
+      );
+      expect(checkEventTransition({ ...base, from: 'TRIAGE', to: 'PROTECT', triaged: true })).toBe(
+        null,
+      );
+    });
+
+    it('cannot leave investigation without a PSIRF learning response when one is needed', () => {
+      const step = { ...base, from: 'INVESTIGATE', to: 'RESPOND' } as const;
+      expect(checkEventTransition({ ...step, learningResponseMissing: true })).toBe(
+        'LEARNING_RESPONSE_MISSING',
+      );
+      expect(checkEventTransition({ ...step, learningResponseMissing: false })).toBeNull();
+      expect(checkEventTransition(step)).toBeNull();
+    });
+
+    it('cannot close with candour steps or reporting decisions outstanding', () => {
+      const close = { ...base, from: 'LEARNING_VERIFIED', to: 'CLOSED' } as const;
+      expect(checkEventTransition({ ...close, candourStepsOutstanding: 2 })).toBe(
+        'CANDOUR_INCOMPLETE',
+      );
+      expect(checkEventTransition({ ...close, pendingObligations: 1 })).toBe(
+        'OBLIGATIONS_UNDECIDED',
+      );
+      expect(checkEventTransition({ ...close, candourStepsOutstanding: 0 })).toBeNull();
+      expect(checkEventTransition(close)).toBeNull();
     });
   });
 });

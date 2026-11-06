@@ -2,7 +2,12 @@ import type { TenantTx } from '@hub/db';
 import {
   addDays,
   checkOdometer,
+  londonDate,
   maintenanceState,
+  motRequired,
+  premisesIntervalStatus,
+  vehicleDocumentKind,
+  vehicleDocumentText,
   vehicleReadiness,
   equipmentReadiness,
   type Check,
@@ -27,9 +32,9 @@ export async function refreshVehicleStatus(tx: TenantTx, vehicleId: string): Pro
     where: { vehicleId, stopUse: true, status: OPEN_DEFECT },
   });
   const [status, reason] = v.offRoad
-    ? (['OFF_ROAD', 'Taken off the road by fleet'] as const)
+    ? (['OFF_ROAD', v.offRoadReason ?? 'Taken off the road by fleet'] as const)
     : v.quarantined
-      ? (['QUARANTINED', 'Quarantined by fleet'] as const)
+      ? (['QUARANTINED', v.quarantineReason ?? 'Quarantined by fleet'] as const)
       : stopUse > 0
         ? (['BLOCKED', `${stopUse} open stop-use defect${stopUse === 1 ? '' : 's'}`] as const)
         : (['AVAILABLE', null] as const);
@@ -79,25 +84,50 @@ export interface Capability {
   lost: string[];
 }
 
-/** FLT-08: quarantining or stop-use defects on fitted equipment reduce what the vehicle can do. */
+/**
+ * FLT-08 / D3: capability comes from fitted equipment that is not quarantined, has no stop-use
+ * defect and whose inspection regimes (LOLER, service, calibration) are in date.
+ */
 export async function vehicleCapability(tx: TenantTx, vehicleId: string): Promise<Capability> {
   const v = await tx.vehicle.findUniqueOrThrow({ where: { id: vehicleId } });
   const assets = await tx.equipmentAsset.findMany({
     where: { vehicleId, capability: { not: null }, status: { not: 'RETIRED' } },
     include: { defects: { where: { stopUse: true, status: OPEN_DEFECT }, select: { id: true } } },
   });
-  const down = (cap: string) =>
-    assets.filter(
-      (a) => a.capability === cap && (a.status === 'QUARANTINED' || a.defects.length > 0),
-    );
+  const outOfDate = new Set(
+    (
+      await tx.requirementInstance.findMany({
+        where: {
+          subjectType: 'EQUIPMENT',
+          subjectId: { in: assets.map((a) => a.id) },
+          status: 'RED',
+        },
+        select: { subjectId: true },
+      })
+    ).map((r) => r.subjectId),
+  );
+  const why = (a: (typeof assets)[number]) =>
+    a.status === 'QUARANTINED'
+      ? 'quarantined'
+      : a.defects.length > 0
+        ? 'has a stop-use defect'
+        : outOfDate.has(a.id)
+          ? 'is out of date'
+          : null;
+  const down = (cap: string) => assets.filter((a) => a.capability === cap && why(a) !== null);
   const lost: string[] = [];
-  for (const a of down('STRETCHER')) lost.push(`Stretcher ${a.assetTag} unavailable`);
-  for (const a of down('WHEELCHAIR')) lost.push(`Wheelchair equipment ${a.assetTag} unavailable`);
-  for (const a of down('CLINICAL')) lost.push(`Clinical kit ${a.assetTag} unavailable`);
+  for (const a of down('STRETCHER')) lost.push(`Stretcher ${a.assetTag} ${why(a)}`);
+  for (const a of down('WHEELCHAIR')) lost.push(`Wheelchair restraint ${a.assetTag} ${why(a)}`);
+  for (const a of down('CLINICAL')) lost.push(`Clinical kit ${a.assetTag} ${why(a)}`);
+  for (const a of down('BARIATRIC')) lost.push(`Bariatric equipment ${a.assetTag} ${why(a)}`);
+  // A vehicle with stretcher assets needs at least one usable; one without any keeps its flag.
+  const usable = (cap: string) =>
+    assets.some((a) => a.capability === cap && why(a) === null) ||
+    !assets.some((a) => a.capability === cap);
   return {
-    stretcher: v.stretcher && down('STRETCHER').length === 0,
-    wheelchairCapacity: down('WHEELCHAIR').length > 0 ? 0 : v.wheelchairCapacity,
-    clinicalKit: down('CLINICAL').length === 0,
+    stretcher: v.stretcher && usable('STRETCHER'),
+    wheelchairCapacity: usable('WHEELCHAIR') ? v.wheelchairCapacity : 0,
+    clinicalKit: usable('CLINICAL'),
     lost,
   };
 }
@@ -111,7 +141,7 @@ async function requirementEntries(
 ) {
   const instances = await tx.requirementInstance.findMany({
     where: { subjectType, subjectId },
-    include: { template: { select: { code: true } } },
+    include: { template: { select: { code: true, title: true } } },
   });
   const out = [];
   for (const i of instances) {
@@ -119,11 +149,71 @@ async function requirementEntries(
     out.push({
       instanceId: i.id,
       code: i.template.code,
+      title: i.template.title,
+      templateId: i.templateId,
       group,
       result,
       validFrom: verified?.validFrom ?? null,
       expiryDate: verified?.validTo ?? iso(i.expiryDate),
     });
+  }
+  return out;
+}
+
+async function missedOxygenChecks(
+  tx: TenantTx,
+  locationId: string | null,
+  now: Date,
+): Promise<string[]> {
+  if (!locationId) return [];
+  const items = await tx.premisesItem.findMany({
+    where: { locationId, controlArea: 'OXYGEN', applicable: true },
+  });
+  const out: string[] = [];
+  for (const p of items) {
+    const red = p.requirementInstanceId
+      ? (await tx.requirementInstance.findUnique({ where: { id: p.requirementInstanceId } }))
+          ?.status === 'RED'
+      : premisesIntervalStatus(p, londonDate(now))?.status === 'RED';
+    if (red) out.push(`Oxygen storage check missed at this base (${p.title})`);
+  }
+  return out;
+}
+
+/**
+ * D1: statutory documents the organisation requires for this vehicle (published, auto-applied
+ * templates for insurance, tax and, once three years old, MOT) that have no record on it.
+ */
+async function missingDocuments(
+  tx: TenantTx,
+  v: {
+    organisationId: string;
+    type: string;
+    firstRegisteredOn: Date | null;
+    year: number | null;
+  },
+  have: Set<string>,
+  now: Date,
+): Promise<string[]> {
+  const versions = await tx.requirementTemplateVersion.findMany({
+    where: { status: 'EFFECTIVE', subjectType: 'VEHICLE', organisationId: v.organisationId },
+    include: { template: { select: { code: true, title: true } } },
+  });
+  const out: string[] = [];
+  for (const ver of versions) {
+    if (have.has(ver.templateId)) continue;
+    const kind = vehicleDocumentKind(ver.template.code) ?? vehicleDocumentKind(ver.template.title);
+    if (!kind || kind === 'CONVERSION') continue;
+    // Only requirements meant for every vehicle (auto-applied) count as missing.
+    const rule = (ver.applicabilityRule ?? {}) as { autoApply?: boolean; types?: string[] };
+    if (!rule.autoApply) continue;
+    if (rule.types && rule.types.length > 0 && !rule.types.includes(v.type)) continue;
+    if (
+      kind === 'MOT' &&
+      !motRequired({ firstRegisteredOn: iso(v.firstRegisteredOn), year: v.year }, londonDate(now))
+    )
+      continue;
+    out.push(`${ver.template.title} missing`);
   }
   return out;
 }
@@ -145,15 +235,65 @@ export async function vehicleReadinessFor(
   const maintenance = plans.map((p) => planStatus(p, v.currentOdometer, a.window.end));
   const openCritical =
     (await tx.defect.count({ where: { vehicleId: v.id, stopUse: true, status: OPEN_DEFECT } })) > 0;
+  const overdue = maintenance.filter((m) => m.state === 'OVERDUE');
+  const entries = await requirementEntries(tx, 'VEHICLE', v.id, 'ROADWORTHY', a.now);
   const r = vehicleReadiness(
     {
       quarantined: v.quarantined || v.offRoad,
       openCriticalDefect: openCritical,
-      maintenanceOverdue: maintenance.some((m) => m.state === 'OVERDUE'),
-      requirements: await requirementEntries(tx, 'VEHICLE', v.id, 'ROADWORTHY', a.now),
+      maintenanceOverdue: overdue.length > 0,
+      maintenanceOverdueBy: overdue.some((m) => m.by === 'MILEAGE')
+        ? 'MILEAGE'
+        : overdue.length
+          ? 'DATE'
+          : null,
+      requirements: entries,
     },
     a.window,
   );
+  // D1/E3: statutory documents in plain words ("Insurance not verified", "MOT expired on ...").
+  for (const c of r.checks) {
+    const e = c.requirementInstanceId
+      ? entries.find((x) => x.instanceId === c.requirementInstanceId)
+      : undefined;
+    if (!e) continue;
+    c.reasonText = vehicleDocumentText(e.title, c, {
+      status: e.result.status,
+      expiryDate: e.expiryDate,
+    });
+  }
+  // Off road and quarantined say which, with the reason fleet gave.
+  const flagCheck = r.checks.find((c) => c.code === 'QUARANTINE');
+  if (flagCheck && flagCheck.result === 'FAIL')
+    flagCheck.reasonText = v.offRoad
+      ? `Vehicle is off road${v.offRoadReason ? `: ${v.offRoadReason}` : ''}`
+      : `Vehicle is quarantined${v.quarantineReason ? `: ${v.quarantineReason}` : ''}`;
+  for (const text of await missingDocuments(
+    tx,
+    v,
+    new Set(entries.map((e) => e.templateId)),
+    a.now,
+  )) {
+    r.checks.push({
+      code: 'DOCUMENT_MISSING',
+      group: 'ROADWORTHY',
+      result: 'FAIL',
+      reasonText: text,
+      overridable: false,
+    });
+    r.state = 'BLOCKED';
+  }
+  // J1: a missed oxygen storage check at the vehicle's base stops deployment.
+  for (const text of await missedOxygenChecks(tx, v.baseLocationId, a.now)) {
+    r.checks.push({
+      code: 'PREMISES_OXYGEN',
+      group: 'EQUIPMENT',
+      result: 'FAIL',
+      reasonText: text,
+      overridable: false,
+    });
+    r.state = 'BLOCKED';
+  }
   const capability = await vehicleCapability(tx, v.id);
   const suit: Check[] = [];
   const need = a.needs ?? {};
@@ -239,18 +379,28 @@ export async function applyAutoRequirements(
     kind: string;
     locationId: string | null;
     organisationId: string;
+    /** D1: a vehicle under three years old gets no MOT requirement yet. */
+    age?: { firstRegisteredOn?: ISODate | null; year?: number | null };
   },
   actorUserId: string,
   now: Date,
 ): Promise<number> {
   const versions = await tx.requirementTemplateVersion.findMany({
     where: { status: 'EFFECTIVE', subjectType: s.subjectType, organisationId: s.organisationId },
+    include: { template: { select: { code: true, title: true } } },
   });
   let n = 0;
   for (const v of versions) {
     const rule = (v.applicabilityRule ?? {}) as { autoApply?: boolean; types?: string[] };
     if (!rule.autoApply) continue;
     if (rule.types && rule.types.length > 0 && !rule.types.includes(s.kind)) continue;
+    if (
+      s.subjectType === 'VEHICLE' &&
+      s.age &&
+      (vehicleDocumentKind(v.template.code) ?? vehicleDocumentKind(v.template.title)) === 'MOT' &&
+      !motRequired(s.age, londonDate(now))
+    )
+      continue;
     const exists = await tx.requirementInstance.findFirst({
       where: { templateId: v.templateId, subjectType: s.subjectType, subjectId: s.subjectId },
       select: { id: true },
@@ -319,7 +469,7 @@ export async function recordOdometer(
     organisationId: string;
     reading: number;
     readOn: ISODate;
-    source: 'MANUAL' | 'VDI' | 'FUEL' | 'SERVICE';
+    source: 'MANUAL' | 'VDI' | 'FUEL' | 'SERVICE' | 'TELEMATICS';
     by: string;
   },
 ): Promise<{ id: string; reading: number; flags: string[] }> {

@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createHash } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -33,6 +34,8 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
   await fastify.register(cors, {
     origin: [deps.config.WEB_ORIGIN],
     credentials: true,
+    // The library's default leaves out PUT, which the browser needs for direct evidence uploads.
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: [
       'Authorization',
       'Content-Type',
@@ -45,6 +48,14 @@ export async function createApp(deps: AppDeps): Promise<NestFastifyApplication> 
   await fastify.register(rateLimit, {
     max: deps.config.NODE_ENV === 'test' ? 10_000 : deps.config.RATE_LIMIT_PER_MINUTE,
     timeWindow: '1 minute',
+    // Per user (DECISIONS M8): many staff can share one office IP. Unauthenticated routes,
+    // including password sign-in, stay keyed by IP.
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      return typeof auth === 'string' && auth.startsWith('Bearer ')
+        ? `t:${createHash('sha256').update(auth).digest('base64url').slice(0, 32)}`
+        : `ip:${req.ip}`;
+    },
     errorResponseBuilder: () => ({
       type: 'https://healthcare-hub.example/problems/rate-limited',
       title: 'Too many requests',

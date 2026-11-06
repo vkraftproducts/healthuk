@@ -3,6 +3,7 @@ import {
   auditOutcome,
   dashboardCounts,
   evidenceCoverage,
+  isNhsContractItem,
   isOverdue,
   jobDashboardRow,
   londonDate,
@@ -31,12 +32,14 @@ const START: Record<string, number> = {
   IMP: 1,
   DSR: 1,
   BRE: 1,
+  DPC: 1,
+  SPK: 1,
+  MTG: 1,
+  NTF: 1,
 };
-export async function nextCode(
-  tx: TenantTx,
-  orgId: string,
-  prefix: 'AUD' | 'ACT' | 'EVT' | 'RSK' | 'J' | 'IMP' | 'DSR' | 'BRE',
-): Promise<string> {
+export type CodePrefix =
+  'AUD' | 'ACT' | 'EVT' | 'RSK' | 'J' | 'IMP' | 'DSR' | 'BRE' | 'DPC' | 'SPK' | 'MTG' | 'NTF';
+export async function nextCode(tx: TenantTx, orgId: string, prefix: CodePrefix): Promise<string> {
   const rows = await tx.$queryRaw<
     { code: string }[]
   >`SELECT next_code(${orgId}::uuid, ${prefix}, ${START[prefix]}::int) AS code`;
@@ -47,7 +50,8 @@ export async function createAction(
   tx: TenantTx,
   a: {
     organisationId: string;
-    sourceType: 'FINDING' | 'EVENT' | 'RISK' | 'CORRESPONDENCE';
+    sourceType:
+      'FINDING' | 'EVENT' | 'RISK' | 'CORRESPONDENCE' | 'FEEDBACK' | 'MEETING' | 'PREMISES';
     sourceId: string;
     kind?: 'ACTION' | 'REAUDIT';
     title: string;
@@ -94,11 +98,14 @@ export async function refreshAuditOutcome(tx: TenantTx, runId: string): Promise<
     include: { findings: true },
   });
   if (run.status === 'SCHEDULED' || run.status === 'IN_PROGRESS') return;
+  // Only the latest submission counts; findings from before a reviewer's return stay as history.
+  const latest = Math.max(1, run.submissionNo);
+  const findings = run.findings.filter((f) => f.submissionNo === latest);
   const actions = await tx.action.findMany({
     where: { sourceType: 'FINDING', sourceId: { in: run.findings.map((f) => f.id) } },
   });
   const o = auditOutcome(
-    run.findings.map((f) => ({
+    findings.map((f) => ({
       result: f.result as AuditResult,
       severity: f.severity as Severity,
     })),
@@ -127,12 +134,15 @@ export interface ActionRowOut {
   module: Module;
   item: string;
   ownerUserId: string | null;
+  /** Owner's display name (organisation members only); null when unassigned or not a member. */
+  ownerName?: string | null;
   deadline: string | null;
   status: RagStatus;
   reasonText: string;
   /** Which tiles this row is counted in: every tile number equals its drill-down rows. */
   tiles: string[];
-  link: { type: string; id: string };
+  /** Requirements have no page of their own: subject says whose page shows them. */
+  link: { type: string; id: string; subjectType?: string; subjectId?: string };
 }
 
 const MODULE_OF: Record<string, Module> = {
@@ -148,17 +158,46 @@ const MODULE_OF: Record<string, Module> = {
  * Single source for tiles AND drill-down: the tiles are counted from the rows returned here, so
  * a tile can never disagree with its list (UAT-08).
  */
+export interface DashboardFilterIn {
+  locationId?: string | undefined;
+  serviceId?: string | undefined;
+  ownerUserId?: string | undefined;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  module?: string | undefined;
+  /** Modules the caller may see (permissions and sector packs); rows for others are dropped. */
+  modules?: readonly string[] | undefined;
+}
+
 export async function dashboardRows(
   tx: TenantTx,
-  f: { locationId?: string; module?: string },
+  f: DashboardFilterIn,
   now: Date,
 ): Promise<{ rows: ActionRowOut[]; results: (RequirementResult & { module: Module })[] }> {
   const today = londonDate(now);
-  const instances = await tx.requirementInstance.findMany({
+  const inRange = (d: string | null): boolean =>
+    d === null || ((!f.dateFrom || d >= f.dateFrom) && (!f.dateTo || d <= f.dateTo));
+  const ownerOk = (o: string | null): boolean => !f.ownerUserId || o === f.ownerUserId;
+  let serviceCode: string | null = null;
+  if (f.serviceId) {
+    const svc = await tx.serviceType.findUnique({ where: { id: f.serviceId } });
+    // An unknown / other-tenant service id matches nothing rather than everything.
+    serviceCode = svc?.code ?? '__none__';
+  }
+  const allInstances = await tx.requirementInstance.findMany({
     where: {
       ...(f.locationId ? { OR: [{ locationId: f.locationId }, { locationId: null }] } : {}),
+      ...(f.ownerUserId ? { ownerUserId: f.ownerUserId } : {}),
     },
-    include: { template: { select: { title: true } } },
+    include: {
+      template: { select: { title: true } },
+      templateVersion: { select: { applicabilityRule: true } },
+    },
+  });
+  const instances = allInstances.filter((i) => {
+    if (serviceCode === null) return true;
+    const svcs = ((i.templateVersion.applicabilityRule ?? {}) as { services?: string[] }).services;
+    return !svcs || svcs.length === 0 || svcs.includes(serviceCode);
   });
   // Names for subjects (staff no / callsign / asset tag / location) — IDs and codes, no PII beyond what the viewer already sees.
   const staff = await tx.staff.findMany({
@@ -207,6 +246,7 @@ export async function dashboardRows(
       daysUntil: null,
       module,
     };
+    if (!inRange(iso(i.dueDate ?? i.expiryDate ?? i.reviewDate))) continue;
     results.push(r);
     const tiles: string[] = [];
     if (r.status === 'RED' && r.reasonCode !== 'CRITICAL_FAILURE') tiles.push('overdue');
@@ -224,13 +264,14 @@ export async function dashboardRows(
       status: r.status,
       reasonText: r.reasonText,
       tiles,
-      link: { type: 'REQUIREMENT', id: i.id },
+      link: { type: 'REQUIREMENT', id: i.id, subjectType: i.subjectType, subjectId: i.subjectId },
     });
   }
   if (!f.module || f.module === 'FLEET') {
     for (const v of vehicles) {
       if (v.status === 'AVAILABLE') continue;
       if (f.locationId && v.baseLocationId !== f.locationId) continue;
+      if (f.ownerUserId) continue; // vehicles have no named owner; an owner filter hides them
       rows.push({
         key: `VEH:${v.id}`,
         module: 'FLEET',
@@ -244,10 +285,38 @@ export async function dashboardRows(
         link: { type: 'VEHICLE', id: v.id },
       });
     }
+    // Open critical defects count as critical findings (WORKFLOWS L1), whatever the date range.
+    if (!f.ownerUserId) {
+      const defects = await tx.defect.findMany({
+        where: { severity: 'CRITICAL', status: { in: ['OPEN', 'REPAIRING'] } },
+        select: { id: true, vehicleId: true, assetId: true, discoveredAt: true },
+      });
+      for (const d of defects) {
+        const v = d.vehicleId ? vehicles.find((x) => x.id === d.vehicleId) : undefined;
+        if (f.locationId && v && v.baseLocationId !== f.locationId) continue;
+        rows.push({
+          key: `DEF:${d.id}`,
+          module: 'FLEET',
+          item: `${v?.callsign ?? 'Equipment'} critical defect`,
+          ownerUserId: null,
+          deadline: null,
+          status: 'RED',
+          reasonText: 'Critical defect open – remains until repaired and released',
+          tiles: [],
+          link: d.vehicleId ? { type: 'VEHICLE', id: d.vehicleId } : { type: 'DEFECT', id: d.id },
+        });
+      }
+    }
   }
   if (!f.module || f.module === 'COMPLIANCE') {
-    const actions = await tx.action.findMany({ where: { status: { not: 'VERIFIED' } } });
+    const actions = await tx.action.findMany({
+      where: {
+        status: { not: 'VERIFIED' },
+        ...(f.ownerUserId ? { ownerUserId: f.ownerUserId } : {}),
+      },
+    });
     for (const a of actions) {
+      if (!inRange(iso(a.deadline))) continue;
       const late = isOverdue(iso(a.deadline)!, now);
       rows.push({
         key: `ACT:${a.id}`,
@@ -271,7 +340,8 @@ export async function dashboardRows(
       where: { severity: 'CRITICAL', run: { status: { not: 'CLOSED' } } },
       include: { run: true },
     });
-    for (const c of critical)
+    // Critical findings stay visible regardless of the date range (never hidden by a filter).
+    for (const c of critical.filter((x) => ownerOk(x.run.ownerUserId)))
       rows.push({
         key: `FND:${c.id}`,
         module: 'COMPLIANCE',
@@ -283,6 +353,83 @@ export async function dashboardRows(
         tiles: [],
         link: { type: 'AUDIT_RUN', id: c.runId },
       });
+    // Audits past their due date and not submitted (Overdue tasks and the sector tile).
+    const lateRuns = await tx.auditRun.findMany({
+      where: {
+        status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+        dueDate: { lt: new Date(`${today}T00:00:00Z`) },
+        ...(f.locationId ? { OR: [{ locationId: f.locationId }, { locationId: null }] } : {}),
+        ...(f.ownerUserId ? { ownerUserId: f.ownerUserId } : {}),
+      },
+      select: { id: true, code: true, title: true, ownerUserId: true, dueDate: true },
+    });
+    for (const r of lateRuns) {
+      if (!inRange(iso(r.dueDate))) continue;
+      rows.push({
+        key: `AUD:${r.id}`,
+        module: 'COMPLIANCE',
+        item: `${r.code} ${r.title}`,
+        ownerUserId: r.ownerUserId,
+        deadline: iso(r.dueDate),
+        status: 'RED',
+        reasonText: 'Audit overdue – not submitted',
+        tiles: ['overdue', 'auditsOverdue'],
+        link: { type: 'AUDIT_RUN', id: r.id },
+      });
+    }
+    // Regulator correspondence with a reply deadline (WORKFLOWS I1).
+    const letters = await tx.regulatoryCorrespondence.findMany({
+      where: {
+        status: 'OPEN',
+        deadline: { not: null },
+        ...(f.ownerUserId ? { ownerUserId: f.ownerUserId } : {}),
+      },
+      select: { id: true, regulator: true, subject: true, ownerUserId: true, deadline: true },
+    });
+    const soon = new Date(`${today}T00:00:00Z`);
+    soon.setUTCDate(soon.getUTCDate() + 30);
+    for (const c of letters) {
+      const due = iso(c.deadline)!;
+      if (!inRange(due)) continue;
+      const late = due < today;
+      rows.push({
+        key: `COR:${c.id}`,
+        module: 'COMPLIANCE',
+        item: `${c.regulator} correspondence: ${c.subject}`,
+        ownerUserId: c.ownerUserId,
+        deadline: due,
+        status: late ? 'RED' : 'AMBER',
+        reasonText: late ? 'Reply to the regulator overdue' : 'Reply to the regulator due',
+        tiles: late ? ['overdue'] : c.deadline! <= soon ? ['dueSoon'] : [],
+        link: { type: 'CORRESPONDENCE', id: c.id },
+      });
+    }
+    // Published policies whose review date has passed or falls in the next 30 days (G4).
+    const reviews = await tx.policyVersion.findMany({
+      where: { status: 'PUBLISHED', reviewDate: { not: null, lte: soon } },
+      select: {
+        id: true,
+        reviewDate: true,
+        document: { select: { id: true, code: true, title: true, ownerUserId: true } },
+      },
+    });
+    for (const v of reviews) {
+      if (!ownerOk(v.document.ownerUserId)) continue;
+      const due = iso(v.reviewDate)!;
+      if (!inRange(due)) continue;
+      const late = due < today;
+      rows.push({
+        key: `POL:${v.id}`,
+        module: 'COMPLIANCE',
+        item: `${v.document.code} ${v.document.title} review`,
+        ownerUserId: v.document.ownerUserId,
+        deadline: due,
+        status: late ? 'RED' : 'AMBER',
+        reasonText: late ? 'Policy review overdue' : 'Policy review due',
+        tiles: late ? ['overdue'] : ['dueSoon'],
+        link: { type: 'POLICY', id: v.document.id },
+      });
+    }
   }
   if (!f.module) {
     const obligations = await tx.reportingObligation.findMany({
@@ -290,6 +437,8 @@ export async function dashboardRows(
       include: { event: { select: { code: true, leadUserId: true } } },
     });
     for (const o of obligations) {
+      if (!ownerOk(o.event.leadUserId)) continue;
+      if (!inRange(o.deadlineAt ? londonDate(o.deadlineAt) : null)) continue;
       const late = o.deadlineAt ? o.deadlineAt < now : false;
       rows.push({
         key: `OBL:${o.id}`,
@@ -309,11 +458,14 @@ export async function dashboardRows(
       });
     }
   }
-  if (!f.module) {
-    // Today's journeys (London day). Job code and time only: no patient details on the dashboard.
+  if (!f.module && !f.ownerUserId) {
+    // Journeys for the date range (default: today, London day). Job code and time only: no patient details on the dashboard.
     const jobs = await tx.job.findMany({
       where: {
-        journeyDate: new Date(`${today}T00:00:00Z`),
+        journeyDate: {
+          gte: new Date(`${f.dateFrom ?? today}T00:00:00Z`),
+          lte: new Date(`${f.dateTo ?? f.dateFrom ?? today}T00:00:00Z`),
+        },
         ...(f.locationId ? { locationId: f.locationId } : {}),
       },
       select: { id: true, code: true, state: true, plannedStart: true },
@@ -339,6 +491,12 @@ export async function dashboardRows(
       });
     }
   }
+  if (f.modules) {
+    const allowed = new Set<string>(f.modules);
+    for (let i = rows.length - 1; i >= 0; i--) if (!allowed.has(rows[i]!.module)) rows.splice(i, 1);
+    for (let i = results.length - 1; i >= 0; i--)
+      if (!allowed.has(results[i]!.module)) results.splice(i, 1);
+  }
   const rank: Record<string, number> = { RED: 0, AMBER: 1, GREY: 2, GREEN: 3, NOT_APPLICABLE: 4 };
   rows.sort(
     (a, b) =>
@@ -346,19 +504,28 @@ export async function dashboardRows(
       (a.deadline ?? '9999').localeCompare(b.deadline ?? '9999') ||
       a.key.localeCompare(b.key),
   );
+  const ownerIds = [...new Set(rows.flatMap((r) => (r.ownerUserId ? [r.ownerUserId] : [])))];
+  const owners = ownerIds.length
+    ? await tx.membership.findMany({
+        where: { userId: { in: ownerIds } },
+        select: { userId: true, user: { select: { displayName: true } } },
+      })
+    : [];
+  const ownerName = new Map(owners.map((o) => [o.userId, o.user.displayName]));
+  for (const r of rows) r.ownerName = r.ownerUserId ? (ownerName.get(r.ownerUserId) ?? null) : null;
   return { rows, results };
 }
 
-export async function dashboardSummary(
-  tx: TenantTx,
-  f: { locationId?: string; module?: string },
-  now: Date,
-) {
+export async function dashboardSummary(tx: TenantTx, f: DashboardFilterIn, now: Date) {
   const { rows, results } = await dashboardRows(tx, f, now);
   const count = (tile: string) => rows.filter((r) => r.tiles.includes(tile)).length;
   const mod = (m: Module) => results.filter((r) => r.module === m);
   const counts = dashboardCounts(results);
   const fleetBlocked = count('blockedVehicles');
+  const setUp = {
+    vehicles: await tx.vehicle.count(),
+    audits: await tx.auditRun.count(),
+  };
   return {
     tiles: {
       overdue: count('overdue'),
@@ -366,7 +533,16 @@ export async function dashboardSummary(
       blockedVehicles: fleetBlocked,
       jobsToday: count('jobsToday'),
       unverified: count('unverified'),
+      auditsOverdue: count('auditsOverdue'),
     },
+    notSetUp: (['STAFF', 'FLEET', 'COMPLIANCE', 'PREMISES'] as const).filter(
+      (m) =>
+        (!f.modules || f.modules.includes(m)) &&
+        mod(m).length === 0 &&
+        !rows.some((r) => r.module === m) &&
+        !(m === 'FLEET' && setUp.vehicles > 0) &&
+        !(m === 'COMPLIANCE' && setUp.audits > 0),
+    ),
     modules: [
       {
         module: 'STAFF' as const,
@@ -394,12 +570,12 @@ export async function dashboardSummary(
         count: mod('PREMISES').filter((r) => r.reasonCode === 'DUE_TODAY').length,
         label: 'due today',
       },
-    ],
+    ].filter((m) => !f.modules || f.modules.includes(m.module)),
     operations: {
       jobsAwaitingAllocation: count('awaitingAllocation'),
       acknowledgementsDue: count('acknowledgementsDue'),
     },
-    criticalOpen: rows.filter((r) => r.key.startsWith('FND:')).length,
+    criticalOpen: rows.filter((r) => r.key.startsWith('FND:') || r.key.startsWith('DEF:')).length,
     coverage: evidenceCoverage(results),
     blockedTotal: counts.blocked,
   };
@@ -411,9 +587,24 @@ export async function dashboardSummary(
 export interface PackParams {
   locationId?: string;
   domain?: string;
+  domains?: string[];
+  serviceId?: string;
+  frameworkVersion?: string;
   from: string;
   to: string;
+  /** Older jobs have none of the options below; the defaults reproduce the original pack. */
+  purpose?: 'INSPECTION' | 'NHS_CONTRACT' | 'INTERNAL';
+  sections?: string[];
+  includeFiles?: boolean;
+  gapsOnly?: boolean;
 }
+
+const PACK_TITLE: Record<string, string> = {
+  INSPECTION: 'Inspection evidence pack',
+  NHS_CONTRACT: 'NHS contract evidence pack',
+  INTERNAL: 'Internal evidence pack',
+};
+const DEFAULT_SECTIONS = ['REQUIREMENTS', 'AUDITS', 'ACTIONS', 'POLICIES'];
 
 const pdfSafe = (s: string) =>
   s
@@ -465,10 +656,13 @@ export async function buildEvidencePack(
   now: Date,
 ): Promise<{ zip: Uint8Array; files: number; gaps: number }> {
   const canSensitive = permissions.includes('staff.sensitive.view');
+  const purpose = p.purpose ?? 'INSPECTION';
+  const sections = new Set(p.sections?.length ? p.sections : DEFAULT_SECTIONS);
+  const includeFiles = p.includeFiles ?? true;
   const instances = await tx.requirementInstance.findMany({
     where: p.locationId ? { OR: [{ locationId: p.locationId }, { locationId: null }] } : {},
     include: {
-      template: { select: { code: true, title: true } },
+      template: { select: { code: true, title: true, pack: true } },
       templateVersion: {
         select: {
           basisType: true,
@@ -482,9 +676,10 @@ export async function buildEvidencePack(
     },
     orderBy: { createdAt: 'asc' },
   });
+  const wanted = new Set([...(p.domains ?? []), ...(p.domain ? [p.domain] : [])]);
   const inDomain = (maps: unknown) =>
-    !p.domain ||
-    (Array.isArray(maps) && maps.some((m) => (m as { domain?: string }).domain === p.domain));
+    wanted.size === 0 ||
+    (Array.isArray(maps) && maps.some((m) => wanted.has((m as { domain?: string }).domain ?? '')));
   const files: Record<string, Uint8Array> = {};
   const csv: string[][] = [
     [
@@ -502,17 +697,42 @@ export async function buildEvidencePack(
       'Verified at',
     ],
   ];
+  const reviewers = new Map<string, string>();
+  const loadNames = async (ids: (string | null)[]) => {
+    const want = [...new Set(ids.filter((x): x is string => !!x && !reviewers.has(x)))];
+    if (want.length === 0) return;
+    for (const m of await tx.membership.findMany({
+      where: { userId: { in: want } },
+      select: { userId: true, user: { select: { displayName: true } } },
+    }))
+      reviewers.set(m.userId, m.user.displayName);
+  };
+  await loadNames(
+    instances.flatMap((i) =>
+      i.links.flatMap((l) => l.item.versions.map((v) => v.verification?.reviewerId ?? null)),
+    ),
+  );
+  const reviewer = (id: string) => reviewers.get(id) ?? 'a former member';
   const lines: string[] = [
     `Period: ${p.from} to ${p.to}. Generated ${now.toISOString()} (Europe/London dates).`,
     'Internal measure - not a CQC rating. Statuses are as at generation time.',
-    '',
-    '# Requirements and evidence',
+    'Only verified evidence counts as met; anything else is listed as a gap.',
+    ...(p.frameworkVersion ? [`Framework version: ${p.frameworkVersion}.`] : []),
+    ...(wanted.size > 0 ? [`Key questions: ${[...wanted].join(', ')}.`] : []),
+    ...(purpose === 'NHS_CONTRACT'
+      ? ['Requirements are limited to NHS contract items. Check them against the contract itself.']
+      : []),
+    ...(p.gapsOnly ? ['Only requirements that are not met are listed.'] : []),
+    ...(includeFiles ? [] : ['Index only: evidence files are not included in this pack.']),
   ];
   let gaps = 0;
-  for (const i of instances) {
+  if (sections.has('REQUIREMENTS')) lines.push('', '# Requirements and evidence');
+  for (const i of sections.has('REQUIREMENTS') ? instances : []) {
     if (!inDomain(i.templateVersion.frameworkMappings)) continue;
+    if (purpose === 'NHS_CONTRACT' && !isNhsContractItem(i.template)) continue;
     const ok = i.status === 'GREEN' || i.status === 'NOT_APPLICABLE';
     if (!ok) gaps += 1;
+    if (p.gapsOnly && ok) continue;
     lines.push(
       `${i.template.code} v${i.templateVersion.version} ${i.template.title} [${i.subjectType}] - ${i.status}: ${i.reasonText}`,
     );
@@ -523,19 +743,21 @@ export async function buildEvidencePack(
         const ver = v.verification;
         if (!ver || ver.decision !== 'ACCEPTED' || v.scanStatus !== 'CLEAN') continue;
         if (ver.createdAt.toISOString().slice(0, 10) > p.to) continue;
-        const bytes = await store.get(v.blobKey);
-        if (!bytes) continue;
         const ext =
           (v.mime ?? '')
             .split('/')[1]
             ?.replace('vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx') ??
           'bin';
         const name = `evidence/${fileSafe(i.template.code)}/${fileSafe(l.item.title)}-v${v.versionNo}.${fileSafe(ext)}`;
-        files[name] = new Uint8Array(bytes);
+        if (includeFiles) {
+          const bytes = await store.get(v.blobKey);
+          if (!bytes) continue;
+          files[name] = new Uint8Array(bytes);
+        }
         any = true;
         const validTo = iso(ver.confirmedValidTo ?? v.validTo);
         lines.push(
-          `   evidence: ${name} (valid to ${validTo ?? 'no end date'}), verified ${ver.createdAt.toISOString().slice(0, 10)} by reviewer ${ver.reviewerId}`,
+          `   evidence: ${includeFiles ? name : `${l.item.title} v${v.versionNo} (held in the hub)`} (valid to ${validTo ?? 'no end date'}), verified ${ver.createdAt.toISOString().slice(0, 10)} by ${reviewer(ver.reviewerId)}`,
         );
         csv.push([
           i.template.title,
@@ -546,9 +768,9 @@ export async function buildEvidencePack(
           i.templateVersion.basisType,
           i.templateVersion.regulationRef ?? '',
           i.templateVersion.sourceUrl ?? '',
-          name,
+          includeFiles ? name : '',
           validTo ?? '',
-          ver.reviewerId,
+          reviewer(ver.reviewerId),
           ver.createdAt.toISOString(),
         ]);
       }
@@ -573,41 +795,59 @@ export async function buildEvidencePack(
   }
   const from = new Date(`${p.from}T00:00:00Z`);
   const to = new Date(`${p.to}T23:59:59Z`);
-  const runs = await tx.auditRun.findMany({
-    where: {
-      dueDate: { gte: from, lte: to },
-      ...(p.locationId ? { locationId: p.locationId } : {}),
-    },
-    include: { findings: true, templateVersion: { include: { template: true } } },
-  });
-  lines.push('', '# Audits in the period');
-  for (const r of runs) {
-    if (p.domain && r.templateVersion.template.domain !== p.domain) continue;
-    lines.push(
-      `${r.code} ${r.title} (${r.templateVersion.template.code} v${r.templateVersion.version}) - ${r.outcome ?? 'not submitted'}${r.outcomeReason ? `: ${r.outcomeReason}` : ''}`,
-    );
-    for (const f of r.findings) lines.push(`   ${f.controlCode}: ${f.summary} (${f.result})`);
+  if (sections.has('AUDITS')) {
+    const runs = await tx.auditRun.findMany({
+      where: {
+        dueDate: { gte: from, lte: to },
+        ...(p.locationId ? { locationId: p.locationId } : {}),
+      },
+      include: { findings: true, templateVersion: { include: { template: true } } },
+    });
+    lines.push('', '# Audits in the period');
+    for (const r of runs) {
+      if (wanted.size > 0 && !wanted.has(r.templateVersion.template.domain)) continue;
+      if (p.serviceId && r.serviceId && r.serviceId !== p.serviceId) continue;
+      lines.push(
+        `${r.code} ${r.title} (${r.templateVersion.template.code} v${r.templateVersion.version}) - ${r.outcome ?? 'not submitted'}${r.outcomeReason ? `: ${r.outcomeReason}` : ''}`,
+      );
+      for (const f of r.findings) lines.push(`   ${f.controlCode}: ${f.summary} (${f.result})`);
+    }
   }
-  const actions = await tx.action.findMany({
-    where: { status: { not: 'VERIFIED' } },
-    orderBy: { deadline: 'asc' },
-  });
-  lines.push('', '# Open actions');
-  for (const a of actions)
-    lines.push(`${a.code} ${a.title} - ${a.status}, deadline ${iso(a.deadline)}`);
-  if (actions.length === 0) lines.push('None');
-  const policies = await tx.policyVersion.findMany({
-    where: { status: 'PUBLISHED' },
-    include: { document: true, _count: { select: { acks: true } } },
-  });
-  lines.push('', '# Published policies');
-  for (const v of policies)
-    lines.push(
-      `${v.document.code} ${v.document.title} v${v.version} - approved by ${v.approvedBy ?? 'n/a'}, ${v._count.acks} acknowledgement(s)`,
-    );
+  if (sections.has('ACTIONS')) {
+    const actions = await tx.action.findMany({
+      where: { status: { not: 'VERIFIED' } },
+      orderBy: { deadline: 'asc' },
+    });
+    lines.push('', '# Open actions');
+    for (const a of actions)
+      lines.push(`${a.code} ${a.title} - ${a.status}, deadline ${iso(a.deadline)}`);
+    if (actions.length === 0) lines.push('None');
+  }
+  if (sections.has('POLICIES')) {
+    const policies = await tx.policyVersion.findMany({
+      where: { status: 'PUBLISHED' },
+      include: { document: true, _count: { select: { acks: true } } },
+    });
+    await loadNames(policies.map((v) => v.approvedBy));
+    lines.push('', '# Published policies');
+    for (const v of policies)
+      lines.push(
+        `${v.document.code} ${v.document.title} v${v.version} - approved by ${v.approvedBy ? reviewer(v.approvedBy) : 'n/a'}, ${v._count.acks} acknowledgement(s)`,
+      );
+  }
+  if (sections.has('GOVERNANCE')) lines.push(...(await governanceLines(tx, from, to)));
+  if (sections.has('CONTRACTS')) {
+    const contracts = await tx.nhsContract.findMany({ orderBy: { endOn: 'asc' } });
+    lines.push('', '# NHS contracts');
+    for (const c of contracts)
+      lines.push(
+        `${c.reference} ${c.service} with ${c.commissioner}: ${iso(c.startOn)} to ${iso(c.endOn)}, notice ${c.noticeMonths} month(s), reporting ${c.reporting.toLowerCase()}`,
+      );
+    if (contracts.length === 0) lines.push('None recorded');
+  }
   lines.push('', `Open gaps: ${gaps}`);
 
-  files['index.pdf'] = await renderPdf('Inspection evidence pack', lines);
+  files['index.pdf'] = await renderPdf(PACK_TITLE[purpose] ?? PACK_TITLE.INSPECTION!, lines);
   files['index.csv'] = strToU8(
     csv
       .map((r) =>
@@ -620,6 +860,50 @@ export async function buildEvidencePack(
       .join('\r\n') + '\r\n',
   );
   return { zip: zipSync(files, { level: 6 }), files: Object.keys(files).length, gaps };
+}
+
+/**
+ * Registration and governance records for the pack: the ratings exactly as CQC published them,
+ * approved meeting minutes and CQC notifications in the period. Notification text is left out
+ * (codes, kinds and dates only) so nothing about a person is copied into the pack.
+ */
+async function governanceLines(tx: TenantTx, from: Date, to: Date): Promise<string[]> {
+  const out: string[] = ['', '# Registration and governance'];
+  const ratings = await tx.cqcRatingRecord.findMany({
+    orderBy: [{ publishedOn: 'desc' }, { createdAt: 'desc' }],
+  });
+  const seen = new Set<string>();
+  out.push('Ratings as published by CQC (the hub does not calculate ratings):');
+  for (const r of ratings) {
+    const k = r.locationId ?? 'provider';
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(
+      `   ${r.locationId ? 'Location' : 'Provider'}: ${r.overall.replace(/_/g, ' ').toLowerCase()}, published ${iso(r.publishedOn)}; displayed at premises ${iso(r.displayedPremisesOn) ?? 'not recorded'}, website ${r.noWebsite ? 'no website' : (iso(r.displayedWebsiteOn) ?? 'not recorded')}`,
+    );
+  }
+  if (seen.size === 0) out.push('   None recorded');
+  const meetings = await tx.governanceMeeting.findMany({
+    where: { heldOn: { gte: from, lte: to } },
+    orderBy: { heldOn: 'asc' },
+  });
+  out.push('Governance meetings in the period:');
+  for (const m of meetings)
+    out.push(
+      `   ${m.code} ${m.title} (${iso(m.heldOn)}) - ${m.status === 'APPROVED' ? 'minutes approved' : 'minutes in draft'}${m.quorate ? '' : ', not quorate'}`,
+    );
+  if (meetings.length === 0) out.push('   None');
+  const notifications = await tx.cqcNotification.findMany({
+    where: { occurredOn: { gte: from, lte: to } },
+    orderBy: { occurredOn: 'asc' },
+  });
+  out.push('CQC notifications in the period:');
+  for (const n of notifications)
+    out.push(
+      `   ${n.code} ${n.kind.replace(/_/g, ' ').toLowerCase()} (${iso(n.occurredOn)}) - ${n.status === 'SUBMITTED' ? `submitted ${iso(n.submittedOn)}, CQC reference ${n.cqcReference ?? ''}` : n.status.replace(/_/g, ' ').toLowerCase()}`,
+    );
+  if (notifications.length === 0) out.push('   None');
+  return out;
 }
 
 /** Worker: runs queued exports for every organisation. Failures are recorded on the job. */
