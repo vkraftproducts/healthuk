@@ -34,7 +34,9 @@ import {
   BookingCreate,
   CrewEndInput,
   CrewInput,
+  ExceptionDecisionInput,
   ExceptionInput,
+  type ExceptionRequestDto,
   JobPatch,
   JobPatchQuery,
   PlannerQuery,
@@ -119,6 +121,21 @@ const isExclusion = (e: unknown) =>
   /23P01|exclusion|no_overlap/i.test(`${e.code} ${e.message}`);
 
 /** Bookings, jobs, allocation and status (JOB-01..04, wireframe 04). */
+
+/** User ids of current members whose role lets them approve allocation exceptions. */
+async function approverIds(tx: TenantTx): Promise<Set<string>> {
+  const now = new Date();
+  const rows = await tx.membership.findMany({
+    where: {
+      validFrom: { lte: now },
+      OR: [{ validTo: null }, { validTo: { gt: now } }],
+      role: { rolePermissions: { some: { permissionKey: 'allocation.exception.approve' } } },
+    },
+    select: { userId: true },
+  });
+  return new Set(rows.map((m) => m.userId));
+}
+
 @Controller()
 export class JobsController {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -614,10 +631,17 @@ export class JobsController {
     });
   }
 
-  /** Only policy-level failures can be excepted; statutory and safety failures have no path (JOB-03). */
-  @RequirePermission('allocation.exception.approve')
+  /**
+   * E3: ask a named approver for a policy exception. Only policy-level failures can be excepted;
+   * statutory and safety failures have no path (JOB-03). Nothing changes until the approver
+   * decides, and nobody can be their own approver.
+   */
+  @RequirePermission('jobs.allocate')
   @Post('allocation-exceptions')
-  async exception(@Hub() hub: HubRequestContext, @Body() raw: unknown) {
+  async requestException(
+    @Hub() hub: HubRequestContext,
+    @Body() raw: unknown,
+  ): Promise<ExceptionRequestDto> {
     const input = body(ExceptionInput, raw);
     const now = new Date();
     const expires = new Date(input.expiresAt);
@@ -635,31 +659,181 @@ export class JobsController {
           422,
           'Statutory and safety-critical checks cannot be overridden',
         );
-      const e = await tx.allocationException.create({
+      if (input.approverId === hub.user.id)
+        throw new HubError('VALIDATION_FAILED', 400, 'Ask someone else to approve it');
+      if (!(await approverIds(tx)).has(input.approverId))
+        throw new HubError(
+          'VALIDATION_FAILED',
+          400,
+          'That person cannot approve exceptions in this organisation',
+        );
+      const r = await tx.allocationExceptionRequest.create({
         data: {
           organisationId: job.organisationId,
           jobId: job.id,
+          shiftId: input.shiftId,
           checkCode: input.checkCode,
-          approverId: hub.user.id,
           reason: input.reason,
           expiresAt: expires,
+          requestedBy: hub.user.id,
+          approverId: input.approverId,
+        },
+      });
+      await tx.alert.create({
+        data: {
+          organisationId: job.organisationId,
+          sourceType: 'EXCEPTION_REQUEST',
+          sourceId: r.id,
+          severity: 'HIGH',
+          reasonCode: 'DECISION_NEEDED',
+          reasonText: `Exception requested for ${job.code}: ${input.reason}`,
+          ownerUserId: input.approverId,
+          raisedAt: now,
         },
       });
       await audit(this.db, tx, hub, {
-        action: 'allocation.exception.approve',
+        action: 'allocation.exception.request',
         entity: 'job',
         entityId: job.id,
-        summary: { checkCode: input.checkCode, expiresAt: input.expiresAt },
+        summary: { checkCode: input.checkCode, approverId: input.approverId },
       });
-      return {
-        id: e.id,
-        jobId: e.jobId,
-        checkCode: e.checkCode,
-        approverId: e.approverId,
-        reason: e.reason,
-        expiresAt: e.expiresAt.toISOString(),
-      };
+      return this.exceptionRequestDto(tx, r.id);
     });
+  }
+
+  @OrgMember()
+  @Get('allocation-exceptions')
+  async exceptionRequests(@Hub() hub: HubRequestContext): Promise<{ data: ExceptionRequestDto[] }> {
+    requireAny(hub, 'jobs.allocate', 'allocation.exception.approve');
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.allocationExceptionRequest.findMany({
+        where: { OR: [{ requestedBy: hub.user.id }, { approverId: hub.user.id }] },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true },
+      });
+      const data: ExceptionRequestDto[] = [];
+      for (const r of rows) data.push(await this.exceptionRequestDto(tx, r.id));
+      return { data };
+    });
+  }
+
+  @RequirePermission('jobs.allocate')
+  @Get('allocation-exceptions/approvers')
+  async approvers(
+    @Hub() hub: HubRequestContext,
+  ): Promise<{ data: { id: string; name: string }[] }> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const ids = [...(await approverIds(tx))].filter((id) => id !== hub.user.id);
+      const users = await tx.appUser.findMany({
+        where: { id: { in: ids }, status: 'ACTIVE' },
+        select: { id: true, displayName: true },
+        orderBy: { displayName: 'asc' },
+      });
+      return { data: users.map((u) => ({ id: u.id, name: u.displayName })) };
+    });
+  }
+
+  /** E3: only the named approver decides; an approval creates the exception, a decline goes back. */
+  @RequirePermission('allocation.exception.approve')
+  @Post('allocation-exceptions/:id/decide')
+  async decideException(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<ExceptionRequestDto> {
+    const input = body(ExceptionDecisionInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const r = await tx.allocationExceptionRequest.findUnique({
+        where: { id },
+        include: { decision: true },
+      });
+      if (!r) throw notFound();
+      if (r.approverId !== hub.user.id)
+        throw new HubError('FORBIDDEN', 403, 'Only the person asked can decide this request');
+      if (r.decision) throw new HubError('CONFLICT', 409, 'This request has already been decided');
+      const now = new Date();
+      if (input.decision === 'APPROVED' && r.expiresAt <= now)
+        throw new HubError('CONFLICT', 409, 'The requested period has already ended');
+      await tx.allocationExceptionDecision.create({
+        data: {
+          organisationId: r.organisationId,
+          requestId: r.id,
+          decision: input.decision,
+          reason: input.reason,
+          decidedBy: hub.user.id,
+        },
+      });
+      if (input.decision === 'APPROVED')
+        await tx.allocationException.create({
+          data: {
+            organisationId: r.organisationId,
+            jobId: r.jobId,
+            checkCode: r.checkCode,
+            approverId: hub.user.id,
+            reason: r.reason,
+            expiresAt: r.expiresAt,
+            requestId: r.id,
+          },
+        });
+      await tx.alert.updateMany({
+        where: { sourceType: 'EXCEPTION_REQUEST', sourceId: r.id, state: { not: 'RESOLVED' } },
+        data: { state: 'RESOLVED', resolvedAt: now },
+      });
+      if (input.decision === 'DECLINED')
+        await tx.alert.create({
+          data: {
+            organisationId: r.organisationId,
+            sourceType: 'EXCEPTION_DECLINED',
+            sourceId: r.id,
+            severity: 'MEDIUM',
+            reasonCode: 'SENT_BACK',
+            reasonText: `Exception declined: ${input.reason}`,
+            ownerUserId: r.requestedBy,
+            raisedAt: now,
+          },
+        });
+      await audit(this.db, tx, hub, {
+        action:
+          input.decision === 'APPROVED'
+            ? 'allocation.exception.approve'
+            : 'allocation.exception.decline',
+        entity: 'job',
+        entityId: r.jobId,
+        summary: { requestId: r.id, checkCode: r.checkCode },
+      });
+      return this.exceptionRequestDto(tx, r.id);
+    });
+  }
+
+  private async exceptionRequestDto(tx: TenantTx, id: string): Promise<ExceptionRequestDto> {
+    const r = await tx.allocationExceptionRequest.findUniqueOrThrow({
+      where: { id },
+      include: { decision: true },
+    });
+    const job = await tx.job.findUniqueOrThrow({ where: { id: r.jobId }, select: { code: true } });
+    const people = await tx.appUser.findMany({
+      where: { id: { in: [r.requestedBy, r.approverId] } },
+      select: { id: true, displayName: true },
+    });
+    const name = (uid: string) =>
+      people.find((p) => p.id === uid)?.displayName ?? 'a former colleague';
+    return {
+      id: r.id,
+      jobId: r.jobId,
+      jobCode: job.code,
+      shiftId: r.shiftId,
+      checkCode: r.checkCode,
+      reason: r.reason,
+      expiresAt: r.expiresAt.toISOString(),
+      requestedBy: r.requestedBy,
+      requestedByName: name(r.requestedBy),
+      approverId: r.approverId,
+      approverName: name(r.approverId),
+      state: (r.decision?.decision as 'APPROVED' | 'DECLINED' | undefined) ?? 'REQUESTED',
+      decisionReason: r.decision?.reason ?? null,
+      createdAt: r.createdAt.toISOString(),
+    };
   }
 
   // ---- helpers ------------------------------------------------------------------------

@@ -101,6 +101,9 @@ async function crewMember(
   return { sub: `dev|c-${tag}`, staffId: s.body.id as string };
 }
 let vn = 70;
+const idOf = async (sub: string) =>
+  (await call('GET', '/api/v1/me', { sub })).body.user.id as string;
+
 async function vehicle(extra: Record<string, unknown> = {}): Promise<string> {
   vn += 1;
   const r = await call('POST', '/api/v1/vehicles', {
@@ -248,6 +251,7 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
         checkCode: 'VEHICLE_ROADWORTHY',
         reason: 'We really need this vehicle',
         expiresAt: at(20),
+        approverId: await idOf('dev|dispatcher'),
       },
     });
     expect([ex.status, ex.body.code]).toEqual([422, 'OVERRIDE_NOT_PERMITTED']);
@@ -322,42 +326,41 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
     expect(
       (await call('POST', `/api/v1/jobs/${m!.id}/allocate`, { body: { shiftId: s3.id } })).status,
     ).toBe(409);
-    expect(
-      (
-        await call('POST', '/api/v1/allocation-exceptions', {
-          body: {
-            jobId: m!.id,
-            shiftId: s3.id,
-            checkCode: 'COMPETENCE',
-            reason: 'Bariatric-trained supervisor attending',
-            expiresAt: at(20),
-          },
-        })
-      ).status,
-    ).toBe(403);
+    // The dispatcher asks a named approver; nothing changes until that person decides (E3).
+    const manager = await idOf('dev|manager');
+    const ask = {
+      jobId: m!.id,
+      shiftId: s3.id,
+      checkCode: 'COMPETENCE',
+      reason: 'Bariatric-trained supervisor attending',
+      expiresAt: at(20),
+    };
+    // Nobody approves their own request.
     expect(
       (
         await call('POST', '/api/v1/allocation-exceptions', {
           sub: 'dev|manager',
-          body: {
-            jobId: m!.id,
-            shiftId: s3.id,
-            checkCode: 'COMPETENCE',
-            reason: 'Bariatric-trained supervisor attending',
-            expiresAt: at(24 * 9),
-          },
+          body: { ...ask, approverId: manager },
         })
       ).status,
     ).toBe(400);
-    const okEx = await call('POST', '/api/v1/allocation-exceptions', {
+    expect(
+      (
+        await call('POST', '/api/v1/allocation-exceptions', {
+          body: { ...ask, expiresAt: at(24 * 9), approverId: manager },
+        })
+      ).status,
+    ).toBe(400);
+    const req = await call('POST', '/api/v1/allocation-exceptions', {
+      body: { ...ask, approverId: manager },
+    });
+    expect([req.status, req.body.state]).toEqual([201, 'REQUESTED']);
+    expect(
+      (await call('POST', `/api/v1/jobs/${m!.id}/allocate`, { body: { shiftId: s3.id } })).status,
+    ).toBe(409);
+    const okEx = await call('POST', `/api/v1/allocation-exceptions/${req.body.id}/decide`, {
       sub: 'dev|manager',
-      body: {
-        jobId: m!.id,
-        shiftId: s3.id,
-        checkCode: 'COMPETENCE',
-        reason: 'Bariatric-trained supervisor attending',
-        expiresAt: at(20),
-      },
+      body: { decision: 'APPROVED', reason: 'Supervisor confirmed for the journey' },
     });
     expect(okEx.status).toBe(201);
     const allowed = await call('POST', `/api/v1/jobs/${m!.id}/allocate`, {
@@ -797,5 +800,96 @@ describe('recurring journeys [UAT-07]', () => {
       },
     });
     expect(r.status).toBe(400);
+  });
+});
+
+describe('exception requests and decisions [E3]', () => {
+  async function competenceGap(startH: number) {
+    const v = await vehicle();
+    const d = await crewMember();
+    const a = await crewMember(['CARE_ASSISTANT']);
+    const s = await shift(
+      v,
+      [
+        { staffId: d.staffId, role: 'DRIVER' },
+        { staffId: a.staffId, role: 'CARE_ASSISTANT' },
+      ],
+      startH,
+      startH + 8,
+    );
+    const [job] = await book(startH + 1, { requiredSkills: ['BARIATRIC'] });
+    return { jobId: job!.id as string, shiftId: s.id as string };
+  }
+  const ask = (g: { jobId: string; shiftId: string }, approverId: string) => ({
+    ...g,
+    checkCode: 'COMPETENCE',
+    reason: 'Bariatric-trained supervisor attending',
+    expiresAt: at(30 + 24),
+    approverId,
+  });
+
+  it('only someone else who can approve exceptions may be named as the approver', async () => {
+    const g = await competenceGap(30);
+    const dispatcher = await idOf('dev|dispatcher');
+    const crew = await idOf('dev|crew');
+    expect(
+      (await call('POST', '/api/v1/allocation-exceptions', { body: ask(g, dispatcher) })).status,
+    ).toBe(400);
+    expect(
+      (await call('POST', '/api/v1/allocation-exceptions', { body: ask(g, crew) })).status,
+    ).toBe(400);
+    const approvers = (await call('GET', '/api/v1/allocation-exceptions/approvers')).body
+      .data as J[];
+    expect(approvers.map((p) => p.name)).toContain('Manager');
+    expect(approvers.map((p) => p.id)).not.toContain(dispatcher);
+  });
+
+  it('the approver is asked, declines with a reason, and it goes back to the dispatcher', async () => {
+    const g = await competenceGap(40);
+    const manager = await idOf('dev|manager');
+    const req = await call('POST', '/api/v1/allocation-exceptions', { body: ask(g, manager) });
+    expect(req.status).toBe(201);
+    const asked = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|manager' })).body.data as J[];
+    expect(asked).toContainEqual(
+      expect.objectContaining({
+        kind: 'EXCEPTION_REQUEST',
+        link: expect.objectContaining({ type: 'JOB', id: g.jobId }),
+      }),
+    );
+    // Only the named approver decides.
+    const decideUrl = `/api/v1/allocation-exceptions/${req.body.id}/decide`;
+    expect(
+      (await call('POST', decideUrl, { body: { decision: 'APPROVED', reason: 'Fine by me' } }))
+        .status,
+    ).toBe(403);
+    const no = await call('POST', decideUrl, {
+      sub: 'dev|manager',
+      body: { decision: 'DECLINED', reason: 'No bariatric supervisor is free that day' },
+    });
+    expect([no.status, no.body.state]).toEqual([201, 'DECLINED']);
+    const back = (await call('GET', '/api/v1/me/inbox')).body.data as J[];
+    expect(back).toContainEqual(
+      expect.objectContaining({
+        kind: 'EXCEPTION_DECLINED',
+        reasonText: expect.stringContaining('No bariatric supervisor is free that day'),
+      }),
+    );
+    const stillAsked = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|manager' })).body
+      .data as J[];
+    expect(
+      stillAsked.filter((i) => i.kind === 'EXCEPTION_REQUEST' && i.link.id === g.jobId),
+    ).toEqual([]);
+    expect(
+      (
+        await call('POST', decideUrl, {
+          sub: 'dev|manager',
+          body: { decision: 'APPROVED', reason: 'Changed my mind' },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (await call('POST', `/api/v1/jobs/${g.jobId}/allocate`, { body: { shiftId: g.shiftId } }))
+        .status,
+    ).toBe(409);
   });
 });

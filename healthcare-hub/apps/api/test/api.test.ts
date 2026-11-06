@@ -7,7 +7,12 @@ import { AuditController } from '../src/modules/audit/audit.controller.js';
 import { HealthController } from '../src/modules/health/health.controller.js';
 import { MeController } from '../src/modules/identity/me.controller.js';
 import { OpenApiController } from '../src/modules/openapi.controller.js';
-import { AUTH_ONLY_KEY, PERMISSION_KEY, PUBLIC_KEY } from '../src/common/decorators.js';
+import {
+  AUTH_ONLY_KEY,
+  ORG_MEMBER_KEY,
+  PERMISSION_KEY,
+  PUBLIC_KEY,
+} from '../src/common/decorators.js';
 import { createLogger } from '../src/logger.js';
 import { SEED_IDS, makeApp, sign } from './harness.js';
 
@@ -229,7 +234,7 @@ describe('error responses', () => {
 });
 
 describe('route declarations (deny by default)', () => {
-  it('every controller route is Public, AuthenticatedOnly or declares a permission', () => {
+  it('every controller route is Public, AuthenticatedOnly, OrgMember or declares a permission', () => {
     const reflector = new Reflector();
     const missing: string[] = [];
     for (const C of [HealthController, OpenApiController, MeController, AuditController]) {
@@ -240,6 +245,7 @@ describe('route declarations (deny by default)', () => {
         const ok =
           reflector.get(PUBLIC_KEY, fn) ||
           reflector.get(AUTH_ONLY_KEY, fn) ||
+          reflector.get(ORG_MEMBER_KEY, fn) ||
           (reflector.get(PERMISSION_KEY, fn) as string[] | undefined)?.length;
         if (!ok) missing.push(`${C.name}.${name}`);
       }

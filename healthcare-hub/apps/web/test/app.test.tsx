@@ -187,6 +187,64 @@ describe('web shell', () => {
     );
   });
 
+  it('shows what was sent back to me, or waits for my decision, with the reason and a link', async () => {
+    renderApp({
+      me: async (o) => me(o, ['dashboard.view']),
+      readyz: async () => ({ status: 'ready' }),
+      get: async (p: string) =>
+        p === '/api/v1/me/inbox'
+          ? {
+              data: [
+                {
+                  id: 'a1',
+                  kind: 'SENT_BACK',
+                  title: 'Basic life support: BLS certificate',
+                  reasonText: 'Sent back: Certificate is for a different course',
+                  raisedAt: '2026-11-06T09:00:00Z',
+                  link: { type: 'REQUIREMENT', id: 'i1', subjectType: 'STAFF', subjectId: 's1' },
+                },
+                {
+                  id: 'a2',
+                  kind: 'EXCEPTION_REQUEST',
+                  title: 'Exception to decide: J-117',
+                  reasonText: 'Exception requested for J-117: supervisor attending',
+                  raisedAt: '2026-11-06T09:05:00Z',
+                  link: { type: 'JOB', id: 'j1', date: '2026-11-07' },
+                },
+              ],
+            }
+          : p.startsWith('/api/v1/dashboard/summary')
+            ? {
+                tiles: {},
+                modules: [],
+                operations: {},
+                coverage: { percent: null },
+                lastRefreshedAt: '2026-10-30T09:00:00Z',
+                sources: [],
+              }
+            : { data: [] },
+    });
+    const panel = await screen.findByRole('region', { name: 'For you' });
+    expect(
+      within(panel).getByRole('link', { name: 'Basic life support: BLS certificate' }),
+    ).toHaveAttribute('href', '/staff/s1');
+    expect(panel).toHaveTextContent('Certificate is for a different course');
+    expect(within(panel).getByRole('link', { name: 'Exception to decide: J-117' })).toHaveAttribute(
+      'href',
+      '/planner',
+    );
+  });
+
+  it('shows no "For you" panel when nothing is waiting', async () => {
+    renderApp({
+      me: async (o) => me(o, ['dashboard.view']),
+      readyz: async () => ({ status: 'ready' }),
+      get: async () => ({ data: [] }),
+    });
+    await screen.findByRole('heading', { name: 'Home dashboard' });
+    expect(screen.queryByRole('region', { name: 'For you' })).toBeNull();
+  });
+
   it('links each action row to the page that deals with it', async () => {
     const row = (item: string, module: string, link: Record<string, string>) => ({
       key: item,

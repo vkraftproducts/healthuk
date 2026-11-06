@@ -21,6 +21,8 @@ import {
   staffStatusSummary,
   syncRole,
   syncStaffRequirements,
+  checkingRoles,
+  startRoleChecks,
 } from '@hub/domain';
 import { allowedTransitions, checkStaffTransition, type StaffLifecycle } from '@hub/rules';
 import {
@@ -49,6 +51,7 @@ import {
   type StaffDetailDto,
   type StaffDto,
   type StaffRecordDto,
+  RoleCheckInput,
 } from '@hub/contracts';
 import { CONFIG, type AppConfig } from '../../config.js';
 import { OrgMember, RequirePermission } from '../../common/decorators.js';
@@ -656,6 +659,7 @@ export class StaffController {
         })
       )
         throw new HubError('CONFLICT', 409, 'Already approved for this role');
+      await this.assertRoleChecksComplete(tx, hub, id, input.role);
       const now = new Date();
       if (input.validTo && new Date(input.validTo) <= now)
         throw new HubError('VALIDATION_FAILED', 400, 'validTo must be in the future');
@@ -679,6 +683,98 @@ export class StaffController {
       });
       return roleApprovalDto(a, now);
     });
+  }
+
+  /** B1: start checks for a role. Its requirements appear, each awaiting evidence. */
+  @RequirePermission('staff.profile.manage')
+  @Post(':id/role-checks')
+  async startChecks(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ): Promise<{ role: string; requirementsCreated: number }> {
+    const input = body(RoleCheckInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const s = await this.subjectForChange(tx, hub, id);
+      if (!(await tx.staffRoleCheck.findFirst({ where: { staffId: id, role: input.role } })))
+        await tx.staffRoleCheck.create({
+          data: {
+            organisationId: s.organisationId,
+            staffId: id,
+            role: input.role,
+            startedBy: hub.user.id,
+          },
+        });
+      const created = await startRoleChecks(tx, id, input.role, hub.user.id, new Date());
+      await audit(this.db, tx, hub, {
+        action: 'staff.role.checks_start',
+        entity: 'staff',
+        entityId: id,
+        summary: { role: input.role, requirementsCreated: created.length },
+      });
+      return { role: input.role, requirementsCreated: created.length };
+    });
+  }
+
+  /**
+   * B1: a role can be approved only when every requirement it needs is verified and in date
+   * (or approved as not applicable), and not by someone who verified every one of them alone.
+   * Roles with no requirements set up have nothing to check.
+   */
+  private async assertRoleChecksComplete(
+    tx: TenantTx,
+    hub: HubRequestContext,
+    staffId: string,
+    role: string,
+  ): Promise<void> {
+    const { required } = await requiredTemplates(tx, [role]);
+    if (required.size === 0) return;
+    const templates = await tx.requirementTemplate.findMany({
+      where: { id: { in: [...required] } },
+      select: { id: true, title: true },
+    });
+    const instances = await tx.requirementInstance.findMany({
+      where: { subjectType: 'STAFF', subjectId: staffId, templateId: { in: [...required] } },
+      select: {
+        id: true,
+        templateId: true,
+        status: true,
+        currentlyVerified: true,
+        applicability: true,
+      },
+    });
+    const done = (i: (typeof instances)[number]) =>
+      i.applicability === 'APPROVED_NOT_APPLICABLE' || (i.currentlyVerified && i.status !== 'RED');
+    const missing = templates.filter((t) => {
+      const i = instances.find((x) => x.templateId === t.id);
+      return !i || !done(i);
+    });
+    if (missing.length > 0)
+      throw new HubError(
+        'VALIDATION_FAILED',
+        422,
+        `Not every requirement for this role is verified: ${missing.map((t) => t.title).join(', ')}. Start checks for the role, then verify each item.`,
+        missing.map((t) => ({ code: t.id, result: 'FAIL', reasonText: t.title })),
+      );
+    const reviewers: string[] = [];
+    for (const i of instances) {
+      if (i.applicability === 'APPROVED_NOT_APPLICABLE') continue;
+      const v = await tx.verification.findFirst({
+        where: {
+          decision: 'ACCEPTED',
+          evidenceVersion: { item: { links: { some: { instanceId: i.id } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { reviewerId: true },
+      });
+      if (v) reviewers.push(v.reviewerId);
+    }
+    if (reviewers.length > 0 && reviewers.every((r) => r === hub.user.id))
+      throw new HubError(
+        'FOUR_EYES_REQUIRED',
+        422,
+        'You verified every item for this role yourself, so someone else must approve it',
+      );
   }
 
   @RequirePermission('staff.approve_role')
@@ -802,7 +898,10 @@ export class StaffController {
           entityId: id,
           summary: { kind },
         });
-      const names = await namesOf(tx, rows.flatMap((r) => userIdsIn(r.data)));
+      const names = await namesOf(
+        tx,
+        rows.flatMap((r) => userIdsIn(r.data)),
+      );
       return { data: rows.map((r) => toRecordDto(r, this.key, names)) };
     });
   }
@@ -962,7 +1061,10 @@ export class StaffController {
         actorUserId: e.actorUserId,
         at: e.at.toISOString(),
       })),
-      requirements: await this.requirements(tx, id, base.roles),
+      requirements: await this.requirements(tx, id, [
+        ...base.roles,
+        ...((await checkingRoles(tx, [id])).get(id) ?? []),
+      ]),
       allowedTransitions: [...allowedTransitions(base.lifecycleState as StaffLifecycle)],
     };
   }

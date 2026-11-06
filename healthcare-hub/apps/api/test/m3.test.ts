@@ -76,6 +76,43 @@ async function userId(email: string): Promise<string> {
   const { body } = await call('GET', '/api/v1/admin/users');
   return (body.data as J[]).find((u) => u.email === email)!.id as string;
 }
+/** Uploads a document for the requirement as `uploader` and has `verifier` accept it. */
+async function verified(instanceId: string, uploader: string, verifier: string): Promise<void> {
+  const bytes = Buffer.from('%PDF-1.4\n% test\n%%EOF\n');
+  const validTo = new Date(Date.now() + 400 * 86_400_000).toISOString().slice(0, 10);
+  const up = await call('POST', '/api/v1/evidence/uploads', {
+    sub: uploader,
+    body: {
+      title: 'Licence check',
+      mime: 'application/pdf',
+      sizeBytes: bytes.length,
+      requirementInstanceIds: [instanceId],
+      validTo,
+    },
+  });
+  expect(up.status).toBe(201);
+  const put = await app.inject({
+    method: 'PUT',
+    url: new URL(up.body.uploadUrl as string).pathname,
+    headers: { 'content-type': 'application/pdf' },
+    payload: bytes,
+  });
+  expect(put.statusCode).toBe(200);
+  expect(
+    (
+      await call('POST', `/api/v1/evidence/${up.body.evidenceVersionId}/complete`, {
+        sub: uploader,
+      })
+    ).status,
+  ).toBe(201);
+  const ok = await call('POST', `/api/v1/evidence/${up.body.evidenceVersionId}/verify`, {
+    sub: verifier,
+    body: { decision: 'ACCEPTED', confirmedValidTo: validTo },
+  });
+  expect(ok.status).toBe(201);
+}
+const startChecks = (id: string, role: string) =>
+  call('POST', `/api/v1/staff/${id}/role-checks`, { sub: 'dev|hr', body: { role } });
 let tseq = 0;
 async function staffTemplate(code: string, o: Record<string, unknown> = {}) {
   const c = await call('POST', '/api/v1/requirements/templates', {
@@ -381,20 +418,33 @@ describe('role requirements and recalculation [HR-03]', () => {
     const item = crew.requirements.find((r: J) => r.templateId === tid);
     expect(item).toMatchObject({ status: 'GREY', required: true, subjectId: SEED_IDS.staffCrew });
 
-    // A care assistant does not need it; approving them as a driver adds it (role change, HR-03).
+    // A care assistant does not need it. To become a driver, checks start first and approval waits
+    // until every item for the role is verified (B1).
     const s = await activeStaff(['CARE_ASSISTANT']);
     expect((await call('GET', `/api/v1/staff/${s.id}`)).body.requirements).toHaveLength(0);
-    await approve(s.id, 'DRIVER');
+    const refused = await approve(s.id, 'DRIVER');
+    expect([refused.status, refused.body.code]).toEqual([422, 'VALIDATION_FAILED']);
+    expect(refused.body.detail).toContain('DRIVING-LICENCE');
+    expect((await startChecks(s.id, 'DRIVER')).status).toBe(201);
+    const checking = (await call('GET', `/api/v1/staff/${s.id}`)).body;
+    const pending = checking.requirements.find((r: J) => r.templateId === tid);
+    expect(pending).toMatchObject({ status: 'GREY', required: true });
+    expect(checking.overallStatus).toBe('GREY');
+    expect((await approve(s.id, 'DRIVER')).status).toBe(422);
+
+    // Fleet verifies the licence HR uploaded; HR can then approve.
+    await verified(pending.id, 'dev|hr', 'dev|fleet');
+    expect((await approve(s.id, 'DRIVER')).status).toBe(201);
     const after = (await call('GET', `/api/v1/staff/${s.id}`)).body;
     expect(after.requirements.map((r: J) => r.templateId)).toEqual([tid]);
-    expect(after.overallStatus).toBe('GREY');
+    expect(after.overallStatus).toBe('GREEN');
 
     const m = (await call('GET', '/api/v1/staff/training-matrix?role=DRIVER')).body;
     expect(m.columns.some((c: J) => c.templateId === tid)).toBe(true);
     const row = m.rows.find((r: J) => r.staffId === s.id);
     expect(row.cells.find((c: J) => c.templateId === tid)).toMatchObject({
       required: true,
-      status: 'GREY',
+      status: 'GREEN',
     });
 
     // Revoking the role keeps the item on record but it stops counting.
@@ -416,6 +466,24 @@ describe('role requirements and recalculation [HR-03]', () => {
     expect((await call('DELETE', `/api/v1/staff/role-requirements/${mapping.id}`)).status).toBe(
       404,
     );
+  });
+
+  it('nobody approves a role when they verified every item themselves (two-person rule)', async () => {
+    const tid = await staffTemplate('BLS');
+    const map = await call('POST', '/api/v1/staff/role-requirements', {
+      body: { role: 'TECHNICIAN', templateId: tid },
+    });
+    expect(map.status).toBe(201);
+    const s = await activeStaff(['CARE_ASSISTANT']);
+    expect((await startChecks(s.id, 'TECHNICIAN')).status).toBe(201);
+    const item = (await call('GET', `/api/v1/staff/${s.id}`)).body.requirements.find(
+      (r: J) => r.templateId === tid,
+    );
+    await verified(item.id, 'dev|fleet', 'dev|hr'); // HR verified the only item
+    const own = await approve(s.id, 'TECHNICIAN', 'dev|hr');
+    expect([own.status, own.body.code]).toEqual([422, 'FOUR_EYES_REQUIRED']);
+    expect((await approve(s.id, 'TECHNICIAN', 'dev|manager')).status).toBe(201);
+    await call('DELETE', `/api/v1/staff/role-requirements/${map.body.id}`);
   });
 
   it('rejects mapping a non-staff template', async () => {

@@ -78,6 +78,21 @@ export async function syncStaffRequirements(
   const roles = await activeRoles(tx, staffId, now);
   const { required } = await requiredTemplates(tx, roles);
   if (required.size === 0) return [];
+  return ensureStaffInstances(tx, staff, required, actorUserId, now);
+}
+
+/**
+ * Creates any missing instances of `templateIds` for the person (from each template's EFFECTIVE
+ * version). Idempotent. Returns the ids created.
+ */
+async function ensureStaffInstances(
+  tx: TenantTx,
+  staff: { id: string; organisationId: string; primaryLocationId: string; userId: string | null },
+  templateIds: Iterable<string>,
+  actorUserId: string,
+  now: Date,
+): Promise<string[]> {
+  const staffId = staff.id;
   const existing = new Set(
     (
       await tx.requirementInstance.findMany({
@@ -87,7 +102,7 @@ export async function syncStaffRequirements(
     ).map((i) => i.templateId),
   );
   const created: string[] = [];
-  for (const templateId of required) {
+  for (const templateId of templateIds) {
     if (existing.has(templateId)) continue;
     const v = await tx.requirementTemplateVersion.findFirst({
       where: { templateId, status: 'EFFECTIVE', subjectType: 'STAFF' },
@@ -243,11 +258,13 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
       roles: string[];
     }
   >();
+  const checking = await checkingRoles(tx, staffIds);
   for (const id of staffIds) {
     const roles = [
       ...new Set(approvals.filter((a) => a.staffId === id).map((a) => a.role as string)),
     ];
-    const required = new Set(map.filter((m) => roles.includes(m.role)).map((m) => m.templateId));
+    const counting = [...roles, ...(checking.get(id) ?? [])];
+    const required = new Set(map.filter((m) => counting.includes(m.role)).map((m) => m.templateId));
     const counts = { red: 0, amber: 0, grey: 0, green: 0 };
     for (const i of instances) {
       if (i.subjectId !== id) continue;
@@ -269,4 +286,42 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
     out.set(id, { counts, overall, roles });
   }
   return out;
+}
+
+/**
+ * B1: roles whose checks have started and that have never been approved (or revoked). Their
+ * requirements count for the person, so a candidate shows what is still missing; deployment still
+ * needs the role approved.
+ */
+export async function checkingRoles(
+  tx: TenantTx,
+  staffIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const checks = await tx.staffRoleCheck.findMany({
+    where: { staffId: { in: [...staffIds] } },
+    select: { staffId: true, role: true },
+  });
+  const decided = await tx.staffRoleApproval.findMany({
+    where: { staffId: { in: [...staffIds] } },
+    select: { staffId: true, role: true },
+  });
+  const out = new Map<string, string[]>();
+  for (const c of checks) {
+    if (decided.some((a) => a.staffId === c.staffId && a.role === c.role)) continue;
+    out.set(c.staffId, [...(out.get(c.staffId) ?? []), c.role]);
+  }
+  return out;
+}
+
+/** B1: start checks for a role: creates its requirements for the person, each awaiting evidence. */
+export async function startRoleChecks(
+  tx: TenantTx,
+  staffId: string,
+  role: string,
+  actorUserId: string,
+  now: Date,
+): Promise<string[]> {
+  const staff = await tx.staff.findUniqueOrThrow({ where: { id: staffId } });
+  const { required } = await requiredTemplates(tx, [role]);
+  return ensureStaffInstances(tx, staff, required, actorUserId, now);
 }

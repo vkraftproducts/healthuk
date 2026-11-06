@@ -101,14 +101,19 @@ const check = (code: string, result: string, overridable = false, reasonText = '
   details: [],
 });
 
-function renderPlanner(permissions: string[], validation: object) {
+function renderPlanner(
+  permissions: string[],
+  validation: object,
+  extra: Record<string, unknown> = {},
+) {
   const send = vi.fn(async (_m: string, path: string) =>
     path.endsWith('/validate') ? validation : {},
   );
   const api: ApiClient = {
     me: async () => me(permissions),
     readyz: async () => ({ status: 'ready' }),
-    get: async (p) => (p.startsWith('/api/v1/planner') ? planner : { data: [] }),
+    get: async (p) =>
+      p.startsWith('/api/v1/planner') ? planner : (extra[p.split('?')[0]!] ?? { data: [] }),
     send: send as ApiClient['send'],
   };
   render(<App api={api} history={createMemoryHistory({ initialEntries: ['/planner'] })} />);
@@ -153,16 +158,76 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     });
   });
 
-  it('a policy failure offers an exception only to approvers', async () => {
+  it('a policy failure lets the dispatcher ask a named approver, rather than grant it', async () => {
     const v = {
       allowed: false,
       checks: [check('COMPETENCE', 'FAIL', true, 'Bariatric competence missing')],
     };
-    renderPlanner(DISPATCH, v);
+    const { send } = renderPlanner(DISPATCH, v, {
+      '/api/v1/allocation-exceptions/approvers': { data: [{ id: 'mgr-1', name: 'Manager' }] },
+    });
     await userEvent.click(await screen.findByRole('button', { name: /J-117/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Check J-117 on AMB-01' }));
     await screen.findByText('Bariatric competence missing');
-    expect(screen.queryByRole('button', { name: 'Request exception' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Request exception' }));
+    await userEvent.selectOptions(await screen.findByLabelText('Ask'), 'mgr-1');
+    await userEvent.type(
+      screen.getByLabelText('Reason (recorded in the audit trail)'),
+      'Bariatric-trained supervisor attending',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'POST',
+        '/api/v1/allocation-exceptions',
+        ORG,
+        expect.objectContaining({
+          jobId: JOB,
+          checkCode: 'COMPETENCE',
+          approverId: 'mgr-1',
+          reason: 'Bariatric-trained supervisor attending',
+        }),
+      ),
+    );
+    expect(screen.queryByRole('button', { name: 'Approve exception' })).toBeNull();
+  });
+
+  it('the named approver sees the request and declines it with a reason, in the page', async () => {
+    const request = {
+      id: 'req-1',
+      jobId: JOB,
+      jobCode: 'J-117',
+      shiftId: S3,
+      checkCode: 'COMPETENCE',
+      reason: 'Bariatric-trained supervisor attending',
+      expiresAt: '2026-11-08T23:59:00Z',
+      requestedBy: 'disp-1',
+      requestedByName: 'Dispatcher',
+      approverId: '01900000-0000-7000-8000-000000000101',
+      approverName: 'Dev',
+      state: 'REQUESTED',
+      decisionReason: null,
+      createdAt: '2026-11-06T09:00:00Z',
+    };
+    const { send } = renderPlanner(
+      ['jobs.job.view', 'allocation.exception.approve'],
+      {},
+      { '/api/v1/allocation-exceptions': { data: [request] } },
+    );
+    const panel = await screen.findByRole('region', { name: 'Exception requests waiting for you' });
+    expect(panel).toHaveTextContent('J-117');
+    expect(panel).toHaveTextContent('Dispatcher');
+    await userEvent.type(
+      within(panel).getByLabelText('Reason for your decision'),
+      'No bariatric supervisor is free that day',
+    );
+    await userEvent.click(within(panel).getByRole('button', { name: 'Decline J-117' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('POST', '/api/v1/allocation-exceptions/req-1/decide', ORG, {
+        decision: 'DECLINED',
+        reason: 'No bariatric supervisor is free that day',
+      }),
+    );
   });
 
   it('when every check passes, allocates then notifies the crew', async () => {

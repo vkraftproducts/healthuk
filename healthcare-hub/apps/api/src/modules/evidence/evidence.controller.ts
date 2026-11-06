@@ -210,6 +210,7 @@ export class EvidenceController {
         });
       }
       await recomputeForEvidenceItem(tx, v.itemId, now);
+      if (status === 'CLEAN') await settleSentBack(tx, v.itemId, now);
       await audit(this.db, tx, hub, {
         action: 'evidence.upload.complete',
         entity: 'evidence_version',
@@ -302,6 +303,20 @@ export class EvidenceController {
         }
       }
       for (const id of instanceIds) await recomputeInstance(tx, id, now);
+      if (input.decision === 'REJECTED')
+        // Sent back: the uploader is told why, until they send a replacement.
+        await tx.alert.create({
+          data: {
+            organisationId: v.organisationId,
+            sourceType: 'EVIDENCE_RETURNED',
+            sourceId: v.id,
+            severity: 'MEDIUM',
+            reasonCode: 'SENT_BACK',
+            reasonText: `Sent back: ${input.reason ?? 'no reason given'}`,
+            ownerUserId: v.uploadedBy,
+            raisedAt: now,
+          },
+        });
       await audit(this.db, tx, hub, {
         action: 'evidence.verify',
         entity: 'evidence_version',
@@ -402,6 +417,31 @@ export class EvidenceController {
       disposition: 'attachment; filename="evidence"',
     });
   }
+}
+
+/**
+ * A replacement document has arrived: rejections of earlier documents for the same requirements
+ * are no longer waiting on anyone, so their "sent back" alerts are resolved.
+ */
+async function settleSentBack(tx: TenantTx, itemId: string, now: Date) {
+  const links = await tx.evidenceLink.findMany({ where: { itemId }, select: { instanceId: true } });
+  if (links.length === 0) return;
+  const rejected = await tx.evidenceVersion.findMany({
+    where: {
+      item: { links: { some: { instanceId: { in: links.map((l) => l.instanceId) } } } },
+      verification: { decision: 'REJECTED' },
+    },
+    select: { id: true },
+  });
+  if (rejected.length === 0) return;
+  await tx.alert.updateMany({
+    where: {
+      sourceType: 'EVIDENCE_RETURNED',
+      sourceId: { in: rejected.map((r) => r.id) },
+      state: { not: 'RESOLVED' },
+    },
+    data: { state: 'RESOLVED', resolvedAt: now },
+  });
 }
 
 /**

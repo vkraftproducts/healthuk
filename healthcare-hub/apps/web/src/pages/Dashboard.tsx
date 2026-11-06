@@ -130,6 +130,8 @@ export function Dashboard() {
             })}
           </section>
 
+          <ForYou />
+
           <div className="space-y-5">
             <section
               aria-labelledby="actions-h"
@@ -311,5 +313,40 @@ export function Dashboard() {
         </>
       )}
     </div>
+  );
+}
+
+/** Work sent back to me, and decisions waiting for me (from `GET /me/inbox`). Hidden when empty. */
+function ForYou() {
+  const res = useOne<{ data: Row[] }>('/api/v1/me/inbox');
+  const items = res.data?.data ?? [];
+  if (items.length === 0) return null;
+  const to = (r: Row) =>
+    r.link.type === 'JOB'
+      ? { to: '/planner' }
+      : r.link.subjectType === 'STAFF'
+        ? { to: '/staff/$id', params: { id: r.link.subjectId } }
+        : r.link.subjectType === 'VEHICLE'
+          ? { to: '/vehicles/$id', params: { id: r.link.subjectId } }
+          : { to: '/compliance' };
+  return (
+    <section
+      aria-labelledby="for-you-h"
+      className="space-y-2 rounded-lg border border-amber-600 bg-amber-50 p-5"
+    >
+      <h2 id="for-you-h" className="text-lg font-bold">
+        For you
+      </h2>
+      <ul className="space-y-2">
+        {items.map((r) => (
+          <li key={r.id} className="text-sm">
+            <Link {...to(r)} className="font-semibold text-hub-teal-dark underline">
+              {r.title}
+            </Link>
+            <span className="block text-slate-800">{r.reasonText}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

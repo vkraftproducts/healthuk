@@ -93,6 +93,7 @@ export function Planner() {
   if (!canView) return <p role="alert">You do not have permission to view the work planner.</p>;
   return (
     <div className="space-y-6">
+      {can('allocation.exception.approve') && <ExceptionRequests />}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Work planner</h1>
@@ -487,14 +488,11 @@ function ValidatePanel({ job, shift, onDone }: { job: Row; shift: Row; onDone: (
                 crew.
               </p>
             )}
-            {c.result === 'FAIL' &&
-              !c.excepted &&
-              c.overridable &&
-              can('allocation.exception.approve') && (
-                <button className={`${smallButton} mt-1`} onClick={() => setExcepting(c.code)}>
-                  Request exception
-                </button>
-              )}
+            {c.result === 'FAIL' && !c.excepted && c.overridable && can('jobs.allocate') && (
+              <button className={`${smallButton} mt-1`} onClick={() => setExcepting(c.code)}>
+                Request exception
+              </button>
+            )}
             {excepting === c.code && (
               <ExceptionForm
                 jobId={job.id}
@@ -551,6 +549,85 @@ function useValidation(jobId: string, shiftId: string) {
   return { ...state, reload };
 }
 
+/** E3: requests addressed to me, approved or declined with a reason (no browser pop-ups). */
+function ExceptionRequests() {
+  const { api, orgId, me } = useApp();
+  const res = useOne<{ data: Row[] }>('/api/v1/allocation-exceptions');
+  const { run, msg } = useRun();
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const waiting = (res.data?.data ?? []).filter(
+    (r) => r.state === 'REQUESTED' && r.approverId === me.user.id,
+  );
+  if (waiting.length === 0) return null;
+  const decide = (r: Row, decision: 'APPROVED' | 'DECLINED') => {
+    const reason = (reasons[r.id] ?? '').trim();
+    void run(
+      () =>
+        api.send('POST', `/api/v1/allocation-exceptions/${r.id}/decide`, orgId, {
+          decision,
+          reason,
+        }),
+      decision === 'APPROVED'
+        ? `Exception approved for ${r.jobCode}. It can now be allocated.`
+        : `Declined. ${r.requestedByName} has been told why.`,
+    );
+  };
+  return (
+    <section
+      aria-labelledby="exc-req-h"
+      className="space-y-3 rounded-lg border border-amber-600 bg-amber-50 p-4"
+    >
+      <h2 id="exc-req-h" className="text-lg font-bold">
+        Exception requests waiting for you
+      </h2>
+      {msg}
+      <ul className="space-y-3">
+        {waiting.map((r) => (
+          <li
+            key={r.id}
+            className="space-y-2 rounded-md border border-hub-line bg-white p-3 text-sm"
+          >
+            <p>
+              <b>{r.jobCode}</b> · {words(r.checkCode)} · asked by {r.requestedByName} · until{' '}
+              {formatDate(londonDate(new Date(r.expiresAt)))}
+            </p>
+            <p className="text-slate-700">“{r.reason}”</p>
+            <label className="block">
+              <span className="text-slate-700">Reason for your decision</span>
+              <input
+                className={input}
+                value={reasons[r.id] ?? ''}
+                minLength={3}
+                maxLength={1000}
+                onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })}
+              />
+            </label>
+            <div className="flex gap-2">
+              <button
+                className={button}
+                disabled={(reasons[r.id] ?? '').trim().length < 3}
+                aria-label={`Approve ${r.jobCode}`}
+                onClick={() => decide(r, 'APPROVED')}
+              >
+                Approve
+              </button>
+              <button
+                className={smallButton}
+                disabled={(reasons[r.id] ?? '').trim().length < 3}
+                aria-label={`Decline ${r.jobCode}`}
+                onClick={() => decide(r, 'DECLINED')}
+              >
+                Decline
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** E3: asks a named approver; nothing is excepted until that person approves. */
 function ExceptionForm(p: {
   jobId: string;
   shiftId: string;
@@ -559,28 +636,51 @@ function ExceptionForm(p: {
 }) {
   const { api, orgId } = useApp();
   const { run, msg } = useRun();
+  const approvers = useOne<{ data: { id: string; name: string }[] }>(
+    '/api/v1/allocation-exceptions/approvers',
+  );
   const max = londonDate(new Date(Date.now() + 7 * 86_400_000));
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    const approverId = String(f.get('approver'));
+    const name = approvers.data?.data.find((x) => x.id === approverId)?.name ?? 'the approver';
     const ok = await run(
       () =>
         api.send('POST', '/api/v1/allocation-exceptions', orgId, {
           jobId: p.jobId,
           shiftId: p.shiftId,
           checkCode: p.checkCode,
+          approverId,
           reason: String(f.get('reason')),
           expiresAt: londonDateTime(String(f.get('until')), '23:59').toISOString(),
         }),
-      'Exception recorded with you as the named approver.',
+      `Request sent to ${name}. Allocation stays unavailable until they approve.`,
     );
     if (ok) p.onClose();
   }
+  const people = approvers.data?.data ?? [];
   return (
     <form
       onSubmit={submit}
       className="mt-2 space-y-2 rounded-lg border border-hub-line bg-white p-2"
     >
+      <Field label="Ask">
+        <select name="approver" required defaultValue="" className={input}>
+          <option value="" disabled>
+            {approvers.isLoading
+              ? 'Loading…'
+              : people.length
+                ? 'Choose an approver'
+                : 'Nobody can approve'}
+          </option>
+          {people.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
       <Field label="Reason (recorded in the audit trail)">
         <textarea name="reason" required minLength={10} maxLength={1000} className={input} />
       </Field>
@@ -596,7 +696,7 @@ function ExceptionForm(p: {
         />
       </Field>
       <div className="flex gap-2">
-        <button className={button}>Approve exception</button>
+        <button className={button}>Send request</button>
         <button type="button" className={smallButton} onClick={p.onClose}>
           Cancel
         </button>

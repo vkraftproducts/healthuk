@@ -63,6 +63,9 @@ function errText(e: unknown): string {
     if (e.code === 'TRANSITION_NOT_ALLOWED')
       return 'That move is not allowed yet (check role approvals).';
     if (e.code === 'CONFLICT') return 'That has already been done.';
+    // Role approval explains itself: which items still need verifying, or who must approve.
+    if ((e.code === 'VALIDATION_FAILED' || e.code === 'FOUR_EYES_REQUIRED') && e.detail)
+      return e.detail;
     if (e.status === 403) return 'You do not have permission to do that.';
     if (e.status === 400) return 'Check the details and try again.';
     return `The server rejected the request (${e.code}).`;
@@ -311,6 +314,20 @@ function Overview({ s }: { s: Row }) {
           }
         />
       )}
+      {can('staff.profile.manage') && s.lifecycleState !== 'LEAVER' && (
+        <ActionForm
+          title="Start checks for a role"
+          options={Object.entries(ROLE_LABEL).filter(([k]) => !s.roles.includes(k))}
+          selectLabel="Role"
+          noReason
+          onSubmit={(role) =>
+            run(
+              () => api.send('POST', `/api/v1/staff/${s.id}/role-checks`, orgId, { role }),
+              'Checks started. The items for this role are listed under Requirements; verify each before approving.',
+            )
+          }
+        />
+      )}
       {can('staff.approve_role') && s.lifecycleState !== 'LEAVER' && (
         <ActionForm
           title="Approve for a role"
@@ -346,11 +363,14 @@ function ActionForm({
   title,
   options,
   selectLabel,
+  noReason = false,
   onSubmit,
 }: {
   title: string;
   options: [string, string][];
   selectLabel: string;
+  /** The action needs no reason (nothing is decided, only started). */
+  noReason?: boolean;
   onSubmit: (value: string, reason: string) => Promise<void>;
 }) {
   const id = title.toLowerCase().replace(/[^a-z]+/g, '-');
@@ -358,7 +378,7 @@ function ActionForm({
     e.preventDefault();
     const form = e.currentTarget;
     const f = new FormData(form);
-    await onSubmit(String(f.get('value')), String(f.get('reason')).trim());
+    await onSubmit(String(f.get('value')), String(f.get('reason') ?? '').trim());
     form.reset();
   }
   if (options.length === 0) return null;
@@ -381,15 +401,17 @@ function ActionForm({
             ))}
           </select>
         </label>
-        <label className="flex flex-col text-sm">
-          Reason (required)
-          <input
-            name="reason"
-            required
-            minLength={3}
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
-          />
-        </label>
+        {!noReason && (
+          <label className="flex flex-col text-sm">
+            Reason (required)
+            <input
+              name="reason"
+              required
+              minLength={3}
+              className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            />
+          </label>
+        )}
         <button className="rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white hover:bg-hub-teal-dark">
           Confirm
         </button>
@@ -488,41 +510,82 @@ function History({ s }: { s: Row }) {
   );
 }
 
+/** Acronyms kept in capitals when a code is written in words. */
+const ACRONYMS = new Set([
+  'DVLA',
+  'DBS',
+  'NHS',
+  'HCPC',
+  'NMC',
+  'GMC',
+  'BLS',
+  'ILS',
+  'ALS',
+  'PIN',
+  'ID',
+  'UK',
+  'EU',
+]);
+
+const sentence = (words: string): string => words.charAt(0).toUpperCase() + words.slice(1);
+
+/** A stored code or value in words: DVLA_SHARE_CODE → "DVLA share code", true → "Yes". */
+function inWords(v: unknown): string {
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'string' && /^[A-Z][A-Z0-9_]*$/.test(v) && (v.includes('_') || v.length >= 4))
+    return sentence(
+      v
+        .split('_')
+        .map((w) => (ACRONYMS.has(w) ? w : w.toLowerCase()))
+        .join(' '),
+    );
+  return String(v);
+}
+
 /**
- * Readable one-line summary: no raw codes, no empty fields (UI_SPEC). Colleagues are named
+ * A record as labelled fields: no raw codes, no empty fields (UI_SPEC). Colleagues are named
  * (`people` maps the user ids a record holds to names), never shown as ids.
  */
 export function summarise(
   data: Record<string, unknown>,
   people: Record<string, string> = {},
-): string {
-  const word = (v: unknown): string =>
-    typeof v === 'string' && /^[A-Z][A-Z0-9_]+$/.test(v) && v.includes('_')
-      ? v.replace(/_/g, ' ').toLowerCase()
-      : typeof v === 'string' && /^[A-Z]{4,}$/.test(v)
-        ? v.toLowerCase()
-        : typeof v === 'boolean'
-          ? v
-            ? 'yes'
-            : 'no'
-          : String(v);
+): [string, string][] {
+  const label = (k: string) => sentence(k.replace(/([A-Z])/g, ' $1').toLowerCase());
   return Object.entries(data)
     .filter(
       ([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0),
     )
-    .map(([k, v]) => {
-      if (k.endsWith('UserId')) {
-        const role = k
-          .slice(0, -'UserId'.length)
-          .replace(/([A-Z])/g, ' $1')
-          .toLowerCase();
-        return `${role}: ${people[String(v)] ?? 'a former colleague'}`;
-      }
-      const key = k.replace(/([A-Z])/g, ' $1').toLowerCase();
-      const val = Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? '…' : word(v);
-      return `${key}: ${val}`;
-    })
-    .join('; ');
+    .map(([k, v]): [string, string] => {
+      if (k.endsWith('UserId'))
+        return [label(k.slice(0, -'UserId'.length)), people[String(v)] ?? 'a former colleague'];
+      const val = Array.isArray(v)
+        ? v.map(inWords).join(', ')
+        : typeof v === 'object'
+          ? '…'
+          : inWords(v);
+      return [label(k), val];
+    });
+}
+
+/** The period a record is valid for, in words. */
+export function validity(from: string | null | undefined, to: string | null | undefined): string {
+  if (from && to) return `${from} to ${to}`;
+  if (to) return `Until ${to}`;
+  if (from) return `From ${from}, no end date`;
+  return '—';
+}
+
+function Fields({ fields }: { fields: [string, string][] }) {
+  return (
+    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 text-sm">
+      {fields.map(([k, v]) => (
+        <div key={k} className="contents">
+          <dt className="font-medium text-slate-700">{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; canAdd: boolean }) {
@@ -562,14 +625,15 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
         error={res.isError ? 'Could not load these records.' : null}
         emptyMessage="No records."
         columns={[
-          { key: 'details', header: 'Details', cell: (r) => summarise(r.data, r.people) },
+          {
+            key: 'details',
+            header: 'Details',
+            cell: (r) => <Fields fields={summarise(r.data, r.people)} />,
+          },
           {
             key: 'valid',
             header: 'Valid',
-            cell: (r) =>
-              r.validFrom || r.validTo
-                ? `${r.validFrom ?? '…'} to ${r.validTo ?? 'no end date'}`
-                : '—',
+            cell: (r) => validity(r.validFrom, r.validTo),
           },
           {
             key: 'state',

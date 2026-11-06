@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
-import type { ApiClient } from '../src/api.js';
+import { ApiError, type ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
 import { fieldsOf } from '../src/pages/staff/RecordForm.js';
 
@@ -203,6 +203,40 @@ describe('staff profile (/staff/:id)', () => {
     );
   });
 
+  it('starts checks for a role without asking for a reason (B1)', async () => {
+    const { send } = renderAt(`/staff/${STAFF}`, MANAGER, async (p) =>
+      p === `/api/v1/staff/${STAFF}` ? detail : { data: [] },
+    );
+    const section = await screen.findByRole('region', { name: 'Start checks for a role' });
+    expect(within(section).queryByLabelText('Reason (required)')).toBeNull();
+    await userEvent.selectOptions(within(section).getByLabelText('Role'), 'TECHNICIAN');
+    await userEvent.click(within(section).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith('POST', `/api/v1/staff/${STAFF}/role-checks`, ORG, {
+        role: 'TECHNICIAN',
+      }),
+    );
+  });
+
+  it('says which items still need verifying when a role approval is refused (B1)', async () => {
+    const { send } = renderAt(`/staff/${STAFF}`, MANAGER, async (p) =>
+      p === `/api/v1/staff/${STAFF}` ? detail : { data: [] },
+    );
+    send.mockRejectedValueOnce(
+      new ApiError(
+        422,
+        'VALIDATION_FAILED',
+        'Not every requirement for this role is verified: BLS.',
+      ),
+    );
+    const section = await screen.findByRole('region', { name: 'Approve for a role' });
+    await userEvent.type(within(section).getByLabelText('Reason (required)'), 'Ready now');
+    await userEvent.click(within(section).getByRole('button', { name: 'Confirm' }));
+    expect(
+      await screen.findByText('Not every requirement for this role is verified: BLS.'),
+    ).toBeInTheDocument();
+  });
+
   it('dispatchers see the clearance view only, with no tabs', async () => {
     renderAt(`/staff/${STAFF}`, ['staff.profile.view_clearance'], async () => ({
       id: STAFF,
@@ -277,13 +311,26 @@ describe('buttons say what they act on, with the words spaced', () => {
 
 describe('documents behind a requirement', () => {
   const evidencePath = (id: string) => `/api/v1/requirements/instances/${id}/evidence`;
+  const version = (o: Record<string, unknown>) => ({
+    title: 'Driving licence check',
+    mime: 'application/pdf',
+    scanStatus: 'CLEAN',
+    ...o,
+  });
   function withDocuments(versions: Record<string, unknown>[]) {
     const first = (detail.requirements as { id: string; templateTitle: string }[])[0]!;
-    const tab = { location: { href: '' }, opener: {} as unknown, close: vi.fn() };
+    const opened = vi.fn();
+    vi.stubGlobal('open', opened);
+    const fetched: string[] = [];
     vi.stubGlobal(
-      'open',
-      vi.fn(() => tab),
+      'fetch',
+      vi.fn(async (url: string) => {
+        fetched.push(url);
+        return new Response(new Blob(['%PDF-1.4'], { type: 'application/pdf' }));
+      }),
     );
+    URL.createObjectURL = vi.fn(() => 'blob:http://localhost/doc-1');
+    URL.revokeObjectURL = vi.fn();
     renderAt(`/staff/${STAFF}`, [...MANAGER, 'compliance.requirement.view'], async (p) =>
       p === `/api/v1/staff/${STAFF}`
         ? detail
@@ -293,44 +340,57 @@ describe('documents behind a requirement', () => {
             ? { url: `http://api.test/blob/${p.split('/')[4]}` }
             : { data: [] },
     );
-    return { first, tab };
+    return { first, opened, fetched };
   }
+  const view = async (title: string) => {
+    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
+    await userEvent.click(screen.getByRole('button', { name: `View document for ${title}` }));
+  };
   afterEach(() => vi.unstubAllGlobals());
 
-  it('opens the latest verified document in a new tab', async () => {
-    const { first, tab } = withDocuments([
-      { id: 'newer-pending', state: 'PENDING_VERIFICATION', scanStatus: 'CLEAN' },
-      { id: 'verified', state: 'VERIFIED', scanStatus: 'CLEAN' },
-      { id: 'older', state: 'VERIFIED', scanStatus: 'CLEAN' },
+  it('shows the latest verified document on screen, without downloading it or opening a tab', async () => {
+    const { first, opened, fetched } = withDocuments([
+      version({ id: 'newer-pending', state: 'PENDING_VERIFICATION' }),
+      version({ id: 'verified', state: 'VERIFIED' }),
+      version({ id: 'older', state: 'VERIFIED' }),
     ]);
-    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
-    await userEvent.click(
-      screen.getByRole('button', { name: `View document for ${first.templateTitle}` }),
-    );
-    await waitFor(() => expect(tab.location.href).toBe('http://api.test/blob/verified'));
-    expect(tab.opener).toBeNull();
+    await view(first.templateTitle);
+    const viewer = await screen.findByRole('dialog', { name: 'Driving licence check' });
+    expect(viewer.querySelector('iframe')).toHaveAttribute('src', 'blob:http://localhost/doc-1');
+    expect(fetched).toEqual(['http://api.test/blob/verified']);
+    expect(opened).not.toHaveBeenCalled();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:http://localhost/doc-1');
   });
 
-  it('opens a document awaiting review when nothing is verified yet, so it can be checked', async () => {
-    const { first, tab } = withDocuments([
-      { id: 'quarantined', state: 'PENDING_VERIFICATION', scanStatus: 'PENDING' },
-      { id: 'awaiting', state: 'PENDING_VERIFICATION', scanStatus: 'CLEAN' },
+  it('shows a document awaiting review when nothing is verified yet, so it can be checked', async () => {
+    const { first, fetched } = withDocuments([
+      version({ id: 'quarantined', state: 'PENDING_VERIFICATION', scanStatus: 'PENDING' }),
+      version({ id: 'awaiting', state: 'PENDING_VERIFICATION', mime: 'image/png', title: 'Scan' }),
     ]);
-    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
-    await userEvent.click(
-      screen.getByRole('button', { name: `View document for ${first.templateTitle}` }),
-    );
-    await waitFor(() => expect(tab.location.href).toBe('http://api.test/blob/awaiting'));
+    await view(first.templateTitle);
+    const viewer = await screen.findByRole('dialog', { name: 'Scan' });
+    expect(viewer.querySelector('img')).toHaveAttribute('src', 'blob:http://localhost/doc-1');
+    expect(fetched).toEqual(['http://api.test/blob/awaiting']);
+  });
+
+  it('offers a download for files that cannot be shown on screen', async () => {
+    const { first } = withDocuments([
+      version({ id: 'sheet', state: 'VERIFIED', mime: 'text/csv', title: 'Training export' }),
+    ]);
+    await view(first.templateTitle);
+    const viewer = await screen.findByRole('dialog', { name: 'Training export' });
+    expect(viewer).toHaveTextContent(/cannot be shown here/);
+    expect(viewer.querySelector('iframe, img')).toBeNull();
   });
 
   it('says so when there is no document on file, and opens nothing', async () => {
-    const { first, tab } = withDocuments([]);
-    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
-    await userEvent.click(
-      screen.getByRole('button', { name: `View document for ${first.templateTitle}` }),
-    );
+    const { first, fetched } = withDocuments([]);
+    await view(first.templateTitle);
     expect(await screen.findByText(/No document on file yet/)).toBeInTheDocument();
-    expect(tab.close).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetched).toEqual([]);
   });
 });
 
@@ -342,10 +402,14 @@ describe('record summaries', () => {
         { completedOn: '2025-10-24', signedOffByUserId: 'u1', checkerUserId: 'u2' },
         { u1: 'Hana Rowe' },
       ),
-    ).toBe('completed on: 2025-10-24; signed off by: Hana Rowe; checker: a former colleague');
+    ).toEqual([
+      ['Completed on', '2025-10-24'],
+      ['Signed off by', 'Hana Rowe'],
+      ['Checker', 'a former colleague'],
+    ]);
   });
 
-  it('humanise codes and drop empty fields', async () => {
+  it('labels each field, writes codes in words with acronyms kept, and drops empty fields', async () => {
     const { summarise } = await import('../src/pages/staff/StaffProfile.js');
     expect(
       summarise({
@@ -353,10 +417,23 @@ describe('record summaries', () => {
         checkMethod: 'DVLA_SHARE_CODE',
         categories: ['B', 'C1'],
         restrictionCodes: [],
+        penaltyPoints: 0,
         updateServiceConsent: true,
       }),
-    ).toBe(
-      'outcome: satisfactory; check method: dvla share code; categories: B, C1; update service consent: yes',
-    );
+    ).toEqual([
+      ['Outcome', 'Satisfactory'],
+      ['Check method', 'DVLA share code'],
+      ['Categories', 'B, C1'],
+      ['Penalty points', '0'],
+      ['Update service consent', 'Yes'],
+    ]);
+  });
+
+  it('writes the valid period in words, with no placeholder for a missing start', async () => {
+    const { validity } = await import('../src/pages/staff/StaffProfile.js');
+    expect(validity(null, '2029-04-21')).toBe('Until 2029-04-21');
+    expect(validity('2025-09-01', null)).toBe('From 2025-09-01, no end date');
+    expect(validity('2025-09-01', '2027-09-01')).toBe('2025-09-01 to 2027-09-01');
+    expect(validity(null, null)).toBe('—');
   });
 });

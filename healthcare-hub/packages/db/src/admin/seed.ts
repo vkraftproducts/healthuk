@@ -310,13 +310,13 @@ export async function seed(
       if (!ins.rowCount) continue;
       await c.query(
         `INSERT INTO staff_lifecycle_event (organisation_id, staff_id, from_state, to_state, reason, actor_user_id)
-         VALUES ($1, $2, NULL, $3, 'Seeded synthetic record', $4)`,
+         VALUES ($1, $2, NULL, $3, 'Added to the staff register', $4)`,
         [SEED_IDS.orgExample, id, state, SEED_USERS.manager!.id],
       );
       for (const role of roles)
         await c.query(
           `INSERT INTO staff_role_approval (organisation_id, staff_id, role, reason, approved_by)
-           VALUES ($1, $2, $3, 'Seeded synthetic approval', $4)`,
+           VALUES ($1, $2, $3, 'Approved for the role at onboarding', $4)`,
           [SEED_IDS.orgExample, id, role, SEED_USERS.manager!.id],
         );
     }
@@ -335,7 +335,7 @@ export async function seed(
       if (ins.rowCount)
         await c.query(
           `INSERT INTO vehicle_location_history (organisation_id, vehicle_id, location_id, reason, moved_by)
-           VALUES ($1, $2, $3, 'Seeded synthetic vehicle', $4)`,
+           VALUES ($1, $2, $3, 'Added to the fleet at its base', $4)`,
           [SEED_IDS.orgExample, id, SEED_IDS.locWatford, SEED_USERS.manager!.id],
         );
     }

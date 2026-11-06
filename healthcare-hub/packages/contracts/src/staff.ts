@@ -304,6 +304,8 @@ export const StaffPatch = z
   .refine((o) => Object.keys(o).length > 0, 'Nothing to change');
 
 export const TransitionInput = z.strictObject({ to: StaffLifecycle, reason });
+/** B1: start checks for a role before it is approved. */
+export const RoleCheckInput = z.strictObject({ role: StaffRole });
 export const RoleApprovalInput = z.strictObject({
   role: StaffRole,
   reason,

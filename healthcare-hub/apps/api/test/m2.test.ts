@@ -319,6 +319,28 @@ describe('requirement templates', () => {
 });
 
 describe('evidence lifecycle and status (upload never makes anything green) [UAT-01]', () => {
+  it('a rejected document goes back to whoever uploaded it, with the reason, until they send a new one', async () => {
+    const inst = await newInstance(await publishedTemplate());
+    const first = await upload({ sub: 'dev|hr', instanceIds: [inst.id] });
+    const no = await call('POST', `/api/v1/evidence/${first.req.evidenceVersionId}/verify`, {
+      body: { decision: 'REJECTED', reason: 'Certificate is for a different course' },
+    });
+    expect(no.status).toBe(201);
+    const mine = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|hr' })).body.data as J[];
+    expect(mine).toContainEqual(
+      expect.objectContaining({
+        kind: 'SENT_BACK',
+        reasonText: expect.stringContaining('Certificate is for a different course'),
+        link: expect.objectContaining({ type: 'REQUIREMENT', id: inst.id }),
+      }),
+    );
+    const others = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|fleet' })).body.data as J[];
+    expect(others.filter((i) => i.link.id === inst.id)).toEqual([]);
+    await upload({ sub: 'dev|hr', instanceIds: [inst.id] }); // resubmitted
+    const after = (await call('GET', '/api/v1/me/inbox', { sub: 'dev|hr' })).body.data as J[];
+    expect(after.filter((i) => i.kind === 'SENT_BACK' && i.link.id === inst.id)).toEqual([]);
+  });
+
   it('missing → unverified → verified → awaiting review, with segregation of duties', async () => {
     const tid = await publishedTemplate();
     const owner = await userId('hr@example.test');

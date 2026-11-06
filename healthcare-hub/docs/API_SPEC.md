@@ -23,6 +23,7 @@ and published at `/api/v1/openapi.json` (non-prod: Swagger UI at `/api/docs`).
 
 ```
 GET    /me                                  user, memberships, permissions, mfa state
+GET    /me/inbox                            items for the caller: evidence sent back, exceptions to decide or declined
 GET    /organisations/:id/locations
 POST   /admin/users  PATCH /admin/users/:id  POST /admin/users/:id/revoke
 POST   /admin/support-access-grants          (manager approves)
@@ -56,7 +57,8 @@ GET  /evidence/:versionId/download → { url, expiresAt }   (audited)
 GET/POST /staff   GET/PATCH /staff/:id   POST /staff/:id/transition { to, reason }
 GET  /staff/:id/readiness?from&to
 GET/POST /staff/:id/{references|dbs|right-to-work|licences|registrations|training|supervisions|appraisals}
-POST /staff/:id/restrictions   POST /staff/:id/role-approvals
+POST /staff/:id/restrictions   POST /staff/:id/role-checks { role }   POST /staff/:id/role-approvals
+  (role approval → 422 until every requirement mapped to the role is verified; FOUR_EYES_REQUIRED if the approver verified them all)
 ```
 
 ### Fleet
@@ -102,7 +104,9 @@ GET/POST /shifts  POST /shifts/:id/crew
 POST /jobs/:id/validate { shiftId }               → checks[] (no side effects)
 POST /jobs/:id/allocate { shiftId, exceptionIds? } → 409 ALLOCATION_BLOCKED with checks[]
 POST /jobs/:id/offer   POST /jobs/:id/status { state, capturedAt, reason?, clientSubmissionId }
-POST /allocation-exceptions  (policy-type checks only; STATUTORY/SAFETY → 422 OVERRIDE_NOT_PERMITTED)
+POST /allocation-exceptions { jobId, shiftId, checkCode, reason, expiresAt, approverId }  request (policy-type checks only; STATUTORY/SAFETY → 422 OVERRIDE_NOT_PERMITTED)
+GET  /allocation-exceptions   GET /allocation-exceptions/approvers
+POST /allocation-exceptions/:id/decide { decision: APPROVED|DECLINED, reason }   named approver only, once
 ```
 
 ### Crew app (mobile-optimised)

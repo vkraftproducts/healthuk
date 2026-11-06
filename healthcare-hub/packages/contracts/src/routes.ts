@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AuditListResponse, VerifyChainResponse } from './audit.js';
 import { HealthResponse, ReadyResponse } from './health.js';
-import { MeResponse } from './me.js';
+import { InboxItemDto, MeResponse } from './me.js';
 import {
   CrewJobDto,
   CrewPolicyDto,
@@ -93,13 +93,14 @@ import {
 } from './governance.js';
 import {
   BookingDto,
-  ExceptionDto,
   JobDetailDto,
   JobDto,
   PlannerDto,
   ShiftDto,
   ShiftGateDto,
   ValidationDto,
+  ApproverDto,
+  ExceptionRequestDto,
 } from './jobs.js';
 import { z as zz } from 'zod';
 import { uuid } from './common.js';
@@ -138,6 +139,12 @@ export const routes: Record<string, RouteDef> = {
     path: '/me',
     summary: 'Current user, memberships and permissions',
     response: MeResponse,
+  },
+  meInbox: {
+    method: 'get',
+    path: '/me/inbox',
+    summary: 'Work sent back to you and decisions waiting for you',
+    response: list(InboxItemDto),
   },
   liveChanges: {
     method: 'get',
@@ -1120,8 +1127,32 @@ export const routes: Record<string, RouteDef> = {
   allocationException: {
     method: 'post',
     path: '/allocation-exceptions',
-    summary: 'Approve a policy exception (statutory/safety: 422)',
-    response: ExceptionDto,
+    summary: 'Ask a named approver for a policy exception (statutory/safety: 422)',
+    response: ExceptionRequestDto,
+  },
+  staffRoleChecks: {
+    method: 'post',
+    path: '/staff/{id}/role-checks',
+    summary: 'Start checks for a role: its requirements appear, each awaiting evidence',
+    response: zz.object({ role: zz.string(), requirementsCreated: zz.number().int() }),
+  },
+  allocationExceptionList: {
+    method: 'get',
+    path: '/allocation-exceptions',
+    summary: 'Exception requests you made or were asked to decide',
+    response: list(ExceptionRequestDto),
+  },
+  allocationExceptionApprovers: {
+    method: 'get',
+    path: '/allocation-exceptions/approvers',
+    summary: 'People you can ask to approve an exception (never yourself)',
+    response: list(ApproverDto),
+  },
+  allocationExceptionDecide: {
+    method: 'post',
+    path: '/allocation-exceptions/{id}/decide',
+    summary: 'The named approver approves or declines, with a reason',
+    response: ExceptionRequestDto,
   },
   planner: {
     method: 'get',

@@ -258,7 +258,32 @@ export const ExceptionInput = z.strictObject({
   ]),
   reason: z.string().trim().min(10).max(1000),
   expiresAt: isoDateTime,
+  /** The named person asked to approve it: someone else, who can approve exceptions (E3). */
+  approverId: uuid,
 });
+export const ExceptionDecisionInput = z.strictObject({
+  decision: z.enum(['APPROVED', 'DECLINED']),
+  reason: z.string().trim().min(3).max(1000),
+});
+/** A request for a policy exception and, once made, the approver's decision (E3). */
+export const ExceptionRequestDto = z.object({
+  id: uuid,
+  jobId: uuid,
+  jobCode: z.string(),
+  shiftId: uuid,
+  checkCode: z.string(),
+  reason: z.string(),
+  expiresAt: isoDateTime,
+  requestedBy: uuid,
+  requestedByName: z.string(),
+  approverId: uuid,
+  approverName: z.string(),
+  state: z.enum(['REQUESTED', 'APPROVED', 'DECLINED']),
+  decisionReason: z.string().nullable(),
+  createdAt: isoDateTime,
+});
+export type ExceptionRequestDto = z.infer<typeof ExceptionRequestDto>;
+export const ApproverDto = z.object({ id: uuid, name: z.string() });
 export const ExceptionDto = z.object({
   id: uuid,
   jobId: uuid,

@@ -766,6 +766,19 @@ model StaffRoleApproval {
   @@map("staff_role_approval")
 }
 
+/// B1: checks for a role started before approval (append-only, one per person and role).
+model StaffRoleCheck {
+  id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  staffId        String    @map("staff_id") @db.Uuid
+  role           StaffRole
+  startedBy      String    @map("started_by") @db.Uuid
+  createdAt      DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([staffId, role])
+  @@map("staff_role_check")
+}
+
 model StaffRestriction {
   id             String               @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   organisationId String               @map("organisation_id") @db.Uuid
@@ -2036,10 +2049,44 @@ model AllocationException {
   reason         String
   expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
   createdAt      DateTime @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  requestId      String?  @map("request_id") @db.Uuid
 
   job Job @relation(fields: [jobId], references: [id])
 
   @@map("allocation_exception")
+}
+
+/// E3: a request for a policy exception, addressed to a named approver (append-only).
+model AllocationExceptionRequest {
+  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  jobId          String   @map("job_id") @db.Uuid
+  shiftId        String   @map("shift_id") @db.Uuid
+  checkCode      String   @map("check_code")
+  reason         String
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  requestedBy    String   @map("requested_by") @db.Uuid
+  approverId     String   @map("approver_id") @db.Uuid
+  createdAt      DateTime @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+
+  decision AllocationExceptionDecision?
+
+  @@map("allocation_exception_request")
+}
+
+/// E3: the approver's decision on a request (append-only, one per request).
+model AllocationExceptionDecision {
+  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  requestId      String   @unique @map("request_id") @db.Uuid
+  decision       String
+  reason         String
+  decidedBy      String   @map("decided_by") @db.Uuid
+  createdAt      DateTime @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+
+  request AllocationExceptionRequest @relation(fields: [requestId], references: [id])
+
+  @@map("allocation_exception_decision")
 }
 
 model JobStatusEvent {
