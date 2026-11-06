@@ -215,10 +215,13 @@ export function App({
       } catch {
         /* storage unavailable */
       }
+      // The next sign-in starts on the dashboard, not on the page the last person left open.
+      if (history) history.replace('/');
+      else window.history.replaceState(null, '', '/');
       setNotice(why ?? null);
       setSignedIn(false);
     },
-    [auth, client],
+    [auth, client, history],
   );
   if (auth && !signedIn) {
     return (

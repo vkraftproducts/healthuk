@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -186,6 +186,34 @@ describe('sign-in page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('You have signed out.');
+  });
+
+  it('starts again on the dashboard after signing out and back in, not on the last page', async () => {
+    tokenServer();
+    renderWith(new MockAuthClient('http://oidc.test'));
+    const signInAs = async () => {
+      await userEvent.type(screen.getByLabelText('Username'), 'hr');
+      await userEvent.type(screen.getByLabelText('Password'), 'right password');
+      await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+      return screen.findByRole('navigation', { name: 'Primary' });
+    };
+    let nav = await signInAs();
+    await userEvent.click(within(nav).getByRole('link', { name: 'Staff' }));
+    await waitFor(() =>
+      expect(within(nav).getByRole('link', { name: 'Staff' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      ),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: 'Sign in' });
+    nav = await signInAs();
+    await waitFor(() =>
+      expect(within(nav).getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      ),
+    );
   });
 
   it('goes back to the sign-in page, saying why, when a stored session has ended', async () => {
