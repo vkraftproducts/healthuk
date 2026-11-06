@@ -51,7 +51,18 @@ type RecordRow = Prisma.StaffRecordGetPayload<{
   include: { supersededBy: { select: { id: true } } };
 }>;
 
-export function toRecordDto(r: RecordRow, key: Buffer): StaffRecordDto {
+/** User ids the record names (checker, assessor, supervisor, ...): their fields end in UserId. */
+export function userIdsIn(data: unknown): string[] {
+  return Object.entries((data ?? {}) as Record<string, unknown>)
+    .filter(([k, v]) => k.endsWith('UserId') && typeof v === 'string')
+    .map(([, v]) => v as string);
+}
+
+export function toRecordDto(
+  r: RecordRow,
+  key: Buffer,
+  names: ReadonlyMap<string, string> = new Map(),
+): StaffRecordDto {
   const data = { ...(r.data as Record<string, unknown>) };
   if (r.kind === 'DBS' && typeof data.certificateNumber === 'string') {
     data.certificateNumber = decryptField(data.certificateNumber, key) ?? '[unreadable]';
@@ -69,6 +80,9 @@ export function toRecordDto(r: RecordRow, key: Buffer): StaffRecordDto {
     current: !r.supersededBy,
     createdAt: r.createdAt.toISOString(),
     createdBy: r.createdBy,
+    people: Object.fromEntries(
+      userIdsIn(r.data).flatMap((id) => (names.has(id) ? [[id, names.get(id)!]] : [])),
+    ),
   };
 }
 

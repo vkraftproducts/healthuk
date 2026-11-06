@@ -2,7 +2,7 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
 import { fieldsOf } from '../src/pages/staff/RecordForm.js';
@@ -244,7 +244,76 @@ describe('record forms are generated from the API contract', () => {
   });
 });
 
+describe('documents behind a requirement', () => {
+  const evidencePath = (id: string) => `/api/v1/requirements/instances/${id}/evidence`;
+  function withDocuments(versions: Record<string, unknown>[]) {
+    const first = (detail.requirements as { id: string; templateTitle: string }[])[0]!;
+    const tab = { location: { href: '' }, opener: {} as unknown, close: vi.fn() };
+    vi.stubGlobal(
+      'open',
+      vi.fn(() => tab),
+    );
+    renderAt(`/staff/${STAFF}`, [...MANAGER, 'compliance.requirement.view'], async (p) =>
+      p === `/api/v1/staff/${STAFF}`
+        ? detail
+        : p === evidencePath(first.id)
+          ? { data: versions }
+          : p.endsWith('/download')
+            ? { url: `http://api.test/blob/${p.split('/')[4]}` }
+            : { data: [] },
+    );
+    return { first, tab };
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('opens the latest verified document in a new tab', async () => {
+    const { first, tab } = withDocuments([
+      { id: 'newer-pending', state: 'PENDING_VERIFICATION', scanStatus: 'CLEAN' },
+      { id: 'verified', state: 'VERIFIED', scanStatus: 'CLEAN' },
+      { id: 'older', state: 'VERIFIED', scanStatus: 'CLEAN' },
+    ]);
+    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
+    await userEvent.click(
+      screen.getByRole('button', { name: `View document for ${first.templateTitle}` }),
+    );
+    await waitFor(() => expect(tab.location.href).toBe('http://api.test/blob/verified'));
+    expect(tab.opener).toBeNull();
+  });
+
+  it('opens a document awaiting review when nothing is verified yet, so it can be checked', async () => {
+    const { first, tab } = withDocuments([
+      { id: 'quarantined', state: 'PENDING_VERIFICATION', scanStatus: 'PENDING' },
+      { id: 'awaiting', state: 'PENDING_VERIFICATION', scanStatus: 'CLEAN' },
+    ]);
+    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
+    await userEvent.click(
+      screen.getByRole('button', { name: `View document for ${first.templateTitle}` }),
+    );
+    await waitFor(() => expect(tab.location.href).toBe('http://api.test/blob/awaiting'));
+  });
+
+  it('says so when there is no document on file, and opens nothing', async () => {
+    const { first, tab } = withDocuments([]);
+    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
+    await userEvent.click(
+      screen.getByRole('button', { name: `View document for ${first.templateTitle}` }),
+    );
+    expect(await screen.findByText(/No document on file yet/)).toBeInTheDocument();
+    expect(tab.close).toHaveBeenCalled();
+  });
+});
+
 describe('record summaries', () => {
+  it('names the colleague instead of showing an id', async () => {
+    const { summarise } = await import('../src/pages/staff/StaffProfile.js');
+    expect(
+      summarise(
+        { completedOn: '2025-10-24', signedOffByUserId: 'u1', checkerUserId: 'u2' },
+        { u1: 'Hana Rowe' },
+      ),
+    ).toBe('completed on: 2025-10-24; signed off by: Hana Rowe; checker: a former colleague');
+  });
+
   it('humanise codes and drop empty fields', async () => {
     const { summarise } = await import('../src/pages/staff/StaffProfile.js');
     expect(

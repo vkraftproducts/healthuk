@@ -5,6 +5,7 @@ import { Field, Section, Tabs, button, input, useCan, useRun, words } from '../.
 import { useApp } from '../../shell/AppContext.js';
 import { useOne } from '../settings/hooks.js';
 import { Defects, VehicleBadge } from './Fleet.js';
+import { ViewDocument } from '../ViewDocument.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const MAINT: Record<string, StatusKind> = { OK: 'GREEN', DUE_SOON: 'AMBER', OVERDUE: 'RED' };
@@ -245,6 +246,11 @@ function Documents({ vehicleId }: { vehicleId: string }) {
           key: 's',
           header: 'Status',
           cell: (r) => <StatusBadge status={r.status as StatusKind} reason={r.reasonText} />,
+        },
+        {
+          key: 'doc',
+          header: 'Document',
+          cell: (r) => <ViewDocument instanceId={r.id} label={r.templateTitle} />,
         },
       ]}
     />

@@ -8,6 +8,7 @@ import { useInvalidate, useOne } from '../settings/hooks.js';
 import { DISPATCH_NOTE } from './StaffList.js';
 import { RecordForm } from './RecordForm.js';
 import { DATE_LABEL, LIFECYCLE_LABEL, RESTRICTION_LABEL, ROLE_LABEL, list } from './labels.js';
+import { ViewDocument } from '../ViewDocument.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -253,19 +254,25 @@ function Overview({ s }: { s: Row }) {
           {
             key: 'act',
             header: 'Action',
-            cell: (r) =>
-              can('compliance.evidence.upload') ? (
-                <button
-                  className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
-                  onClick={() => {
-                    setTarget(r.id);
-                    fileRef.current?.click();
-                  }}
-                >
-                  Upload evidence
-                  <span className="sr-only"> for {r.templateTitle}</span>
-                </button>
-              ) : null,
+            cell: (r) => (
+              <span className="flex flex-wrap items-center gap-2">
+                {can('compliance.requirement.view') && (
+                  <ViewDocument instanceId={r.id} label={r.templateTitle} />
+                )}
+                {can('compliance.evidence.upload') && (
+                  <button
+                    className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
+                    onClick={() => {
+                      setTarget(r.id);
+                      fileRef.current?.click();
+                    }}
+                  >
+                    Upload evidence
+                    <span className="sr-only"> for {r.templateTitle}</span>
+                  </button>
+                )}
+              </span>
+            ),
           },
         ]}
       />
@@ -480,8 +487,14 @@ function History({ s }: { s: Row }) {
   );
 }
 
-/** Readable one-line summary: no raw codes, no empty fields (UI_SPEC). */
-export function summarise(data: Record<string, unknown>): string {
+/**
+ * Readable one-line summary: no raw codes, no empty fields (UI_SPEC). Colleagues are named
+ * (`people` maps the user ids a record holds to names), never shown as ids.
+ */
+export function summarise(
+  data: Record<string, unknown>,
+  people: Record<string, string> = {},
+): string {
   const word = (v: unknown): string =>
     typeof v === 'string' && /^[A-Z][A-Z0-9_]+$/.test(v) && v.includes('_')
       ? v.replace(/_/g, ' ').toLowerCase()
@@ -497,6 +510,13 @@ export function summarise(data: Record<string, unknown>): string {
       ([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0),
     )
     .map(([k, v]) => {
+      if (k.endsWith('UserId')) {
+        const role = k
+          .slice(0, -'UserId'.length)
+          .replace(/([A-Z])/g, ' $1')
+          .toLowerCase();
+        return `${role}: ${people[String(v)] ?? 'a former colleague'}`;
+      }
       const key = k.replace(/([A-Z])/g, ' $1').toLowerCase();
       const val = Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? '…' : word(v);
       return `${key}: ${val}`;
@@ -541,7 +561,7 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
         error={res.isError ? 'Could not load these records.' : null}
         emptyMessage="No records."
         columns={[
-          { key: 'details', header: 'Details', cell: (r) => summarise(r.data) },
+          { key: 'details', header: 'Details', cell: (r) => summarise(r.data, r.people) },
           {
             key: 'valid',
             header: 'Valid',

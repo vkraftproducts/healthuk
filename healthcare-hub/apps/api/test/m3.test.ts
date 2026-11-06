@@ -733,3 +733,20 @@ describe('self-service [PRD §4.3]', () => {
     ).toBe(404);
   });
 });
+
+describe('names in staff records', () => {
+  it('returns the names of colleagues a record mentions, not just their ids', async () => {
+    const hr = (await call('GET', '/api/v1/admin/users')).body.data.find(
+      (u: J) => u.email === 'hr@example.test',
+    ).id as string;
+    const added = await call('POST', `/api/v1/staff/${SEED_IDS.staffCrew}/induction`, {
+      body: { data: { completedOn: '2026-01-05', signedOffByUserId: hr } },
+    });
+    expect(added.status).toBe(201);
+    expect(added.body.people).toEqual({ [hr]: 'Hana Rowe' });
+    const list = await call('GET', `/api/v1/staff/${SEED_IDS.staffCrew}/induction`);
+    const mine = (list.body.data as J[]).find((r) => r.id === added.body.id)!;
+    expect(mine.people).toEqual({ [hr]: 'Hana Rowe' });
+    expect(JSON.stringify(mine.people)).not.toContain('@'); // names only, never emails
+  });
+});

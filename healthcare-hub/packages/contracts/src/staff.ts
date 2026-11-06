@@ -194,6 +194,8 @@ export const StaffRecordDto = z.object({
   current: z.boolean(),
   createdAt: isoDateTime,
   createdBy: uuid,
+  /** Display names of the colleagues the record mentions (checker, assessor, ...), by user id. */
+  people: z.record(z.string(), z.string()),
 });
 export type StaffRecordDto = z.infer<typeof StaffRecordDto>;
 

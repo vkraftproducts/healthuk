@@ -66,6 +66,7 @@ import {
   toCorrectionDto,
   toRecordDto,
   toStaffDto,
+  userIdsIn,
 } from './staff.mapper.js';
 
 const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
@@ -75,6 +76,19 @@ const SENSITIVE = 'staff.sensitive.view';
 
 function requireAny(hub: HubRequestContext, ...keys: string[]): void {
   if (!keys.some((k) => hub.permissions.has(k))) throw new HubError('FORBIDDEN', 403);
+}
+
+/**
+ * Names of the colleagues records mention. Only people who are (or were) members of this
+ * organisation are found (row-level security), and only their display names are returned.
+ */
+async function namesOf(tx: TenantTx, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await tx.membership.findMany({
+    where: { userId: { in: [...new Set(ids)] } },
+    select: { user: { select: { id: true, displayName: true } } },
+  });
+  return new Map(rows.map((m) => [m.user.id, m.user.displayName]));
 }
 
 function kindOf(slug: string): RecordKind {
@@ -788,7 +802,8 @@ export class StaffController {
           entityId: id,
           summary: { kind },
         });
-      return { data: rows.map((r) => toRecordDto(r, this.key)) };
+      const names = await namesOf(tx, rows.flatMap((r) => userIdsIn(r.data)));
+      return { data: rows.map((r) => toRecordDto(r, this.key, names)) };
     });
   }
 
@@ -864,7 +879,7 @@ export class StaffController {
         entityId: r.id,
         summary: { staffId: id, kind, supersedesId: input.supersedesId ?? null },
       });
-      return toRecordDto(r, this.key);
+      return toRecordDto(r, this.key, await namesOf(tx, userIdsIn(r.data)));
     });
   }
 
