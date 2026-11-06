@@ -137,3 +137,36 @@ describe('vehicles and assets', () => {
     );
   });
 });
+
+describe('equipment actions', () => {
+  it('quarantine and release name the asset they act on', async () => {
+    const asset = (o: Record<string, unknown>) => ({
+      category: 'STRETCHER',
+      swlKg: 227,
+      regimes: [],
+      quarantineReason: null,
+      ...o,
+    });
+    renderAt(
+      '/vehicles',
+      ['fleet.vehicle.view', 'fleet.vehicle.manage', 'fleet.return_to_service'],
+      (p) =>
+        p.startsWith('/api/v1/equipment')
+          ? {
+              data: [
+                asset({ id: 'e1', assetTag: 'STR-01', status: 'AVAILABLE' }),
+                asset({
+                  id: 'e2',
+                  assetTag: 'STR-02',
+                  status: 'QUARANTINED',
+                  quarantineReason: 'Wheel lock',
+                }),
+              ],
+            }
+          : { data: [], nextCursor: null },
+    );
+    await userEvent.click(await screen.findByRole('tab', { name: 'Equipment' }));
+    expect(await screen.findByRole('button', { name: 'Quarantine STR-01' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Release STR-02' })).toBeInTheDocument();
+  });
+});

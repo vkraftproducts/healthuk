@@ -262,13 +262,13 @@ function Overview({ s }: { s: Row }) {
                 {can('compliance.evidence.upload') && (
                   <button
                     className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
+                    aria-label={`Upload evidence for ${r.templateTitle}`}
                     onClick={() => {
                       setTarget(r.id);
                       fileRef.current?.click();
                     }}
                   >
                     Upload evidence
-                    <span className="sr-only"> for {r.templateTitle}</span>
                   </button>
                 )}
               </span>
@@ -474,9 +474,10 @@ function History({ s }: { s: Row }) {
               r.active && me.permissions.includes('staff.restrict') ? (
                 <button
                   className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
+                  aria-label={`Lift ${RESTRICTION_LABEL[r.type]}`}
                   onClick={() => void lift(r.id)}
                 >
-                  Lift<span className="sr-only"> {RESTRICTION_LABEL[r.type]}</span>
+                  Lift
                 </button>
               ) : null,
           },
@@ -541,10 +542,10 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
           <button
             className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
             aria-expanded={open}
+            aria-label={`${open ? 'Cancel' : 'Add record'} – ${SECTION_TITLE[slug]}`}
             onClick={() => setOpen(!open)}
           >
             {open ? 'Cancel' : 'Add record'}
-            <span className="sr-only"> – {SECTION_TITLE[slug]}</span>
           </button>
         )}
       </div>

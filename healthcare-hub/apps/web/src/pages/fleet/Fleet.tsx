@@ -273,12 +273,20 @@ function Equipment() {
             header: 'Action',
             cell: (r) =>
               r.status === 'AVAILABLE' && can('fleet.vehicle.manage') ? (
-                <button className={smallButton} onClick={() => act(r.id, 'quarantine')}>
-                  Quarantine<span className="sr-only"> {r.assetTag}</span>
+                <button
+                  className={smallButton}
+                  aria-label={`Quarantine ${r.assetTag}`}
+                  onClick={() => act(r.id, 'quarantine')}
+                >
+                  Quarantine
                 </button>
               ) : r.status === 'QUARANTINED' && can('fleet.return_to_service') ? (
-                <button className={smallButton} onClick={() => act(r.id, 'release')}>
-                  Release<span className="sr-only"> {r.assetTag}</span>
+                <button
+                  className={smallButton}
+                  aria-label={`Release ${r.assetTag}`}
+                  onClick={() => act(r.id, 'release')}
+                >
+                  Release
                 </button>
               ) : null,
           },

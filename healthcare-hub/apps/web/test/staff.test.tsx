@@ -244,6 +244,37 @@ describe('record forms are generated from the API contract', () => {
   });
 });
 
+describe('buttons say what they act on, with the words spaced', () => {
+  it('upload, add record and lift name their item for screen readers', async () => {
+    const withRestriction = {
+      ...detail,
+      restrictions: [
+        {
+          id: 'r1',
+          type: 'NO_NIGHT_SHIFTS',
+          reason: 'Return from leave',
+          validFrom: '2026-10-01T00:00:00Z',
+          validTo: null,
+          active: true,
+        },
+      ],
+    };
+    renderAt(`/staff/${STAFF}`, [...MANAGER, 'compliance.requirement.view'], async (p) =>
+      p === `/api/v1/staff/${STAFF}` ? withRestriction : { data: [] },
+    );
+    await screen.findByRole('table', { name: 'Requirements' }, { timeout: 5000 });
+    expect(
+      screen.getByRole('button', { name: 'Upload evidence for Driving licence' }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Recruitment' }));
+    expect(
+      await screen.findByRole('button', { name: 'Add record – References' }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'History' }));
+    expect(await screen.findByRole('button', { name: 'Lift No night shifts' })).toBeInTheDocument();
+  });
+});
+
 describe('documents behind a requirement', () => {
   const evidencePath = (id: string) => `/api/v1/requirements/instances/${id}/evidence`;
   function withDocuments(versions: Record<string, unknown>[]) {
