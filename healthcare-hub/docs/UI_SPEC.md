@@ -7,8 +7,9 @@ Desktop-first (1280–1920), usable at 1024; responsive down to tablet. WCAG 2.2
 
 - Left sidebar nav: Dashboard, Staff, Vehicles and assets, Compliance, Premises safety,
   Work planner, Reports, Settings; organisation name at bottom ("Exora").
-- Top bar: breadcrumb `Organisation / Location / Service` (each a switcher), current date,
-  **Refresh** button, "Last updated HH:MM | All sources available" (or warning per source).
+- No top bar (removed at the product owner's request, 2026-11-06). A warning band appears above
+  the page only when the service cannot be reached or live updates have dropped, with a Try again
+  button; nothing is shown while all is well. The organisation name is in the sidebar.
 - Footer label on every screen during pilot: none (wireframe footers are doc-only).
 
 ## Status badge component (`<StatusBadge>`)

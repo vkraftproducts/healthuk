@@ -132,34 +132,28 @@ describe('web shell', () => {
     expect(screen.getByText(/not CQC ratings/)).toBeInTheDocument();
   });
 
-  it('goes back to the previous page from the breadcrumb, or home when there is none', async () => {
-    const shell = {
-      me: async (o: string | null) => me(o, []),
-      readyz: async () => ({ status: 'ready' as const }),
-      get: async () => ({ data: [] }),
-    };
-    const current = (name: string) =>
-      expect(screen.getByRole('link', { name })).toHaveAttribute('aria-current', 'page');
-    const back = () => screen.findByRole('button', { name: /^Go back: / });
-
-    const view = renderApp(shell, '/premises');
-    await userEvent.click(await screen.findByRole('link', { name: 'Staff' }));
-    await waitFor(() => current('Staff'));
-    await userEvent.click(await back());
-    await waitFor(() => current('Premises safety'));
-    view.unmount();
-
-    renderApp(shell, '/staff');
-    await userEvent.click(await back());
-    await waitFor(() => current('Dashboard'));
+  it('has no status bar: nothing above the page while all is well', async () => {
+    renderApp(
+      {
+        me: async (o) => me(o, []),
+        readyz: async () => ({ status: 'ready' }),
+        get: async () => ({ data: [] }),
+      },
+      '/staff',
+    );
+    await screen.findByRole('navigation', { name: 'Primary' });
+    await waitFor(() => expect(screen.queryByTestId('connection-warning')).toBeNull());
+    expect(screen.queryByRole('button', { name: /^Go back/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(screen.queryByText(/Last updated/)).toBeNull();
   });
 
-  it('refetches what is on screen when the server signals a change, and says it is live', async () => {
+  it('refetches what is on screen when the server signals a change, with no warning shown', async () => {
     let signal: (e: 'ready' | 'change') => void = () => {};
     const get = vi.fn(async () => ({ data: [] }));
     renderApp(
       {
-        me: async (o) => me(o, []),
+        me: async (o) => me(o, ['compliance.audit.view']),
         readyz: async () => ({ status: 'ready' }),
         get,
         watchChanges: (_org, onEvent, abort) =>
@@ -169,10 +163,10 @@ describe('web shell', () => {
             abort.addEventListener('abort', () => resolve());
           }),
       },
-      '/staff',
+      '/compliance',
     );
-    await waitFor(() => expect(screen.getByTestId('live-state')).toHaveTextContent('Live'));
     await waitFor(() => expect(get).toHaveBeenCalled());
+    expect(screen.queryByTestId('connection-warning')).toBeNull();
     const before = get.mock.calls.length;
     signal('change');
     await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(before));
@@ -187,7 +181,9 @@ describe('web shell', () => {
       },
     });
     await waitFor(() =>
-      expect(screen.getByTestId('live-state')).toHaveTextContent(/Reconnecting.*out of date/),
+      expect(screen.getByTestId('connection-warning')).toHaveTextContent(
+        /Reconnecting.*out of date/,
+      ),
     );
   });
 

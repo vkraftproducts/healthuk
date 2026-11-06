@@ -172,7 +172,6 @@ function Authenticated({
       </p>
     );
 
-  const lastUpdated = meQ.dataUpdatedAt ? new Date(meQ.dataUpdatedAt) : null;
   return (
     <AppContext.Provider
       value={{
@@ -184,8 +183,7 @@ function Authenticated({
           void meQ.refetch();
           void readyQ.refetch();
         },
-        lastUpdated,
-        sourceOk: readyQ.data?.status === 'ready',
+        sourceOk: !readyQ.isError && (!readyQ.data || readyQ.data.status === 'ready'),
         live,
         signOut: signOut ? () => signOut('You have signed out.') : undefined,
       }}

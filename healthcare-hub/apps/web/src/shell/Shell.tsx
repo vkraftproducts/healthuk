@@ -1,52 +1,16 @@
-import { Link, Outlet, useRouter } from '@tanstack/react-router';
+import { Link, Outlet } from '@tanstack/react-router';
 import { StatusBadge } from '@hub/ui';
 import { NAV_ITEMS } from '../nav.js';
-import { useList, useOne } from '../pages/settings/hooks.js';
 import { useApp } from './AppContext.js';
 
-const londonDate = new Intl.DateTimeFormat('en-GB', {
-  dateStyle: 'medium',
-  timeZone: 'Europe/London',
-});
-const londonTime = new Intl.DateTimeFormat('en-GB', {
-  timeStyle: 'short',
-  timeZone: 'Europe/London',
-});
-
-/** Sector pack -> service name shown in the breadcrumb (wireframe 01). */
-const SERVICE_NAME: Record<string, string> = {
-  ambulance: 'Ambulance service',
-  dental: 'Dental practice',
-  'care-home': 'Care home',
-};
-
-/** "Exora / Watford / Ambulance service" from the user's scope. */
-function useScope(orgId: string | null) {
-  const { me } = useApp();
-  const org = useOne<{ sectorPacks?: string[] }>(orgId ? `/api/v1/organisations/${orgId}` : null);
-  const locs = useList(orgId ? `/api/v1/organisations/${orgId}/locations` : '', !!orgId);
-  const mine = me.memberships.filter((m) => m.organisationId === orgId);
-  const list = Array.isArray(locs.data) ? (locs.data as { id: string; name: string }[]) : [];
-  const allLocations = mine.some((m) => m.locationId === null);
-  const visible = allLocations ? list : list.filter((l) => mine.some((m) => m.locationId === l.id));
-  const location = visible.length === 1 ? visible[0]!.name : 'All locations';
-  const packs = Array.isArray(org.data?.sectorPacks) ? org.data.sectorPacks : [];
-  const service = packs.length === 1 ? (SERVICE_NAME[packs[0]!] ?? 'All services') : 'All services';
-  return { location, service, role: mine[0]?.roleName ?? null };
-}
-
 export function Shell() {
-  const { me, orgId, setOrgId, refresh, lastUpdated, sourceOk, live, signOut } = useApp();
+  const { me, orgId, setOrgId, refresh, sourceOk, live, signOut } = useApp();
   const orgs = [
     ...new Map(me.memberships.map((m) => [m.organisationId, m.organisationName])).entries(),
   ];
   const activeOrg = orgs.find(([id]) => id === orgId)?.[1];
-  const scope = useScope(orgId);
-  const crumbs = [activeOrg ?? 'No organisation', scope.location, scope.service];
-  const router = useRouter();
-  // Opened directly (nothing to go back to): the dashboard is the way out.
-  const goBack = () =>
-    router.history.canGoBack() ? router.history.back() : void router.navigate({ to: '/' });
+  const role = me.memberships.find((m) => m.organisationId === orgId)?.roleName ?? null;
+  const reconnecting = live === 'reconnecting';
 
   return (
     <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
@@ -104,7 +68,7 @@ export function Shell() {
           )}
           <div className="border-t border-hub-navy-2 pt-3">
             <div className="text-sm font-semibold text-white">{me.user.displayName}</div>
-            {scope.role && <div>{scope.role}</div>}
+            {role && <div>{role}</div>}
             {signOut && (
               <button
                 type="button"
@@ -119,58 +83,31 @@ export function Shell() {
       </aside>
 
       <div className="min-w-0 flex-1 space-y-5 p-4 md:p-6">
-        <header className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-hub-line bg-white px-5 py-3.5">
-          <nav aria-label="Breadcrumb">
-            <button
-              type="button"
-              onClick={goBack}
-              title="Go back"
-              aria-label={`Go back: ${crumbs.join(' / ')}`}
-              className="flex flex-wrap gap-x-3 text-left font-semibold text-hub-navy underline-offset-2 hover:underline"
-            >
-              {crumbs.map((crumb, i) => (
-                <span key={crumb} className="flex gap-x-3">
-                  {i > 0 && <span aria-hidden="true">/</span>}
-                  {crumb}
-                </span>
-              ))}
-            </button>
-          </nav>
-          <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-hub-muted">
-            <time dateTime={new Date().toISOString()}>{londonDate.format(new Date())}</time>
-            <span aria-hidden="true">|</span>
+        {/* Shown only when the figures on screen may be out of date; nothing when all is well. */}
+        {(!sourceOk || reconnecting) && (
+          <div
+            role="alert"
+            data-testid="connection-warning"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-red-700 bg-red-50 px-4 py-3 text-sm text-red-900"
+          >
+            <StatusBadge
+              status="RED"
+              reason={sourceOk ? 'live updates disconnected' : 'source unavailable'}
+            />
+            <span>
+              {sourceOk
+                ? 'Reconnecting… figures may be out of date.'
+                : 'The service cannot be reached. Figures on screen may be out of date.'}
+            </span>
             <button
               type="button"
               onClick={refresh}
-              className="font-medium text-hub-navy underline-offset-2 hover:underline"
+              className="font-semibold underline-offset-2 hover:underline"
             >
-              Refresh
+              Try again
             </button>
-            <span aria-hidden="true">|</span>
-            <span>Last updated {lastUpdated ? londonTime.format(lastUpdated) : '—'}</span>
-            {live && (
-              <>
-                <span aria-hidden="true">|</span>
-                <span data-testid="live-state" className="inline-flex items-center gap-1.5">
-                  <span
-                    aria-hidden="true"
-                    className={`h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
-                  />
-                  {live === 'live'
-                    ? 'Live'
-                    : live === 'connecting'
-                      ? 'Connecting…'
-                      : 'Reconnecting… figures may be out of date'}
-                </span>
-              </>
-            )}
-            {sourceOk ? (
-              <StatusBadge status="GREEN" reason="all sources available" />
-            ) : (
-              <StatusBadge status="RED" reason="source unavailable" />
-            )}
           </div>
-        </header>
+        )}
         <main id="main" tabIndex={-1}>
           <Outlet />
         </main>
