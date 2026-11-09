@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { AUTH_MESSAGES, passwordProblem } from '@hub/contracts';
 import { LocalAuthError, type LocalAuthClient, type LocalStep } from '../auth.js';
-import { BRAND, BrandMark } from '../brand.js';
+import { BRAND, BrandMark, HeroArt } from '../brand.js';
 
 type Step =
   | { kind: 'credentials' }
@@ -9,12 +9,9 @@ type Step =
   | { kind: 'mfa-setup'; challengeId: string; secret?: string; otpauthUri?: string }
   | { kind: 'password-change'; challengeId: string };
 
-const input =
-  'mt-1 block w-full rounded-md border border-hub-line px-3 py-2 text-base focus:border-hub-teal';
-const primary =
-  'w-full rounded-md bg-hub-teal px-4 py-3 font-semibold text-white hover:bg-hub-teal-dark ' +
-  'disabled:opacity-50';
-const secondary = 'text-sm font-semibold text-hub-teal underline';
+const input = 'field mt-1 block w-full px-3 py-2 text-base';
+const primary = 'btn-primary w-full py-3 text-base';
+const secondary = 'text-sm font-semibold text-hub-teal-dark underline underline-offset-2';
 
 /**
  * Username + password sign-in run by the Healthcare Hub API (VITE_AUTH_MODE=local, ADR 0006):
@@ -322,29 +319,32 @@ export function LocalSignIn({
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
+    <div className="flex min-h-screen flex-col md:flex-row">
       <section
         aria-label={`About ${BRAND.name}`}
         className={
-          'flex flex-col justify-between bg-hub-navy px-8 py-8 text-white ' +
-          'md:w-[40%] md:px-12 md:py-12'
+          'on-dark relative flex flex-col justify-between overflow-hidden md:sticky md:top-0 md:h-screen border-b border-hub-line bg-hub-navy/90 px-8 py-8 text-white ' +
+          'md:w-[42%] md:border-b-0 md:border-r md:px-12 md:py-12'
         }
       >
-        <div>
+        <HeroArt />
+        <div className="relative">
           <BrandMark />
-          <p className="mb-10 mt-6 max-w-sm text-lg font-medium leading-snug text-slate-100">
+          <p className="mb-10 mt-8 max-w-sm font-display text-3xl font-semibold leading-tight tracking-tight text-hub-ink">
             Operations and compliance, in one place.
           </p>
         </div>
-        <p className="text-xs text-slate-300">
+        <p className="relative text-xs text-hub-muted">
           Internal measures are not CQC ratings. Access is logged.
         </p>
       </section>
 
       <main id="main" className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-md space-y-6 rounded-lg border border-hub-line bg-white p-8">
+        <div className="hud glass rise-in w-full max-w-md space-y-6 rounded-2xl border border-hub-line p-8 shadow-panel">
           <div>
-            <h1 className="text-2xl font-bold">Sign in with your organisation account</h1>
+            <h1 className="font-display text-2xl font-bold">
+              Sign in with your organisation account
+            </h1>
             <p className="mt-1 text-sm text-hub-muted">
               Managers, directors, administrators, HR, governance and auditors also need a code from
               an authenticator app.

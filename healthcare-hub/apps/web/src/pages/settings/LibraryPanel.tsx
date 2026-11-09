@@ -95,7 +95,7 @@ export function LibraryPanel() {
 
   return (
     <div className="space-y-6">
-      <p className="rounded-lg border border-hub-line bg-white p-3 text-sm">
+      <p className="rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
         The requirement library says what has to be checked, why (its legal basis) and how often.
         Adopt the items that apply to you, have a second person publish them, then map staff items
         to roles. Each person, vehicle, asset or premises item then gets the requirement as
@@ -201,7 +201,7 @@ export function LibraryPanel() {
           {Object.entries(ROLE_LABEL).map(([role, label]) => {
             const items = maps.filter((m) => m.role === role);
             return (
-              <li key={role} className="rounded-lg border border-hub-line bg-white p-3 text-sm">
+              <li key={role} className="rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
                 <strong>{label}</strong>
                 {items.length === 0 ? (
                   <p className="mt-1 text-amber-900">
@@ -234,7 +234,7 @@ export function LibraryPanel() {
           })}
         </ul>
         {canMap && (
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-white p-3">
+          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3">
             <label className="flex flex-col text-sm">
               Role
               <select

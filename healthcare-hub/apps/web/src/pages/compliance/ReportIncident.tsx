@@ -85,7 +85,7 @@ export function ReportIncident() {
       {msg}
       <form
         aria-label="Report an incident"
-        className="grid gap-3 rounded-lg border border-hub-line bg-white p-4 sm:grid-cols-2"
+        className="grid gap-3 rounded-lg border border-hub-line bg-hub-card p-4 sm:grid-cols-2"
         onSubmit={(e) => void submit(e)}
       >
         <Field label="What are you reporting?">

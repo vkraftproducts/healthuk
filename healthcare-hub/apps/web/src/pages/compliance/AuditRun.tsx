@@ -428,7 +428,7 @@ export function AuditRun() {
         / {words(a.domain)} / {a.templateCode} / {a.code}
       </nav>
       <div className="grid gap-4 lg:grid-cols-3">
-        <header className="rounded-lg border border-hub-line bg-white p-4 lg:col-span-2">
+        <header className="rounded-lg border border-hub-line bg-hub-card p-4 lg:col-span-2">
           <h1 className="text-2xl font-bold">
             {a.code} {a.title}
           </h1>
@@ -489,7 +489,7 @@ export function AuditRun() {
         </header>
         <section
           aria-labelledby="outcome-h"
-          className="rounded-lg border border-hub-line bg-white p-4"
+          className="rounded-lg border border-hub-line bg-hub-card p-4"
         >
           <h2 id="outcome-h" className="font-semibold">
             Outcome

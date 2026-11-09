@@ -165,7 +165,7 @@ const optionText = (o: string) =>
     .replace(/_/g, ' ')
     .toLowerCase()
     .replace(/^./, (c) => c.toUpperCase());
-const box = 'rounded-md border border-slate-500 bg-white px-2.5 py-1.5';
+const box = 'rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5';
 
 export function RecordForm({
   kind,
@@ -360,7 +360,7 @@ export function RecordForm({
         <div className="sm:col-span-2">
           <button
             disabled={busy}
-            className="rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white hover:bg-hub-teal-dark disabled:opacity-50"
+            className="rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             Save record
           </button>
@@ -388,7 +388,7 @@ function CertificateUpload({ staffId, courseCode }: { staffId: string; courseCod
   const match = reqs.find((r) => courseCode && r.templateCode === courseCode.toUpperCase());
   const pick = reqs.find((r) => r.id === (chosen || match?.id)) ?? null;
   return (
-    <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-white p-3">
+    <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3">
       <label className="flex flex-col text-sm">
         Upload a certificate for
         <select className={box} value={pick?.id ?? ''} onChange={(e) => setChosen(e.target.value)}>
@@ -403,7 +403,7 @@ function CertificateUpload({ staffId, courseCode }: { staffId: string; courseCod
       <button
         type="button"
         disabled={!pick}
-        className="rounded-md border border-slate-500 bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row disabled:opacity-50"
+        className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink hover:bg-hub-row disabled:opacity-50"
         aria-label={pick ? `Upload certificate for ${pick.templateTitle}` : 'Upload certificate'}
         onClick={() => setTarget(pick)}
       >

@@ -147,7 +147,7 @@ export function Reports() {
             {r.measures.map((m: Row) => (
               <article
                 key={m.key}
-                className="rounded-lg border border-hub-line bg-white p-4"
+                className="rounded-lg border border-hub-line bg-hub-card p-4"
                 aria-label={m.label}
               >
                 <h3 className="text-sm text-slate-700">{m.label}</h3>

@@ -67,7 +67,7 @@ export function VehicleDetail() {
         </Link>{' '}
         / {v.callsign}
       </nav>
-      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-white p-4">
+      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-hub-card p-4">
         <div>
           <h1 className="text-2xl font-bold">
             {v.callsign} <span className="text-slate-600">/ {v.registration}</span>
@@ -165,7 +165,7 @@ function Register({ v }: { v: Row }) {
     >
       <dl
         className={
-          'grid gap-x-6 gap-y-1 rounded-lg border border-hub-line bg-white p-4 text-sm ' +
+          'grid gap-x-6 gap-y-1 rounded-lg border border-hub-line bg-hub-card p-4 text-sm ' +
           'md:grid-cols-2'
         }
       >

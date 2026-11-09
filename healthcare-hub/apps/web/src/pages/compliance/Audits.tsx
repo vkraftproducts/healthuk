@@ -247,7 +247,7 @@ function AuditCalendar({ runs }: { runs: Row[] }) {
     >
       <ul aria-label="Audits by due date" className="grid gap-1 text-sm sm:grid-cols-7">
         {days.map((d) => (
-          <li key={d} className="min-h-12 rounded border border-hub-line bg-white p-1">
+          <li key={d} className="min-h-12 rounded border border-hub-line bg-hub-card p-1">
             <span className="block text-xs font-semibold">{fmtDate(d)}</span>
             {(byDay.get(d) ?? []).map((r) => (
               <Link

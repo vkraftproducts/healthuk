@@ -7,4 +7,6 @@ interface ImportMetaEnv {
   readonly VITE_BRAND_NAME?: string;
   /** Optional line under the brand name, e.g. the registered company name. */
   readonly VITE_BRAND_LEGAL_NAME?: string;
+  /** Logo: pulse (default, Pulse Cross) or rapid (backup, Rapid Response ambulance). */
+  readonly VITE_BRAND_LOGO?: 'pulse' | 'rapid';
 }

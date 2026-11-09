@@ -146,7 +146,7 @@ export function Premises() {
         <form
           aria-label="Add premises item"
           onSubmit={submit}
-          className="grid gap-3 rounded-lg border border-hub-line bg-white p-4 sm:grid-cols-2"
+          className="grid gap-3 rounded-lg border border-hub-line bg-hub-card p-4 sm:grid-cols-2"
         >
           <Field label="Location">
             <select
@@ -570,7 +570,7 @@ function PremisesHistory({ item, onClose }: { item: Row | null; onClose: () => v
   return (
     <section
       aria-label={`History of ${item.title}`}
-      className="rounded-lg border border-hub-line bg-white p-4"
+      className="rounded-lg border border-hub-line bg-hub-card p-4"
     >
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold">History of {item.title}</h2>

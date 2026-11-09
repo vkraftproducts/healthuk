@@ -121,7 +121,7 @@ export function StaffProfile() {
         </Link>{' '}
         / {s.staffNo}
       </nav>
-      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-white p-4">
+      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-hub-card p-4">
         <div>
           <h1 className="text-2xl font-bold">
             {s.displayName} <span className="text-slate-600">/ {s.staffNo}</span>
@@ -178,7 +178,7 @@ export function StaffProfile() {
           <div
             role="tablist"
             aria-label="Staff profile sections"
-            className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-white p-1.5"
+            className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-hub-card p-1.5"
           >
             {TABS.map((t) => (
               <button
@@ -188,7 +188,7 @@ export function StaffProfile() {
                 aria-selected={tab === t.id}
                 aria-controls="staff-panel"
                 onClick={() => setTab(t.id)}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-navy hover:bg-hub-row'}`}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-ink hover:bg-hub-row'}`}
               >
                 {t.label}
               </button>
@@ -503,7 +503,7 @@ function RoleChecks({ s }: { s: Row }) {
   return (
     <section
       aria-labelledby="role-checks"
-      className="rounded-lg border border-hub-line bg-white p-3"
+      className="rounded-lg border border-hub-line bg-hub-card p-3"
     >
       <h2 id="role-checks" className="font-semibold">
         Checks for a role
@@ -763,7 +763,7 @@ function History({ s }: { s: Row }) {
             cell: (r) =>
               r.active && me.permissions.includes('staff.restrict') ? (
                 <button
-                  className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
+                  className="rounded-md border border-hub-line bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink hover:bg-hub-row"
                   onClick={() => lift(r.id)}
                 >
                   Lift<span className="sr-only"> {RESTRICTION_LABEL[r.type]}</span>
@@ -861,7 +861,7 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
         </h2>
         {canAdd && (
           <button
-            className="rounded-md border border-hub-line bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row"
+            className="rounded-md border border-hub-line bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink hover:bg-hub-row"
             aria-expanded={open}
             onClick={() => setOpen(!open)}
           >

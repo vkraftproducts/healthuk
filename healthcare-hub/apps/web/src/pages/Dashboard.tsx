@@ -29,7 +29,7 @@ const TILE_COLOUR: Partial<Record<StatusKind, string>> = {
 };
 /** Rows shown before "View all" (most urgent first, as returned by the API). */
 const PREVIEW = 8;
-const textAction = 'font-medium text-hub-navy underline-offset-2 hover:underline';
+const textAction = 'font-medium text-hub-ink underline-offset-2 hover:underline';
 const MODULE_LABEL: Record<string, string> = {
   STAFF: 'Staff',
   FLEET: 'Fleet',
@@ -139,7 +139,7 @@ export function Dashboard() {
         <>
           <form
             aria-label="Dashboard filters"
-            className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-white p-3 text-sm"
+            className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3 text-sm"
             onSubmit={(e) => e.preventDefault()}
           >
             <label className="flex flex-col">
@@ -232,7 +232,7 @@ export function Dashboard() {
             )}
           </form>
           {visibleModules?.length === 0 && (
-            <p role="status" className="rounded-lg border border-hub-line bg-white p-3 text-sm">
+            <p role="status" className="rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
               Your role has no dashboard figures in this organisation. Use the navigation for the
               pages you can open.
             </p>
@@ -263,17 +263,17 @@ export function Dashboard() {
                   disabled={!connected}
                   aria-pressed={selected}
                   onClick={() => setTile(selected ? 'all' : t.key)}
-                  className={`rounded-lg border bg-white px-5 py-4 text-left hover:border-hub-teal ${selected ? 'border-hub-teal ring-2 ring-hub-teal' : 'border-hub-line'}`}
+                  className={`hud rounded-lg border bg-hub-card px-5 py-4 text-left hover:border-hub-teal hover:shadow-glow-sm ${selected ? 'border-hub-teal ring-2 ring-hub-teal' : 'border-hub-line'}`}
                 >
                   <div
-                    className={`text-4xl font-bold leading-tight ${connected && value !== 0 ? TILE_COLOUR[t.kind] : 'text-hub-navy'}`}
+                    className={`font-display text-4xl font-bold leading-tight ${connected && value !== 0 ? TILE_COLOUR[t.kind] : 'text-hub-ink'}`}
                     aria-label={
                       connected ? `${t.label}: ${value}` : `${t.label}: not connected yet`
                     }
                   >
                     {summary.isLoading ? '…' : connected ? value : '—'}
                   </div>
-                  <div className="mt-1 text-sm text-hub-navy">{t.label}</div>
+                  <div className="mt-1 text-sm text-hub-ink">{t.label}</div>
                   <div className="mt-3">
                     {connected && notSetUp && value === 0 && REQUIREMENT_TILES.has(t.key) ? (
                       <StatusBadge status="GREY" reason="not set up" />
@@ -296,7 +296,7 @@ export function Dashboard() {
           <div className="space-y-5">
             <section
               aria-labelledby="actions-h"
-              className="rounded-lg border border-hub-line bg-white p-5"
+              className="rounded-lg border border-hub-line bg-hub-card p-5"
             >
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <h2 id="actions-h" className="text-lg font-bold">
@@ -407,7 +407,7 @@ export function Dashboard() {
             <div className="grid gap-5 lg:grid-cols-3">
               <section
                 aria-labelledby="modules-h"
-                className="rounded-lg border border-hub-line bg-white p-4"
+                className="rounded-lg border border-hub-line bg-hub-card p-4"
               >
                 <h2 id="modules-h" className="mb-2 text-lg font-bold">
                   Module status
@@ -455,7 +455,7 @@ export function Dashboard() {
               </section>
               <section
                 aria-labelledby="ops-h"
-                className="rounded-lg border border-hub-line bg-white p-4"
+                className="rounded-lg border border-hub-line bg-hub-card p-4"
               >
                 <h2 id="ops-h" className="mb-2 text-lg font-bold">
                   Today in operations
@@ -479,7 +479,7 @@ export function Dashboard() {
               {s && (
                 <section
                   aria-labelledby="cov-h"
-                  className="rounded-lg border border-hub-line bg-white p-4 text-sm"
+                  className="rounded-lg border border-hub-line bg-hub-card p-4 text-sm"
                 >
                   <h2 id="cov-h" className="mb-1 text-lg font-bold">
                     Evidence coverage
@@ -520,7 +520,7 @@ function GroupPanel() {
   return (
     <section
       aria-labelledby="group-h"
-      className="rounded-lg border border-hub-line bg-white p-5"
+      className="rounded-lg border border-hub-line bg-hub-card p-5"
       aria-busy={group.isLoading}
     >
       <h2 id="group-h" className="mb-1 text-lg font-bold">

@@ -604,7 +604,7 @@ function Actions() {
     <>
       <form
         aria-label="Action filters"
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-white p-3 text-sm"
+        className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3 text-sm"
         onSubmit={(e) => e.preventDefault()}
       >
         <Field label="Owner">

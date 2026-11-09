@@ -1,7 +1,7 @@
 import { AUTH_MESSAGES } from '@hub/contracts';
 import { useState, type FormEvent } from 'react';
 import { DEV_USERS, DEV_USER_GROUPS, LocalAuthClient, type AuthClient } from '../auth.js';
-import { BRAND, BrandMark } from '../brand.js';
+import { BRAND, BrandMark, HeroArt } from '../brand.js';
 import { LocalSignIn } from './LocalSignIn.js';
 
 interface SignInProps {
@@ -49,15 +49,16 @@ function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
+    <div className="flex min-h-screen flex-col md:flex-row">
       <section
         aria-label={`About ${BRAND.name}`}
-        className="flex flex-col justify-between bg-hub-navy px-8 py-8 text-white md:w-[40%] md:px-12 md:py-12"
+        className="on-dark relative flex flex-col justify-between overflow-hidden md:sticky md:top-0 md:h-screen border-b border-hub-line bg-hub-navy/90 px-8 py-8 text-white md:w-[42%] md:border-b-0 md:border-r md:px-12 md:py-12"
       >
-        <div>
+        <HeroArt />
+        <div className="relative">
           <BrandMark />
-          <div className="mb-10 mt-6 max-w-sm space-y-4">
-            <p className="text-lg font-medium leading-snug text-slate-100">
+          <div className="mb-10 mt-8 max-w-sm space-y-4">
+            <p className="font-display text-3xl font-semibold leading-tight tracking-tight text-hub-ink">
               Operations and compliance, in one place.
             </p>
             <p className="text-slate-200">
@@ -66,15 +67,15 @@ function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
             </p>
           </div>
         </div>
-        <p className="text-xs text-slate-300">
+        <p className="relative text-xs text-hub-muted">
           Internal measures are not CQC ratings. Access is logged.
         </p>
       </section>
 
       <main id="main" className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-md space-y-6 rounded-lg border border-hub-line bg-white p-8">
+        <div className="hud glass rise-in w-full max-w-md space-y-6 rounded-2xl border border-hub-line p-8 shadow-panel">
           <div>
-            <h1 className="text-2xl font-bold">Sign in</h1>
+            <h1 className="font-display text-2xl font-bold">Sign in</h1>
             <p className="mt-1 text-sm text-hub-muted">
               Use your organisation account. Multi-factor authentication is required.
             </p>
@@ -99,20 +100,20 @@ function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
               type="button"
               disabled={busy}
               onClick={() => void go()}
-              className="flex w-full items-center justify-center gap-3 rounded-md bg-hub-teal px-4 py-3 font-semibold text-white hover:bg-hub-teal-dark disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-3 rounded-lg bg-hub-teal px-4 py-3 font-semibold text-white disabled:opacity-50"
             >
               <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-                <rect width="8" height="8" fill="#fff" />
-                <rect x="10" width="8" height="8" fill="#fff" />
-                <rect y="10" width="8" height="8" fill="#fff" />
-                <rect x="10" y="10" width="8" height="8" fill="#fff" />
+                <rect width="8" height="8" fill="currentColor" />
+                <rect x="10" width="8" height="8" fill="currentColor" />
+                <rect y="10" width="8" height="8" fill="currentColor" />
+                <rect x="10" y="10" width="8" height="8" fill="currentColor" />
               </svg>
               Sign in with Microsoft
             </button>
           ) : (
             <form onSubmit={(e) => void go(e)} className="space-y-4">
               <fieldset className="space-y-2">
-                <legend className="mb-2 text-sm font-semibold text-hub-navy">
+                <legend className="mb-2 text-sm font-semibold text-hub-ink">
                   Development sign-in: choose a synthetic user
                 </legend>
                 {Object.entries(DEV_USER_GROUPS).map(([org, heading]) => (
@@ -136,7 +137,7 @@ function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
                           className="accent-hub-teal"
                         />
                         <span className="flex flex-1 flex-wrap justify-between gap-x-3">
-                          <span className="font-semibold text-hub-navy">{u.name}</span>
+                          <span className="font-semibold text-hub-ink">{u.name}</span>
                           <span className="text-hub-muted">{u.role}</span>
                         </span>
                       </label>
@@ -147,7 +148,7 @@ function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
               <button
                 type="submit"
                 disabled={busy}
-                className="w-full rounded-md bg-hub-teal px-4 py-3 font-semibold text-white hover:bg-hub-teal-dark disabled:opacity-50"
+                className="w-full rounded-lg bg-hub-teal px-4 py-3 font-semibold text-white disabled:opacity-50"
               >
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>

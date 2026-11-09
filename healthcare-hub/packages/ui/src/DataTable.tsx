@@ -18,10 +18,10 @@ export interface DataTableProps<T> {
   emptyMessage?: string;
 }
 
-// Wireframe style: navy header bar, each row a white rounded strip (alternate rows tinted).
+// Neon Forest style: glowing header bar, each row a dark glass strip (alternate rows tinted, hover lit).
 const CELL =
-  'border-y border-hub-line bg-white px-3 py-2.5 align-top first:rounded-l-md first:border-l last:rounded-r-md last:border-r group-even:bg-hub-row';
-const EMPTY = 'rounded-md border border-hub-line bg-white px-3 py-4';
+  'border-y border-hub-line bg-hub-card px-3 py-2.5 align-top transition-colors first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-even:bg-hub-row group-hover:bg-emerald-50 group-hover:border-emerald-500/50';
+const EMPTY = 'rounded-lg border border-hub-line bg-hub-card px-3 py-4';
 
 /** Plain, keyboard- and screen-reader-friendly table with explicit loading/error/empty states. */
 export function DataTable<T>({
@@ -35,7 +35,7 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   if (error) {
     return (
-      <div role="alert" className="rounded border border-red-700 bg-red-50 p-3 text-red-900">
+      <div role="alert" className="rounded-lg border border-red-700 bg-red-50 p-3 text-red-900">
         <strong>Source unavailable.</strong> {error}
       </div>
     );
@@ -50,7 +50,7 @@ export function DataTable<T>({
               <th
                 key={c.key}
                 scope="col"
-                className="bg-hub-navy px-3 py-2.5 font-semibold text-white first:rounded-l-md last:rounded-r-md"
+                className="border-y border-hub-navy bg-hub-navy px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-emerald-200 first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r"
               >
                 {c.header}
               </th>

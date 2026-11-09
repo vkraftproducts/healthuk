@@ -71,7 +71,7 @@ function guarded(item: NavItem, Page: () => JSX.Element) {
 
 function NoAccess({ title }: { title: string }) {
   return (
-    <div className="space-y-3 rounded-lg border border-hub-line bg-white p-4">
+    <div className="space-y-3 rounded-lg border border-hub-line bg-hub-card p-4">
       <h1 className="text-xl font-bold">{title}</h1>
       <p role="alert">Your role does not give access to this page.</p>
       <Link to="/" className="font-medium text-hub-teal-dark underline">
@@ -100,7 +100,7 @@ function Home() {
       {crew && (
         <section
           aria-label="Crew app"
-          className="space-y-1 rounded-lg border border-hub-line bg-white p-4"
+          className="space-y-1 rounded-lg border border-hub-line bg-hub-card p-4"
         >
           <h2 className="font-semibold">Your shifts are in the crew app</h2>
           <p>
@@ -120,7 +120,7 @@ function Home() {
             <li key={n.to}>
               <Link
                 to={n.to}
-                className="block rounded-lg border border-hub-line bg-white p-4 font-semibold text-hub-teal-dark underline"
+                className="block rounded-lg border border-hub-line bg-hub-card p-4 font-semibold text-hub-teal-dark underline"
               >
                 {n.label}
               </Link>
@@ -275,7 +275,7 @@ function Authenticated({
         <div className="flex gap-2">
           <button
             type="button"
-            className="rounded-md border border-red-700 bg-white px-3 py-1.5 text-sm"
+            className="rounded-md border border-red-700 bg-hub-card px-3 py-1.5 text-sm"
             onClick={() => void meQ.refetch()}
           >
             Try again

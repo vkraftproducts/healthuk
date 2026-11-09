@@ -125,6 +125,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 2,
   },
-  tabOn: { borderTopWidth: 3, borderColor: colors.primary },
+  tabOn: { borderTopWidth: 3, borderColor: colors.primary, backgroundColor: colors.greenBg },
   tabText: { fontSize: 13, fontWeight: '700', color: colors.muted, textAlign: 'center' },
 });

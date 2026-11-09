@@ -40,7 +40,7 @@ export function IntegrationsPanel() {
             <li
               key={r.adapter}
               aria-label={r.name}
-              className="rounded-lg border border-hub-line bg-white p-3"
+              className="rounded-lg border border-hub-line bg-hub-card p-3"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
@@ -172,7 +172,7 @@ export function IntegrationsPanel() {
         ) : (
           <ul className="space-y-2 text-sm">
             {runs.map((r) => (
-              <li key={r.id} className="rounded border border-hub-line bg-white p-2">
+              <li key={r.id} className="rounded border border-hub-line bg-hub-card p-2">
                 <strong>{words(r.adapter)}</strong> · {words(r.status)} · {r.recordsApplied}{' '}
                 applied, {r.recordsFlagged} flagged, {r.recordsSkipped} skipped of {r.recordsSeen}
                 {r.notes.length > 0 && (
