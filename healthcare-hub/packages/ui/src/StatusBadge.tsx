@@ -74,7 +74,7 @@ const STYLES: Record<StatusKind, Style> = {
   },
   GREY: {
     word: 'Grey',
-    classes: 'bg-slate-100 text-slate-800 border-slate-600',
+    classes: 'bg-slate-400/10 text-slate-800 border-slate-500',
     // question mark in circle
     icon: (
       <svg
@@ -92,7 +92,7 @@ const STYLES: Record<StatusKind, Style> = {
   },
   NOT_APPLICABLE: {
     word: 'N/A',
-    classes: 'bg-white text-slate-700 border-slate-400 border-dashed',
+    classes: 'bg-hub-card text-slate-700 border-slate-400 border-dashed',
     // minus in circle
     icon: (
       <svg
@@ -122,7 +122,7 @@ export function StatusBadge({ status, reason }: StatusBadgeProps) {
   return (
     <span
       data-status={status}
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold leading-5 ${s.classes}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold leading-5 ${s.classes}`}
     >
       {s.icon}
       <span>

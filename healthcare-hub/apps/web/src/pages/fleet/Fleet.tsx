@@ -94,7 +94,7 @@ export function Fleet() {
   const expenses = can('fleet.expense.submit') || can('fleet.expense.approve');
   if (!can('fleet.vehicle.view') && !expenses)
     return (
-      <p role="alert" className="rounded-lg border border-hub-line bg-white p-3">
+      <p role="alert" className="rounded-lg border border-hub-line bg-hub-card p-3">
         You do not have access to vehicles and assets.
       </p>
     );

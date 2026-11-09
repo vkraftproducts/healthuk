@@ -272,7 +272,7 @@ export function RatingDisplay() {
         <form
           onSubmit={record}
           aria-label="Record a published rating"
-          className="grid gap-3 rounded border border-hub-line bg-white p-3 sm:grid-cols-3"
+          className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-3"
         >
           <Field label="Location">
             <select name="locationId" className={input}>
@@ -497,7 +497,7 @@ export function FitAndProper() {
       <form
         onSubmit={record}
         aria-label="Record a fit and proper check"
-        className="space-y-3 rounded border border-hub-line bg-white p-3"
+        className="space-y-3 rounded border border-hub-line bg-hub-card p-3"
       >
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Director's name">
@@ -759,7 +759,7 @@ export function Meetings() {
         <form
           onSubmit={record}
           aria-label="Record a meeting"
-          className="grid gap-3 rounded border border-hub-line bg-white p-3 sm:grid-cols-2"
+          className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-2"
         >
           <Field label="Type of meeting">
             <select name="kind" className={input} required>
@@ -1163,7 +1163,7 @@ export function NhsContracts() {
         <form
           onSubmit={add}
           aria-label="Record an NHS contract"
-          className="grid gap-3 rounded border border-hub-line bg-white p-3 sm:grid-cols-3"
+          className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-3"
         >
           <Field label="Commissioner">
             <input name="commissioner" className={input} required minLength={2} maxLength={200} />
@@ -1440,7 +1440,7 @@ export function Notifications() {
         <form
           onSubmit={draft}
           aria-label="Draft a CQC notification"
-          className="grid gap-3 rounded border border-hub-line bg-white p-3 sm:grid-cols-2"
+          className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-2"
         >
           <Field label="Type of notification">
             <select className={input} value={kind} onChange={(e) => setKind(e.target.value)}>

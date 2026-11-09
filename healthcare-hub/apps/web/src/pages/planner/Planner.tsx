@@ -175,7 +175,7 @@ export function Planner() {
           <section
             aria-labelledby="grid-h"
             aria-busy={planner.isLoading}
-            className="rounded-lg border border-hub-line bg-white p-4 xl:col-span-2"
+            className="rounded-lg border border-hub-line bg-hub-card p-4 xl:col-span-2"
           >
             <h2 id="grid-h" className="mb-2 text-lg font-bold">
               Vehicles and crews
@@ -202,7 +202,7 @@ export function Planner() {
                     key={s.id}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => onDrop(e, s.id)}
-                    className={`flex items-stretch gap-2 rounded border p-1 ${shiftId === s.id ? 'border-hub-teal ring-2 ring-hub-teal' : 'border-slate-200'}`}
+                    className={`flex items-stretch gap-2 rounded border p-1 ${shiftId === s.id ? 'border-hub-teal ring-2 ring-hub-teal' : 'border-hub-line'}`}
                   >
                     <div className="w-56 shrink-0 text-sm">
                       <div className="font-semibold">{label}</div>
@@ -230,7 +230,7 @@ export function Planner() {
                       )}
                     </div>
                     <div
-                      className={`relative min-h-12 flex-1 rounded ${blocked ? 'bg-[repeating-linear-gradient(45deg,#fee2e2,#fee2e2_6px,#fff_6px,#fff_12px)]' : 'bg-slate-50'}`}
+                      className={`relative min-h-12 flex-1 rounded ${blocked ? 'bg-[repeating-linear-gradient(45deg,rgb(220_38_38/0.22),rgb(220_38_38/0.22)_6px,transparent_6px,transparent_12px)]' : 'bg-slate-50'}`}
                     >
                       <div
                         className="absolute inset-y-0 rounded bg-green-50"
@@ -238,14 +238,14 @@ export function Planner() {
                         aria-hidden="true"
                       />
                       {blocked && (
-                        <span className="absolute top-1 right-1 rounded bg-white px-1 text-sm font-semibold text-red-900">
+                        <span className="absolute top-1 right-1 rounded bg-hub-card px-1 text-sm font-semibold text-red-900">
                           BLOCKED – {words(s.vehicleStatus)}
                         </span>
                       )}
                       {(s.jobs as Row[]).map((j) => (
                         <span
                           key={j.jobId}
-                          className="absolute top-5 truncate rounded border border-slate-500 bg-white px-1 text-xs"
+                          className="absolute top-5 truncate rounded border border-slate-500 bg-hub-card px-1 text-xs"
                           style={pos(j.startsAt, j.endsAt)}
                           title={`${j.code} ${jobWord(j.state)} ${span(j.startsAt, j.endsAt)}`}
                         >
@@ -281,7 +281,7 @@ export function Planner() {
           <div className="space-y-6">
             <section
               aria-labelledby="unalloc-h"
-              className="rounded-lg border border-hub-line bg-white p-4"
+              className="rounded-lg border border-hub-line bg-hub-card p-4"
             >
               <h2 id="unalloc-h" className="mb-2 text-lg font-bold">
                 Unallocated jobs ({unallocated.length})
@@ -359,7 +359,7 @@ function WeekView(p: { from: string; locationId: string; onPick: (d: string) => 
       <h2 id="week-h" className="mb-2 text-lg font-bold">
         Week from {formatDate(p.from)}
       </h2>
-      <table className="w-full border-collapse bg-white text-sm">
+      <table className="w-full border-collapse bg-hub-card text-sm">
         <caption className="sr-only">Shifts and jobs by vehicle and day</caption>
         <thead>
           <tr>
@@ -397,14 +397,14 @@ function WeekView(p: { from: string; locationId: string; onPick: (d: string) => 
             <tr key={v}>
               <th
                 scope="row"
-                className="border border-hub-line bg-hub-row p-1.5 text-left text-hub-navy"
+                className="border border-hub-line bg-hub-row p-1.5 text-left text-hub-ink"
               >
                 {v}
               </th>
               {days.map((d, i) => {
                 const ss = (results[i]?.data?.shifts ?? []).filter((s) => s.vehicleCallsign === v);
                 return (
-                  <td key={d} className="border border-hub-line bg-white p-1 align-top">
+                  <td key={d} className="border border-hub-line bg-hub-card p-1 align-top">
                     {ss.length === 0
                       ? '—'
                       : ss.map((s) => (
@@ -433,7 +433,7 @@ function JobCard({ job }: { job: Row }) {
   return (
     <dl
       aria-label={`Job ${job.code}`}
-      className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-slate-200 pt-3 text-sm"
+      className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-hub-line pt-3 text-sm"
     >
       <dt className="font-semibold">Pickup window</dt>
       <dd>{span(job.pickupFrom, job.pickupTo)}</dd>
@@ -497,7 +497,7 @@ function ValidatePanel({
   }
 
   return (
-    <section aria-labelledby="val-h" className="rounded-lg border border-hub-line bg-white p-4">
+    <section aria-labelledby="val-h" className="rounded-lg border border-hub-line bg-hub-card p-4">
       <h2 id="val-h" className="text-lg font-bold">
         Validate assignment
       </h2>
@@ -652,7 +652,7 @@ function ExceptionRequests() {
       {!res.isLoading && rows.length === 0 && <p role="status">No exceptions are waiting.</p>}
       <ul className="space-y-2">
         {rows.map((r) => (
-          <li key={r.id} className="rounded-lg border border-hub-line bg-white p-3 text-sm">
+          <li key={r.id} className="rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
             <p className="font-semibold">{name(r)}</p>
             <p>
               Asked by {r.requestedByName ?? 'a dispatcher'} on {fmtDateTime(r.requestedAt)}, to
@@ -774,7 +774,7 @@ function ExceptionForm(p: {
   return (
     <form
       onSubmit={submit}
-      className="mt-2 space-y-2 rounded-lg border border-hub-line bg-white p-2"
+      className="mt-2 space-y-2 rounded-lg border border-hub-line bg-hub-card p-2"
     >
       <Field label="Reason (recorded in the audit trail)">
         <textarea name="reason" required minLength={10} maxLength={1000} className={input} />

@@ -924,7 +924,7 @@ const REGIME_WORDS: Record<string, string> = {
 export function EquipmentDetail({ asset, where }: { asset: Row; where: string }) {
   const regimes = (asset.regimes ?? []) as Row[];
   return (
-    <div className="space-y-2 rounded-lg border border-hub-line bg-white p-3 text-sm">
+    <div className="space-y-2 rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
       <h3 className="font-semibold">{asset.assetTag}</h3>
       <dl className="grid gap-x-4 gap-y-1 md:grid-cols-2">
         <dt className="font-medium">Serial number</dt>

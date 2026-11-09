@@ -91,7 +91,10 @@ export function Inspection() {
       {q.isLoading && <p role="status">Loading…</p>}
       {d && (
         <>
-          <section aria-label="Rating" className="rounded-lg border border-hub-line bg-white p-4">
+          <section
+            aria-label="Rating"
+            className="rounded-lg border border-hub-line bg-hub-card p-4"
+          >
             <h2 className="font-semibold">Rating published by CQC</h2>
             <p>
               {d.publishedRating

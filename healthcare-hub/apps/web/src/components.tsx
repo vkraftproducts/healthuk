@@ -125,7 +125,7 @@ export function Tabs({
       <div
         role="tablist"
         aria-label={label}
-        className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-white p-1.5"
+        className="glass flex flex-wrap gap-1 rounded-xl border border-hub-line p-1.5"
       >
         {visible.map((t, i) => (
           <button
@@ -140,7 +140,7 @@ export function Tabs({
               if (d) onChange(visible[(i + d + visible.length) % visible.length]!.id);
             }}
             onClick={() => onChange(t.id)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${current === t.id ? 'bg-hub-teal text-white' : 'text-hub-navy hover:bg-hub-row'}`}
+            className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold ${current === t.id ? 'bg-hub-teal' : 'text-hub-ink hover:bg-hub-row hover:text-hub-teal-dark'}`}
           >
             {t.label}
           </button>
@@ -158,11 +158,9 @@ export function Tabs({
   );
 }
 
-export const input = 'rounded-md border border-slate-500 bg-white px-2.5 py-1.5';
-export const button =
-  'rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white hover:bg-hub-teal-dark disabled:opacity-50';
-export const smallButton =
-  'rounded-md border border-slate-500 bg-white px-2.5 py-1 text-sm font-medium text-hub-navy hover:bg-hub-row';
+export const input = 'field';
+export const button = 'btn-primary';
+export const smallButton = 'btn-ghost';
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -186,7 +184,7 @@ export function Section({
   return (
     <section aria-labelledby={id} className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 id={id} className="text-lg font-bold">
+        <h2 id={id} className="section-title text-lg font-bold">
           {title}
         </h2>
         {actions}
@@ -270,7 +268,7 @@ export function ActionDialog(p: ActionDialogProps) {
   };
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
       onKeyDown={(e) => {
         if (e.key === 'Escape') close();
       }}
@@ -279,7 +277,7 @@ export function ActionDialog(p: ActionDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="action-dialog-title"
-        className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl"
+        className="hud w-full max-w-lg rounded-xl border border-hub-line bg-hub-card-2 p-5 shadow-glow rise-in"
       >
         <h2 id="action-dialog-title" className="text-lg font-semibold">
           {p.title}
@@ -294,7 +292,7 @@ export function ActionDialog(p: ActionDialogProps) {
             </span>
             <textarea
               autoFocus
-              className="w-full rounded border border-slate-400 p-2"
+              className="field w-full p-2"
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -322,7 +320,7 @@ export function ActionDialog(p: ActionDialogProps) {
           </button>
           <button
             type="button"
-            className={`rounded px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50 ${p.danger ? 'bg-red-700' : 'bg-hub-teal'}`}
+            className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold disabled:opacity-50 ${p.danger ? 'bg-red-700 text-white shadow-[0_6px_16px_-6px_rgb(220_38_38/0.6)] hover:bg-red-500' : 'bg-hub-teal'}`}
             disabled={busy || tooShort || p.confirmDisabled}
             onClick={() => void confirm()}
           >

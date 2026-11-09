@@ -50,7 +50,7 @@ export function StaffList() {
   if (!orgId) return <p role="status">Select an organisation to continue.</p>;
   if (!allowed)
     return (
-      <p role="alert" className="rounded-lg border border-hub-line bg-white p-3">
+      <p role="alert" className="rounded-lg border border-hub-line bg-hub-card p-3">
         You do not have access to the staff register.
       </p>
     );
@@ -63,7 +63,7 @@ export function StaffList() {
         <div
           role="tablist"
           aria-label="Staff views"
-          className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-white p-1.5"
+          className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-hub-card p-1.5"
         >
           {(
             [
@@ -80,7 +80,7 @@ export function StaffList() {
                 role="tab"
                 aria-selected={view === id}
                 onClick={() => setView(id)}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === id ? 'bg-hub-teal text-white' : 'text-hub-navy hover:bg-hub-row'}`}
+                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === id ? 'bg-hub-teal text-white' : 'text-hub-ink hover:bg-hub-row'}`}
               >
                 {label}
               </button>
@@ -145,7 +145,7 @@ function StaffRegister({
         <label className="flex flex-col text-sm">
           Search name or staff number
           <input
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -153,7 +153,7 @@ function StaffRegister({
         <label className="flex flex-col text-sm">
           Lifecycle
           <select
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
             value={lifecycle}
             onChange={(e) => setLifecycle(e.target.value)}
           >
@@ -168,7 +168,7 @@ function StaffRegister({
         <label className="flex flex-col text-sm">
           Approved role
           <select
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
             value={role}
             onChange={(e) => setRole(e.target.value)}
           >
@@ -292,7 +292,10 @@ function AddStaff() {
     }
   }
   return (
-    <section aria-labelledby="add-staff" className="rounded-lg border border-hub-line bg-white p-4">
+    <section
+      aria-labelledby="add-staff"
+      className="rounded-lg border border-hub-line bg-hub-card p-4"
+    >
       <h2 id="add-staff" className="mb-2 text-lg font-bold">
         Add a staff member
       </h2>
@@ -303,7 +306,7 @@ function AddStaff() {
             name="staffNo"
             required
             placeholder="ST-0000"
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           />
         </label>
         <label className="flex flex-col text-sm">
@@ -311,14 +314,14 @@ function AddStaff() {
           <input
             name="displayName"
             required
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           />
         </label>
         <label className="flex flex-col text-sm">
           Job title
           <input
             name="jobTitle"
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           />
         </label>
         <label className="flex flex-col text-sm">
@@ -326,7 +329,7 @@ function AddStaff() {
           <select
             name="location"
             required
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           >
             {(locations.data?.data ?? []).map((l) => (
               <option key={l.id} value={l.id}>
@@ -340,7 +343,7 @@ function AddStaff() {
           <input
             name="workEmail"
             type="email"
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           />
         </label>
         <label className="flex flex-col text-sm">
@@ -348,14 +351,14 @@ function AddStaff() {
           <input
             name="startDate"
             type="date"
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           />
         </label>
         <label className="flex flex-col text-sm">
           Contract type
           <select
             name="contractType"
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           >
             <option value="">Not recorded</option>
             {Object.entries(CONTRACT_LABEL).map(([k, v]) => (
@@ -369,7 +372,7 @@ function AddStaff() {
           Line manager
           <select
             name="managerStaffId"
-            className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
           >
             <option value="">Not set</option>
             {(managers.data?.data ?? []).map((m) => (
@@ -381,7 +384,10 @@ function AddStaff() {
         </label>
         <label className="flex flex-col text-sm">
           Role to check for
-          <select name="role" className="rounded-md border border-slate-500 bg-white px-2.5 py-1.5">
+          <select
+            name="role"
+            className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5"
+          >
             <option value="">Decide later</option>
             {roles.map(([k, v]) => (
               <option key={k} value={k}>
@@ -390,7 +396,7 @@ function AddStaff() {
             ))}
           </select>
         </label>
-        <button className="rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white hover:bg-hub-teal-dark">
+        <button className="rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white">
           Add
         </button>
       </form>

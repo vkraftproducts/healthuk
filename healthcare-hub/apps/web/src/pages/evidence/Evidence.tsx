@@ -416,7 +416,7 @@ export function EvidenceDialog({
   if (!target) return null;
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4"
+      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 backdrop-blur-sm p-4"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !uploading) onClose();
       }}
@@ -425,7 +425,7 @@ export function EvidenceDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="evidence-dialog-title"
-        className="mt-10 w-full max-w-4xl space-y-3 rounded-lg bg-white p-5 shadow-xl"
+        className="mt-10 w-full max-w-4xl space-y-3 rounded-lg bg-hub-card p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-3">
           <h2 id="evidence-dialog-title" className="text-lg font-semibold">

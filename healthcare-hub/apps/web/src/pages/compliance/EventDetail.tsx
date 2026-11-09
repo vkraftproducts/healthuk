@@ -638,7 +638,7 @@ export function EventDetail() {
         </Link>{' '}
         / {e.code}
       </nav>
-      <header className="rounded-lg border border-hub-line bg-white p-4">
+      <header className="rounded-lg border border-hub-line bg-hub-card p-4">
         <h1 className="text-2xl font-bold">
           {e.code} {e.title}
         </h1>
@@ -861,7 +861,7 @@ export function EventDetail() {
         }
       >
         {((suggestions.data as Row[] | undefined) ?? []).some((s) => !s.recorded) && (
-          <div className="rounded border border-hub-line bg-white p-3 text-sm">
+          <div className="rounded border border-hub-line bg-hub-card p-3 text-sm">
             <p className="font-medium">Suggested from what was recorded (a person decides):</p>
             <ul className="list-disc pl-5">
               {((suggestions.data as Row[]) ?? [])
@@ -974,7 +974,7 @@ export function EventDetail() {
             </dd>
           </dl>
           {e.complaint.escalationText && (
-            <p className="rounded border border-hub-line bg-white p-2 text-sm">
+            <p className="rounded border border-hub-line bg-hub-card p-2 text-sm">
               <span className="font-semibold">Escalation rights to include: </span>
               {e.complaint.escalationText}
             </p>

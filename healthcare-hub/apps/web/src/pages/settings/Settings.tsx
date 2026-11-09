@@ -73,7 +73,7 @@ export function Settings() {
       <div
         role="tablist"
         aria-label="Settings sections"
-        className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-white p-1.5"
+        className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-hub-card p-1.5"
       >
         {tabs.map((t) => (
           <button
@@ -83,7 +83,7 @@ export function Settings() {
             aria-selected={tab === t.id}
             aria-controls="settings-panel"
             onClick={() => setTab(t.id)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-navy hover:bg-hub-row'}`}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-ink hover:bg-hub-row'}`}
           >
             {t.label}
           </button>

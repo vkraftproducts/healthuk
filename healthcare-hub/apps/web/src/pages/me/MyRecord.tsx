@@ -156,7 +156,7 @@ export function MyRecord() {
       {me.permissions.includes('crew.today.view') && (
         <section
           aria-label="Crew app"
-          className="space-y-1 rounded-lg border border-hub-line bg-white p-4"
+          className="space-y-1 rounded-lg border border-hub-line bg-hub-card p-4"
         >
           <h2 className="font-semibold">Your shifts are in the crew app</h2>
           <p>
@@ -166,7 +166,7 @@ export function MyRecord() {
           </p>
         </section>
       )}
-      <dl className="grid gap-2 rounded-lg border border-hub-line bg-white p-4 sm:grid-cols-2">
+      <dl className="grid gap-2 rounded-lg border border-hub-line bg-hub-card p-4 sm:grid-cols-2">
         <div>
           <dt className="text-sm font-semibold">Name</dt>
           <dd>{p.displayName}</dd>

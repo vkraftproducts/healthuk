@@ -1,4 +1,5 @@
 import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 import { supportBannerText } from '@hub/contracts';
 import { StatusBadge } from '@hub/ui';
 import { BrandMark } from '../brand.js';
@@ -22,6 +23,120 @@ const SERVICE_NAME: Record<string, string> = {
   dental: 'Dental practice',
   care_home: 'Care home',
 };
+
+const ICON_PATHS: Record<string, ReactNode> = {
+  '/': (
+    <>
+      <rect x="3" y="3" width="7" height="9" rx="1.5" />
+      <rect x="14" y="3" width="7" height="5" rx="1.5" />
+      <rect x="14" y="12" width="7" height="9" rx="1.5" />
+      <rect x="3" y="16" width="7" height="5" rx="1.5" />
+    </>
+  ),
+  '/inspection': (
+    <>
+      <path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z" />
+      <path d="M8 6H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-2" />
+      <path d="m9 14 2 2 4-4" />
+    </>
+  ),
+  '/me': (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" />
+    </>
+  ),
+  '/report': (
+    <>
+      <path d="M12 3 2 20h20z" />
+      <path d="M12 10v4M12 17h.01" />
+    </>
+  ),
+  '/alerts': (
+    <>
+      <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z" />
+      <path d="M10 21a2 2 0 0 0 4 0" />
+    </>
+  ),
+  '/staff': (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20c0-3.5 2.9-5.5 6.5-5.5s6.5 2 6.5 5.5" />
+      <circle cx="17" cy="9" r="2.8" />
+      <path d="M17 14.5c2.8 0 4.5 1.6 4.5 4.5" />
+    </>
+  ),
+  '/vehicles': (
+    <>
+      <path d="M3 17V8a1 1 0 0 1 1-1h9v10" />
+      <path d="M13 10h4l3 3.5V17h-1.5M13 17h-3" />
+      <circle cx="7.5" cy="17.5" r="2" />
+      <circle cx="16.5" cy="17.5" r="2" />
+      <path d="M8 9.5v3.5M6.25 11.25h3.5" />
+    </>
+  ),
+  '/compliance': (
+    <>
+      <path d="M12 3 20 6v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z" />
+      <path d="m8.5 12 2.5 2.5 4.5-5" />
+    </>
+  ),
+  '/premises': (
+    <>
+      <path d="M4 21V6l8-3 8 3v15" />
+      <path d="M9 21v-5h6v5M8 10h.01M12 10h.01M16 10h.01M8 13h.01M12 13h.01M16 13h.01" />
+    </>
+  ),
+  '/planner': (
+    <>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+      <path d="m9 15 2 2 4-4" />
+    </>
+  ),
+  '/reports': <path d="M4 20V10M10 20V4M16 20v-7M21 20H3" />,
+  '/speak-up': (
+    <>
+      <path d="M21 12a8 8 0 0 1-11.8 7L4 20l1.2-4.4A8 8 0 1 1 21 12z" />
+      <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
+    </>
+  ),
+  '/settings': (
+    <>
+      <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="8" cy="17" r="2" />
+    </>
+  ),
+};
+
+function NavIcon({ to }: { to: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      className="shrink-0"
+    >
+      {ICON_PATHS[to] ?? <circle cx="12" cy="12" r="8" />}
+    </svg>
+  );
+}
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('');
 
 /** "Exora International Ltd / London / Ambulance service" from the user's scope. */
 function useScope(orgId: string | null) {
@@ -64,35 +179,52 @@ export function Shell() {
     router.history.canGoBack() ? router.history.back() : void router.navigate({ to: '/' });
 
   return (
-    <div className="flex min-h-screen flex-col bg-hub-bg md:flex-row">
+    <div className="flex min-h-screen flex-col md:flex-row">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-10 focus:bg-white focus:p-2"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded-lg focus:bg-hub-card-2 focus:p-3 focus:text-hub-ink"
       >
         Skip to main content
       </a>
 
-      <aside className="on-dark flex shrink-0 flex-col bg-hub-navy text-white md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto">
-        <div className="px-5 pb-3 pt-6">
+      <aside className="on-dark relative flex shrink-0 flex-col border-b border-hub-line bg-hub-navy/95 text-white md:sticky md:top-0 md:h-screen md:w-64 md:overflow-y-auto md:border-b-0">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 hidden w-px bg-gradient-to-b from-transparent via-hub-teal/50 to-transparent md:block"
+        />
+        <div className="px-5 pb-4 pt-6">
           <BrandMark compact />
         </div>
+        <div aria-hidden="true" className="neon-rule mx-5 mb-3" />
         <nav aria-label="Primary" className="px-3">
-          <ul className="flex flex-wrap gap-1 md:block md:space-y-1.5">
+          <ul className="flex flex-wrap gap-1 md:block md:space-y-1">
             {NAV_ITEMS.filter((item) => canSee(item, me.permissions, scope.packs)).map((item) => (
               <li key={item.to}>
                 <Link
                   to={item.to}
                   activeOptions={{ exact: item.to === '/' }}
-                  className="block rounded-md px-3 py-2.5 text-sm"
-                  inactiveProps={{ className: 'text-slate-100 hover:bg-hub-navy-2' }}
+                  className="group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm"
+                  inactiveProps={{
+                    className: 'text-slate-100 hover:bg-hub-navy-2 hover:text-white',
+                  }}
                   activeProps={{
                     'aria-current': 'page',
-                    className: 'bg-hub-teal font-semibold text-white',
+                    className:
+                      'bg-hub-teal/10 font-semibold text-white shadow-[inset_0_0_0_1px_rgb(52_211_153/0.35),0_0_22px_-8px_rgb(34_229_138/0.6)]',
                   }}
                 >
-                  {item.to === '/' && !me.permissions.includes('dashboard.view')
-                    ? 'Home'
-                    : item.label}
+                  <span
+                    aria-hidden="true"
+                    className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-hub-teal opacity-0 shadow-[0_0_10px_rgb(34_229_138)] group-aria-[current=page]:opacity-100"
+                  />
+                  <span className="text-hub-muted transition-colors group-hover:text-hub-teal group-aria-[current=page]:text-hub-teal">
+                    <NavIcon to={item.to} />
+                  </span>
+                  <span>
+                    {item.to === '/' && !me.permissions.includes('dashboard.view')
+                      ? 'Home'
+                      : item.label}
+                  </span>
                 </Link>
               </li>
             ))}
@@ -101,12 +233,12 @@ export function Shell() {
 
         <div className="mt-auto space-y-3 px-5 pb-5 pt-6 text-xs text-slate-200">
           <div className="flex flex-col gap-1">
-            <label htmlFor="org-switcher" className="text-slate-300">
+            <label htmlFor="org-switcher" className="text-hub-muted">
               Organisation
             </label>
             <select
               id="org-switcher"
-              className="rounded-md border border-slate-400 bg-hub-navy-2 px-2 py-1.5 text-sm text-white"
+              className="field bg-hub-navy-2 px-2 py-1.5 text-sm text-white"
               value={orgId ?? ''}
               onChange={(e) => setOrgId(e.target.value)}
             >
@@ -117,35 +249,44 @@ export function Shell() {
               ))}
             </select>
           </div>
-          <div className="border-t border-hub-navy-2 pt-3">
-            <div className="text-sm font-semibold text-white">{me.user.displayName}</div>
-            {scope.role && <div>{scope.role}</div>}
-            {signOut && (
-              <button
-                type="button"
-                onClick={signOut}
-                className="mt-2 rounded-md border border-slate-300 px-3 py-1 text-sm text-white hover:bg-hub-navy-2"
-              >
-                Sign out
-              </button>
-            )}
+          <div className="neon-rule" aria-hidden="true" />
+          <div className="flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-hub-teal/60 bg-hub-navy-2 font-display text-sm font-semibold text-hub-teal shadow-glow-sm"
+            >
+              {initials(me.user.displayName)}
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-white">{me.user.displayName}</div>
+              {scope.role && <div className="truncate text-hub-muted">{scope.role}</div>}
+            </div>
           </div>
+          {signOut && (
+            <button type="button" onClick={signOut} className="btn-ghost w-full">
+              Sign out
+            </button>
+          )}
         </div>
       </aside>
 
       <div className="min-w-0 flex-1 space-y-5 p-4 md:p-6">
-        <header className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-hub-line bg-white px-5 py-3.5">
+        <header className="hud glass sticky top-3 z-20 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-hub-line px-5 py-3.5 shadow-panel">
           <nav aria-label="Breadcrumb">
             <button
               type="button"
               onClick={goBack}
               title="Go back"
               aria-label={`Go back: ${crumbs.join(' / ')}`}
-              className="flex flex-wrap gap-x-3 text-left font-semibold text-hub-navy underline-offset-2 hover:underline"
+              className="flex flex-wrap gap-x-3 text-left font-display font-semibold text-hub-ink underline-offset-2 hover:underline"
             >
               {crumbs.map((crumb, i) => (
                 <span key={crumb} className="flex gap-x-3">
-                  {i > 0 && <span aria-hidden="true">/</span>}
+                  {i > 0 && (
+                    <span aria-hidden="true" className="text-hub-teal">
+                      /
+                    </span>
+                  )}
                   {crumb}
                 </span>
               ))}
@@ -156,7 +297,7 @@ export function Shell() {
               <>
                 <Link
                   to="/alerts"
-                  className="font-medium text-hub-navy underline-offset-2 hover:underline"
+                  className="font-medium text-hub-ink underline-offset-2 hover:underline"
                   aria-label={
                     `Alerts: ${alerts.data.open} open` +
                     (alerts.data.critical ? `, ${alerts.data.critical} critical` : '')
@@ -168,25 +309,36 @@ export function Shell() {
                 <span aria-hidden="true">|</span>
               </>
             )}
-            <time dateTime={new Date().toISOString()}>{londonDate.format(new Date())}</time>
+            <time dateTime={new Date().toISOString()} className="font-mono text-xs">
+              {londonDate.format(new Date())}
+            </time>
             <span aria-hidden="true">|</span>
             <button
               type="button"
               onClick={refresh}
-              className="font-medium text-hub-navy underline-offset-2 hover:underline"
+              className="font-medium text-hub-ink underline-offset-2 hover:text-hub-teal-dark hover:underline"
             >
               Refresh
             </button>
             <span aria-hidden="true">|</span>
-            <span>Last updated {lastUpdated ? londonTime.format(lastUpdated) : '—'}</span>
+            <span>
+              Last updated{' '}
+              <span className="font-mono text-xs">
+                {lastUpdated ? londonTime.format(lastUpdated) : '—'}
+              </span>
+            </span>
             {live && (
               <>
                 <span aria-hidden="true">|</span>
                 <span data-testid="live-state" className="inline-flex items-center gap-1.5">
-                  <span
-                    aria-hidden="true"
-                    className={`h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
-                  />
+                  <span aria-hidden="true" className="relative flex h-2 w-2">
+                    {live === 'live' && (
+                      <span className="absolute inline-flex h-full w-full animate-beacon rounded-full bg-green-700" />
+                    )}
+                    <span
+                      className={`relative h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
+                    />
+                  </span>
                   {live === 'live'
                     ? 'Live'
                     : live === 'connecting'
@@ -205,13 +357,13 @@ export function Shell() {
         {support && (
           <div
             role="status"
-            className="rounded-lg border border-amber-700 bg-amber-50 px-5 py-3 text-sm text-amber-950"
+            className="rounded-xl border border-amber-700 bg-amber-50 px-5 py-3 text-sm text-amber-950"
           >
             <strong>Support access, read-only.</strong>{' '}
             {supportBannerText(fmtDateTime(support.endsAt))}
           </div>
         )}
-        <main id="main" tabIndex={-1}>
+        <main id="main" tabIndex={-1} className="rise-in">
           <Outlet />
         </main>
       </div>

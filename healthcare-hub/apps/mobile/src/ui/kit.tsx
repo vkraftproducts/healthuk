@@ -94,7 +94,17 @@ export function Screen({
         contentContainerStyle={s.body}
         keyboardShouldPersistTaps="handled"
         {...(onRefresh
-          ? { refreshControl: <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> }
+          ? {
+              refreshControl: (
+                <RefreshControl
+                  refreshing={!!refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={colors.primary}
+                  colors={[colors.primary]}
+                  progressBackgroundColor={colors.card}
+                />
+              ),
+            }
           : {})}
       >
         {children}
@@ -144,8 +154,14 @@ export function Button({
   kind?: 'primary' | 'secondary' | 'danger';
   hint?: string;
 }) {
-  const bg = kind === 'primary' ? colors.primary : kind === 'danger' ? colors.red : colors.card;
-  const fg = kind === 'secondary' ? colors.primary : colors.primaryText;
+  const bg =
+    kind === 'primary' ? colors.primary : kind === 'danger' ? colors.dangerSolid : colors.card;
+  const fg =
+    kind === 'danger'
+      ? colors.onDanger
+      : kind === 'secondary'
+        ? colors.primary
+        : colors.primaryText;
   return (
     <Pressable
       onPress={onPress}
@@ -157,6 +173,7 @@ export function Button({
       style={({ pressed }) => [
         s.button,
         { backgroundColor: bg, borderColor: kind === 'secondary' ? colors.primary : bg },
+        kind === 'primary' && !disabled && s.glow,
         disabled && s.disabled,
         pressed && !disabled && s.pressed,
       ]}
@@ -219,6 +236,8 @@ export function Field({
           multiline && { minHeight: 96 },
           error ? { borderColor: colors.red } : null,
         ]}
+        placeholderTextColor={colors.muted}
+        selectionColor={colors.primary}
         {...(placeholder ? { placeholder } : {})}
       />
       {error ? (
@@ -281,7 +300,13 @@ export function Toggle({
   return (
     <View style={[s.field, s.toggle]}>
       <Text style={[s.label, { flex: 1 }]}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} accessibilityLabel={label} />
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        accessibilityLabel={label}
+        trackColor={{ false: colors.border, true: colors.primary }}
+        thumbColor={value ? colors.primaryText : colors.muted}
+      />
     </View>
   );
 }
@@ -311,15 +336,20 @@ const s = StyleSheet.create({
   },
   back: { minHeight: 44, justifyContent: 'center' },
   backText: { color: colors.primary, fontSize: 17, fontWeight: '600' },
-  title: { fontSize: 24, fontWeight: '700', color: colors.text },
+  title: { fontSize: 24, fontWeight: '700', color: colors.text, letterSpacing: -0.3 },
   body: { padding: 16, gap: 12, paddingBottom: 48 },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 14,
     gap: 8,
+    shadowColor: '#0a4630',
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   cardTitle: { fontSize: 18, fontWeight: '700', color: colors.text, flexShrink: 1 },
@@ -331,9 +361,16 @@ const s = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   pillText: { fontWeight: '700', fontSize: 14 },
+  glow: {
+    shadowColor: colors.glow,
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
   button: {
     minHeight: TOUCH,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
@@ -342,18 +379,18 @@ const s = StyleSheet.create({
   buttonText: { fontSize: 18, fontWeight: '700' },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.8 },
-  banner: { borderWidth: 2, borderRadius: 10, padding: 12 },
+  banner: { borderWidth: 2, borderRadius: 14, padding: 12 },
   bannerText: { fontSize: 16, fontWeight: '700' },
   field: { gap: 6 },
   label: { fontSize: 16, fontWeight: '600', color: colors.text },
   input: {
     minHeight: TOUCH,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: colors.edge,
+    borderRadius: 12,
     paddingHorizontal: 12,
     fontSize: 17,
-    backgroundColor: colors.card,
+    backgroundColor: colors.field,
     color: colors.text,
   },
   error: { color: colors.red, fontWeight: '600' },
@@ -361,7 +398,7 @@ const s = StyleSheet.create({
   choice: {
     minHeight: TOUCH,
     paddingHorizontal: 14,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.primary,
     justifyContent: 'center',
