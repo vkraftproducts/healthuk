@@ -4,6 +4,8 @@
 #
 # Coolify fills the SERVICE_* variables: SERVICE_FQDN_WEB_80 gives the web service a URL
 # (sslip.io when there is no domain) and SERVICE_PASSWORD_* are generated once and kept.
+# HUB_PUBLIC_URL must be set by hand to the web service's domain, exactly as the browser uses it
+# (for example http://web.203.0.113.10.sslip.io): the API refuses to start without it.
 services:
   postgres:
     image: postgres:16
@@ -52,8 +54,8 @@ services:
       OIDC_AUDIENCE: healthcare-hub-api
       OIDC_JWKS_URI: http://localhost:4010/.well-known/jwks.json
       # The browser origin: the web service serves the app and proxies /api.
-      WEB_ORIGIN: ${SERVICE_URL_WEB}
-      PUBLIC_API_URL: ${SERVICE_URL_WEB}
+      WEB_ORIGIN: ${HUB_PUBLIC_URL}
+      PUBLIC_API_URL: ${HUB_PUBLIC_URL}
       EVIDENCE_DIR: /data/evidence
       IP_HASH_SECRET: ${SERVICE_PASSWORD_64_IPHASH}
       BLOB_SIGNING_SECRET: ${SERVICE_PASSWORD_64_BLOB}
@@ -85,7 +87,7 @@ services:
       DATABASE_URL: postgresql://hub_app:${SERVICE_PASSWORD_APP}@postgres:5432/hub
       QUEUE_DATABASE_URL: postgresql://hub_migrator:${SERVICE_PASSWORD_MIGRATOR}@postgres:5432/hub
       EVIDENCE_DIR: /data/evidence
-      WEB_ORIGIN: ${SERVICE_URL_WEB}
+      WEB_ORIGIN: ${HUB_PUBLIC_URL}
       LOG_LEVEL: info
       PUSH_PROVIDER: log
       EMAIL_TRANSPORT: outbox
