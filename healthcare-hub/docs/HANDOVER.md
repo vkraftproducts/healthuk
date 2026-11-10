@@ -1123,10 +1123,10 @@ Migrations `0030_fleet_workflows.sql`, `0031_dispatch_workflows.sql` and
 - Demo organisation renamed to "Exora International Ltd" (trading name Exora Medical), location
   London; the seed renames existing databases. The web reads the repo-root `.env` (`envDir`),
   unit tests keep their own.
-- Product branding (10 Nov 2026): "Healthcare Hub by Vkraft" with the Vkraft V-and-cross logo
-  (`apps/web/src/brand.tsx`, `public/favicon.svg`, `public/brand/vkraft-mark.svg`). The
-  per-deployment `VITE_BRAND_NAME` / `VITE_BRAND_LEGAL_NAME` settings were removed;
-  `VITE_BRAND_LOGO=pulse|rapid` still selects the older marks.
+- Product branding (10 Nov 2026): "Healthcare Hub" with the Pulse Cross logo and a small
+  "by VKRAFT" badge (`MadeBy` in `apps/web/src/brand.tsx`, artwork
+  `public/brand/by-vkraft.png`). The per-deployment `VITE_BRAND_NAME` /
+  `VITE_BRAND_LEGAL_NAME` settings were removed.
 
 ### Full test run fixes (6 Nov 2026; all suites and Playwright green)
 

@@ -11,13 +11,26 @@ export const BRAND = {
 };
 
 /**
- * Logo marks. "vkraft" (a V cradling a medical cross) is the primary logo. "pulse" (Pulse Cross)
- * and "rapid" (Rapid Response ambulance) are alternatives, chosen with VITE_BRAND_LOGO. Standalone
- * SVGs are in public/brand/ (keep public/favicon.svg in step with the chosen mark).
+ * Logo marks. "pulse" (Pulse Cross: a medical cross with a heartbeat line) is the primary logo;
+ * "rapid" (Rapid Response: an ambulance on the move) is the approved backup. Choose the backup for
+ * a deployment with VITE_BRAND_LOGO=rapid. Standalone SVGs for these and the other options that
+ * were considered are in public/brand/ (keep public/favicon.svg in step with the chosen mark).
  */
-export type LogoVariant = 'vkraft' | 'pulse' | 'rapid';
-const envLogo = import.meta.env.VITE_BRAND_LOGO;
-const configured: LogoVariant = envLogo === 'pulse' || envLogo === 'rapid' ? envLogo : 'vkraft';
+export type LogoVariant = 'pulse' | 'rapid';
+const configured = import.meta.env.VITE_BRAND_LOGO === 'rapid' ? 'rapid' : 'pulse';
+
+/** The maker's "by VKRAFT" badge (the supplied artwork has a white background). */
+export function MadeBy({ compact = false }: { compact?: boolean }) {
+  return (
+    <img
+      src="/brand/by-vkraft.png"
+      alt={`by ${MAKER}`}
+      width={97}
+      height={35}
+      className={`block w-auto rounded-md ${compact ? 'h-6' : 'h-8'}`}
+    />
+  );
+}
 
 export function BrandLogo({
   size = 40,
@@ -48,37 +61,7 @@ export function BrandLogo({
           <feGaussianBlur stdDeviation="2.2" />
         </filter>
       </defs>
-      {variant === 'vkraft' ? (
-        <>
-          <rect x="2" y="2" width="60" height="60" rx="16" fill="#10283a" />
-          <rect x="2" y="2" width="60" height="60" rx="16" fill={f} />
-          <rect
-            x="2.9"
-            y="2.9"
-            width="58.2"
-            height="58.2"
-            rx="15.2"
-            fill="none"
-            stroke={g}
-            strokeOpacity=".6"
-            strokeWidth="1.5"
-          />
-          <path
-            d="M11 15h11.5L32 41.5 41.5 15H53L38 51H26z"
-            fill={g}
-            stroke={g}
-            strokeWidth="1.2"
-            strokeLinejoin="round"
-          />
-          <g filter={`url(#${id}b)`} opacity=".7">
-            <rect x="29.5" y="14" width="5" height="14" rx="1.2" fill="#8fd8e0" />
-          </g>
-          <g fill="#eef8fb">
-            <rect x="29.6" y="14" width="4.8" height="14" rx="1.2" />
-            <rect x="25" y="18.6" width="14" height="4.8" rx="1.2" />
-          </g>
-        </>
-      ) : variant === 'rapid' ? (
+      {variant === 'rapid' ? (
         <>
           <rect x="2" y="2" width="60" height="60" rx="16" fill="#10283a" />
           <rect x="2" y="2" width="60" height="60" rx="16" fill={f} />
@@ -151,7 +134,7 @@ export function BrandLogo({
 export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`flex items-center ${compact ? 'gap-2.5' : 'gap-3.5'}`}>
-      <BrandLogo size={compact ? 36 : 52} animated={!compact} />
+      <BrandLogo size={compact ? 44 : 68} animated={!compact} />
       <div className="leading-tight">
         <div
           className={`font-display font-semibold tracking-tight text-hub-ink ${
@@ -160,8 +143,8 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
         >
           Healthcare <span className="text-hub-teal">Hub</span>
         </div>
-        <div className={compact ? 'text-xs text-hub-muted' : 'text-sm text-hub-muted'}>
-          by {MAKER}
+        <div className="mt-0.5">
+          <MadeBy compact={compact} />
         </div>
       </div>
     </div>
