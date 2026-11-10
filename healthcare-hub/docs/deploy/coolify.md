@@ -43,8 +43,10 @@ check both work.
 4. **Domains.** Open the `web` service settings. Coolify fills in an sslip.io address such as
    `http://web-abc123.203.0.113.10.sslip.io`. Leave it, or replace it with your own domain later
    (see below). The other services need no domain.
-5. **Environment Variables.** Coolify generates the `SERVICE_PASSWORD_*` values and
-   `SERVICE_URL_WEB` itself. You can optionally set:
+5. **Environment Variables.** Coolify generates the `SERVICE_PASSWORD_*` values itself. Set
+   `HUB_PUBLIC_URL` to the `web` domain from step 4, exactly as the browser uses it (scheme and
+   host, no trailing slash), for example `http://web-abc123.203.0.113.10.sslip.io`. The API does
+   not start without it. You can optionally set:
 
    | Variable              | Default                   | Meaning                                |
    | --------------------- | ------------------------- | -------------------------------------- |
@@ -68,8 +70,8 @@ check both work.
 
 1. Point a DNS `A` record at the VM's IP.
 2. In Coolify, set the `web` service domain to `https://hub.example.com` and redeploy. Coolify
-   issues the certificate. `SERVICE_URL_WEB` follows the domain, so `WEB_ORIGIN` and
-   `PUBLIC_API_URL` update by themselves, and the sign-in cookie becomes `Secure` over https.
+   issues the certificate. Change `HUB_PUBLIC_URL` to the same `https://` address before
+   redeploying; the sign-in cookie then becomes `Secure`.
 
 ## Updating
 
@@ -80,7 +82,8 @@ overwrites existing data.
 ## Troubleshooting
 
 - **Sign-in fails with "Not permitted" or a cross-origin error:** the browser URL must match
-  `SERVICE_URL_WEB` exactly (scheme and host). Redeploy after changing the domain.
+  `HUB_PUBLIC_URL` exactly (scheme and host). Redeploy after changing the domain.
+- **`api` is unhealthy straight after `setup`:** `HUB_PUBLIC_URL` is missing or not a full URL.
 - **`setup` failed:** open its logs. A database password error after you changed a generated
   password means the volume still has the old one. Restore the old value, or delete the
   `pgdata` volume to start again (this deletes all data).

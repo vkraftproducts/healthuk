@@ -1,0 +1,115 @@
+# Demo environment for Coolify (Docker Compose build pack). Synthetic data only: password
+# sign-in with the seeded users, NODE_ENV=development so the demo passwords and DEV_DISABLE_MFA
+# are allowed. Not a production deployment (see docs/deploy/coolify.md).
+#
+# Coolify fills the SERVICE_* variables: SERVICE_FQDN_WEB_80 gives the web service a URL
+# (sslip.io when there is no domain) and SERVICE_PASSWORD_* are generated once and kept.
+# HUB_PUBLIC_URL must be set by hand to the web service's domain, exactly as the browser uses it
+# (for example http://web.203.0.113.10.sslip.io): the API refuses to start without it.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  setup:
+    build:
+      context: .
+      dockerfile: deploy/setup.Dockerfile
+    restart: 'no'
+    environment:
+      NODE_ENV: development
+      DATABASE_SUPERUSER_URL: postgresql://postgres:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/postgres
+      DATABASE_ADMIN_URL: postgresql://hub_migrator:${SERVICE_PASSWORD_MIGRATOR}@postgres:5432/hub
+      DATABASE_URL: postgresql://hub_app:${SERVICE_PASSWORD_APP}@postgres:5432/hub
+      SEED_LOCAL_PASSWORD: ${SEED_LOCAL_PASSWORD:-Hub-Dev-Password-2026!}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      API_PORT: '4000'
+      DATABASE_URL: postgresql://hub_app:${SERVICE_PASSWORD_APP}@postgres:5432/hub
+      AUTH_MODE: local
+      DEV_DISABLE_MFA: ${DEV_DISABLE_MFA:-true}
+      # Unused in local mode but required by the config schema.
+      OIDC_ISSUER: http://localhost:4010
+      OIDC_AUDIENCE: healthcare-hub-api
+      OIDC_JWKS_URI: http://localhost:4010/.well-known/jwks.json
+      # The browser origin: the web service serves the app and proxies /api.
+      WEB_ORIGIN: ${HUB_PUBLIC_URL}
+      PUBLIC_API_URL: ${HUB_PUBLIC_URL}
+      EVIDENCE_DIR: /data/evidence
+      IP_HASH_SECRET: ${SERVICE_PASSWORD_64_IPHASH}
+      BLOB_SIGNING_SECRET: ${SERVICE_PASSWORD_64_BLOB}
+      LOG_LEVEL: info
+    volumes:
+      - evidence:/data/evidence
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:4000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://hub_app:${SERVICE_PASSWORD_APP}@postgres:5432/hub
+      QUEUE_DATABASE_URL: postgresql://hub_migrator:${SERVICE_PASSWORD_MIGRATOR}@postgres:5432/hub
+      EVIDENCE_DIR: /data/evidence
+      WEB_ORIGIN: ${HUB_PUBLIC_URL}
+      LOG_LEVEL: info
+      PUSH_PROVIDER: log
+      EMAIL_TRANSPORT: outbox
+      PUSH_TRANSPORT: outbox
+    volumes:
+      - evidence:/data/evidence
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_AUTH_MODE: local
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_WEB_80
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  evidence:
