@@ -1121,9 +1121,12 @@ Migrations `0030_fleet_workflows.sql`, `0031_dispatch_workflows.sql` and
 - `pg` moved to the API's runtime dependencies (the live service imports it; the production
   image crashed without it). API and worker images create `/data/evidence` owned by `node`.
 - Demo organisation renamed to "Exora International Ltd" (trading name Exora Medical), location
-  London; the seed renames existing databases. Branding via `VITE_BRAND_NAME` and
-  `VITE_BRAND_LEGAL_NAME` (`apps/web/src/brand.tsx`, logo and favicon); the web reads the
-  repo-root `.env` (`envDir`), unit tests keep their own.
+  London; the seed renames existing databases. The web reads the repo-root `.env` (`envDir`),
+  unit tests keep their own.
+- Product branding (10 Nov 2026): "Healthcare Hub by Vkraft" with the Vkraft V-and-cross logo
+  (`apps/web/src/brand.tsx`, `public/favicon.svg`, `public/brand/vkraft-mark.svg`). The
+  per-deployment `VITE_BRAND_NAME` / `VITE_BRAND_LEGAL_NAME` settings were removed;
+  `VITE_BRAND_LOGO=pulse|rapid` still selects the older marks.
 
 ### Full test run fixes (6 Nov 2026; all suites and Playwright green)
 

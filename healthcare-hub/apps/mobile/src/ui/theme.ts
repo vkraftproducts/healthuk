@@ -1,28 +1,29 @@
 /**
- * "Neon Forest" light theme, matching the web app. WCAG 2.2 AA: every text colour below is at least
+ * "Neon Forest" light theme, matching the web app (navy and teal from the wireframe). WCAG 2.2 AA: every text colour below is at least
  * 4.5:1 on its background; colour is always paired with an icon and words (non-negotiable 8).
  */
 export const colors = {
-  text: '#0b2a1c',
-  muted: '#4a6a5a',
-  border: '#cde5d7',
-  edge: '#6f9a84',
-  bg: '#eef7f2',
+  text: '#1f3a52',
+  muted: '#52677a',
+  border: '#d6e1ea',
+  edge: '#64748b',
+  bg: '#f2f6fa',
   card: '#ffffff',
   field: '#ffffff',
-  primary: '#047857',
+  primary: '#0f7c86',
   primaryText: '#ffffff',
-  glow: '#10b981',
+  glow: '#0f7c86',
   green: '#166534',
   greenBg: '#dcf5e6',
+  accentBg: '#e0f0f2',
   amber: '#92400e',
   amberBg: '#fef3c7',
   red: '#b91c1c',
   redBg: '#fee2e2',
   dangerSolid: '#b91c1c',
   onDanger: '#ffffff',
-  grey: '#3f5a4c',
-  greyBg: '#e4efe9',
+  grey: '#475569',
+  greyBg: '#e8eef4',
 };
 
 /** Large touch targets for gloved hands and use at a glance. */

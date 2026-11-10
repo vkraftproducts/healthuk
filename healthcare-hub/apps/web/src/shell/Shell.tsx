@@ -210,12 +210,12 @@ export function Shell() {
                   activeProps={{
                     'aria-current': 'page',
                     className:
-                      'bg-hub-teal/10 font-semibold text-white shadow-[inset_0_0_0_1px_rgb(52_211_153/0.35),0_0_22px_-8px_rgb(34_229_138/0.6)]',
+                      'bg-hub-teal/10 font-semibold text-white shadow-[inset_0_0_0_1px_rgb(94_200_212/0.4),0_0_22px_-8px_rgb(94_200_212/0.5)]',
                   }}
                 >
                   <span
                     aria-hidden="true"
-                    className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-hub-teal opacity-0 shadow-[0_0_10px_rgb(34_229_138)] group-aria-[current=page]:opacity-100"
+                    className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-hub-teal opacity-0 shadow-[0_0_10px_rgb(94_200_212)] group-aria-[current=page]:opacity-100"
                   />
                   <span className="text-hub-muted transition-colors group-hover:text-hub-teal group-aria-[current=page]:text-hub-teal">
                     <NavIcon to={item.to} />

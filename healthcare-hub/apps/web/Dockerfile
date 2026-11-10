@@ -7,11 +7,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 # Baked into the bundle at build time: dev | local | entra (match the API's AUTH_MODE).
 ARG VITE_AUTH_MODE=local
-ARG VITE_BRAND_NAME=
-ARG VITE_BRAND_LEGAL_NAME=
-ENV VITE_AUTH_MODE=$VITE_AUTH_MODE \
-    VITE_BRAND_NAME=$VITE_BRAND_NAME \
-    VITE_BRAND_LEGAL_NAME=$VITE_BRAND_LEGAL_NAME
+ENV VITE_AUTH_MODE=$VITE_AUTH_MODE
 RUN pnpm turbo run build --filter=@hub/web...
 
 FROM nginx:1.27-alpine

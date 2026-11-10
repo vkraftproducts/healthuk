@@ -26,37 +26,37 @@
 @tailwind utilities;
 
 /* ------------------------------------------------------------------------------------------
-   Neon Forest theme tokens (light edition). tailwind.config.cjs maps these to the hub.* colours.
+   Theme tokens (light navy + teal, from the wireframe). tailwind.config.cjs maps these to the hub.* colours.
    Inside .on-dark (sidebar, sign-in hero) the same tokens flip to light-on-dark.
    ------------------------------------------------------------------------------------------ */
 :root {
   color-scheme: light;
-  --hub-ink: 11 42 28;
-  --hub-muted: 74 106 90;
-  --hub-teal: 4 120 87;
-  --hub-teal-dark: 6 95 70;
-  --hub-line: 205 229 215;
-  --hub-edge: 111 154 132;
-  --grad-primary: linear-gradient(135deg, #22e08c 0%, #86e234 100%);
-  --on-primary: #03150b;
-  --glow: 16 185 129;
+  --hub-ink: 31 58 82;
+  --hub-muted: 82 103 122;
+  --hub-teal: 15 124 134;
+  --hub-teal-dark: 11 99 107;
+  --hub-line: 214 225 234;
+  --hub-edge: 100 116 139;
+  --grad-primary: linear-gradient(135deg, #0f7c86 0%, #0b636b 100%);
+  --on-primary: #ffffff;
+  --glow: 15 124 134;
 }
 .on-dark {
-  --hub-ink: 233 247 240;
-  --hub-muted: 169 203 185;
-  --hub-teal: 52 211 153;
-  --hub-teal-dark: 134 239 172;
-  --hub-line: 31 77 56;
-  --hub-edge: 95 138 118;
+  --hub-ink: 240 246 250;
+  --hub-muted: 190 205 218;
+  --hub-teal: 94 200 212;
+  --hub-teal-dark: 150 222 230;
+  --hub-line: 54 84 110;
+  --hub-edge: 125 150 175;
 }
 
 @layer base {
   html {
     @apply bg-hub-bg font-sans text-slate-900 antialiased;
     background-image:
-      radial-gradient(1100px 560px at 8% -12%, rgb(34 224 140 / 0.16), transparent 62%),
-      radial-gradient(900px 520px at 100% 0%, rgb(134 226 52 / 0.1), transparent 58%),
-      radial-gradient(900px 600px at 50% 120%, rgb(15 181 160 / 0.1), transparent 60%);
+      radial-gradient(1100px 560px at 8% -12%, rgb(15 124 134 / 0.12), transparent 62%),
+      radial-gradient(900px 520px at 100% 0%, rgb(31 58 82 / 0.07), transparent 58%),
+      radial-gradient(900px 600px at 50% 120%, rgb(15 124 134 / 0.08), transparent 60%);
     background-attachment: fixed;
   }
   body {
@@ -71,8 +71,8 @@
     z-index: -1;
     pointer-events: none;
     background-image:
-      linear-gradient(rgb(10 120 80 / 0.055) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(10 120 80 / 0.055) 1px, transparent 1px);
+      linear-gradient(rgb(31 58 82 / 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(31 58 82 / 0.05) 1px, transparent 1px);
     background-size: 44px 44px;
     -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
     mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
@@ -96,24 +96,24 @@
     font-variant-numeric: tabular-nums;
   }
   ::selection {
-    background: rgb(16 185 129 / 0.3);
+    background: rgb(15 124 134 / 0.28);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: #9cc7b2 transparent;
+    scrollbar-color: #b7c6d3 transparent;
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #9cc7b2;
+    background: #b7c6d3;
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #62a888;
+    background: #8aa3b8;
     background-clip: content-box;
     border: 2px solid transparent;
   }
@@ -124,17 +124,17 @@
     textarea
   ) {
     background-color: #fff;
-    color: #0b2a1c;
+    color: #1f3a52;
     border-width: 1px;
     border-style: solid;
-    border-color: #6f9a84;
+    border-color: #64748b;
     border-radius: 0.5rem;
   }
   :where(input, textarea)::placeholder {
-    color: #557565;
+    color: #5a6f82;
   }
   :where(input[type='checkbox'], input[type='radio']) {
-    accent-color: #059669;
+    accent-color: #0f7c86;
   }
   :where(button, [role='button'], summary, select):not(:disabled) {
     cursor: pointer;
@@ -163,16 +163,16 @@
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold;
     background-image: var(--grad-primary);
-    background-color: #16c97a;
+    background-color: #0f7c86;
     color: var(--on-primary);
     box-shadow:
-      0 0 0 1px rgb(5 150 105 / 0.4),
+      0 0 0 1px rgb(11 99 107 / 0.45),
       0 8px 18px -8px rgb(var(--glow) / 0.65);
   }
   .btn-primary:hover:not(:disabled) {
     filter: brightness(1.05) saturate(1.1);
     box-shadow:
-      0 0 0 1px rgb(5 150 105 / 0.6),
+      0 0 0 1px rgb(11 99 107 / 0.6),
       0 10px 24px -8px rgb(var(--glow) / 0.8);
   }
   .btn-primary:disabled {
@@ -184,16 +184,16 @@
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-hub-edge bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink;
   }
   .btn-ghost:hover:not(:disabled) {
-    border-color: #059669;
-    background-color: #ecfaf3;
+    border-color: #0f7c86;
+    background-color: #e8f3f5;
     box-shadow: 0 6px 16px -8px rgb(var(--glow) / 0.7);
   }
   .on-dark .btn-ghost {
     background-color: rgb(255 255 255 / 0.04);
   }
   .on-dark .btn-ghost:hover:not(:disabled) {
-    background-color: rgb(52 211 153 / 0.14);
-    border-color: #34d399;
+    background-color: rgb(94 200 212 / 0.16);
+    border-color: #5ec8d4;
   }
   .btn-ghost:disabled {
     @apply opacity-50;
@@ -202,11 +202,11 @@
     @apply rounded-lg border border-hub-edge bg-hub-field px-2.5 py-1.5 text-hub-ink;
   }
   .field:hover {
-    border-color: #4f8a6f;
+    border-color: #0b636b;
   }
   .field:focus {
-    border-color: #059669;
-    box-shadow: 0 0 0 3px rgb(16 185 129 / 0.25);
+    border-color: #0f7c86;
+    box-shadow: 0 0 0 3px rgb(15 124 134 / 0.25);
   }
   .section-title {
     @apply flex items-center gap-2;
@@ -230,7 +230,7 @@
     width: 14px;
     height: 14px;
     pointer-events: none;
-    border: 2px solid rgb(5 150 105 / 0.8);
+    border: 2px solid rgb(15 124 134 / 0.85);
   }
   .hud::before {
     top: -1px;
@@ -266,13 +266,13 @@
    button and panel without touching each page.
    ------------------------------------------------------------------------------------------ */
 
-/* Primary action: green gradient with dark text (AA: 10:1). */
+/* Primary action: teal gradient with white text (AA: 4.9:1 or better). */
 .bg-hub-teal {
-  background-color: #16c97a;
+  background-color: #0f7c86;
   background-image: var(--grad-primary);
   color: var(--on-primary);
   box-shadow:
-    0 0 0 1px rgb(5 150 105 / 0.4),
+    0 0 0 1px rgb(11 99 107 / 0.45),
     0 8px 18px -8px rgb(var(--glow) / 0.65);
 }
 button.bg-hub-teal:hover:not(:disabled),
@@ -286,24 +286,24 @@ button.bg-hub-teal:disabled {
 .bg-hub-teal.text-white {
   color: var(--on-primary);
 }
-/* Panels: faint mint top light and soft depth. */
+/* Panels: faint cool top light and soft depth. */
 .bg-hub-card {
-  background-image: linear-gradient(180deg, rgb(232 249 240 / 0.7), transparent 46%);
+  background-image: linear-gradient(180deg, rgb(232 243 246 / 0.7), transparent 46%);
 }
 .rounded-lg.bg-hub-card:not(button):not(input):not(select) {
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.9),
-    0 10px 28px -16px rgb(10 70 45 / 0.3);
+    0 10px 28px -16px rgb(31 58 82 / 0.22);
 }
 button.bg-hub-card:hover:not(:disabled),
 button.rounded-lg.border:hover:not(:disabled) {
-  border-color: #059669;
+  border-color: #0f7c86;
   box-shadow: 0 8px 20px -8px rgb(var(--glow) / 0.6);
 }
 
 /* Secondary buttons written inline as bordered buttons. */
 button.border-slate-500:not(.bg-hub-teal):hover:not(:disabled) {
-  border-color: #059669;
+  border-color: #0f7c86;
   box-shadow: 0 6px 16px -8px rgb(var(--glow) / 0.7);
 }
 
@@ -313,20 +313,20 @@ input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='
   ),
 select:not([class*='border-red']),
 textarea:not([class*='border-red']) {
-  border-color: #6f9a84;
+  border-color: #64748b;
 }
 input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not(
     [disabled]
   ):hover,
 select:not([disabled]):hover,
 textarea:not([disabled]):hover {
-  border-color: #4f8a6f;
+  border-color: #0b636b;
 }
 input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):focus,
 select:focus,
 textarea:focus {
-  border-color: #059669;
-  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.25);
+  border-color: #0f7c86;
+  box-shadow: 0 0 0 3px rgb(15 124 134 / 0.25);
   outline: none;
 }
 input:disabled,
@@ -337,19 +337,19 @@ textarea:disabled {
 /* Controls inside dark regions (the organisation switcher) use light edges and text. */
 .on-dark select,
 .on-dark input:not([type='checkbox']):not([type='radio']) {
-  background-color: #13402c;
+  background-color: #2b4a66;
   color: #fff;
-  border-color: #5f8a76;
+  border-color: #7d93a8;
 }
 
 /* Keyboard focus is always obvious (WCAG 2.2 AA focus appearance). */
 :focus-visible {
-  outline: 2px solid #047857;
+  outline: 2px solid #0b636b;
   outline-offset: 2px;
-  box-shadow: 0 0 0 5px rgb(16 185 129 / 0.22);
+  box-shadow: 0 0 0 5px rgb(15 124 134 / 0.22);
 }
 .on-dark :focus-visible {
-  outline-color: #86efac;
+  outline-color: #bfe8ee;
 }
 
 /* Status rows and panels get a faint glow so they read as live signals (text + icon remain). */
