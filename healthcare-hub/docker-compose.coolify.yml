@@ -102,8 +102,6 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         VITE_AUTH_MODE: local
-        VITE_BRAND_NAME: ${BRAND_NAME:-Exora Medical}
-        VITE_BRAND_LEGAL_NAME: ${BRAND_LEGAL_NAME:-Exora International Ltd}
     restart: unless-stopped
     environment:
       - SERVICE_FQDN_WEB_80

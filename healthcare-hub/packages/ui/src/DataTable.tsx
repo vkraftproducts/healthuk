@@ -20,7 +20,7 @@ export interface DataTableProps<T> {
 
 // Neon Forest style: glowing header bar, each row a dark glass strip (alternate rows tinted, hover lit).
 const CELL =
-  'border-y border-hub-line bg-hub-card px-3 py-2.5 align-top transition-colors first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-even:bg-hub-row group-hover:bg-emerald-50 group-hover:border-emerald-500/50';
+  'border-y border-hub-line bg-hub-card px-3 py-2.5 align-top transition-colors first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-even:bg-hub-row group-hover:bg-sky-50 group-hover:border-teal-600/50';
 const EMPTY = 'rounded-lg border border-hub-line bg-hub-card px-3 py-4';
 
 /** Plain, keyboard- and screen-reader-friendly table with explicit loading/error/empty states. */
@@ -50,7 +50,7 @@ export function DataTable<T>({
               <th
                 key={c.key}
                 scope="col"
-                className="border-y border-hub-navy bg-hub-navy px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-emerald-200 first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r"
+                className="border-y border-hub-navy bg-hub-navy px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-white first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r"
               >
                 {c.header}
               </th>

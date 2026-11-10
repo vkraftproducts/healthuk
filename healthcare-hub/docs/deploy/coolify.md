@@ -50,8 +50,6 @@ check both work.
    | --------------------- | ------------------------- | -------------------------------------- |
    | `SEED_LOCAL_PASSWORD` | `Hub-Dev-Password-2026!`  | Password for every seeded demo user    |
    | `DEV_DISABLE_MFA`     | `true`                    | `false` to require authenticator codes |
-   | `BRAND_NAME`          | `Exora Medical`           | Name beside the logo                   |
-   | `BRAND_LEGAL_NAME`    | `Exora International Ltd` | Line under the name                    |
 
    The seed password applies only when a user is first created. Changing it later does not change
    existing passwords.
@@ -63,7 +61,7 @@ check both work.
 ## Checking it
 
 - `https://<your-web-url>/readyz` returns `{"status":"ready"}`.
-- The sign-in page shows the Exora Medical logo and a username and password form.
+- The sign-in page shows the Healthcare Hub by Vkraft logo and a username and password form.
 - After sign-in the header reads `Exora International Ltd / London / Ambulance service`.
 
 ## Using your own domain later
