@@ -2,7 +2,7 @@ import { RECORD_SLUGS, SENSITIVE_RECORD_KINDS } from '@hub/contracts';
 import { needsSchedule3, staffRolesFor } from '@hub/rules';
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { Link, useParams } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActionDialog,
   errText,
@@ -15,6 +15,7 @@ import {
 import { EvidenceDialog, StaffDocuments, UploadDialog } from '../evidence/Evidence.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useInvalidate, useOne, usePeople } from '../settings/hooks.js';
+import { Icon, type IconName } from '../../icons.js';
 import { DISPATCH_NOTE } from './StaffList.js';
 import { RecordForm } from './RecordForm.js';
 import { DriverEligibilityPanel, Schedule3Panel } from './Schedule3.js';
@@ -96,6 +97,35 @@ export function readinessBadge(s: Row): { status: StatusKind; reason: string } {
   }
 }
 
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('');
+
+/** Readiness panel and avatar tint by status; the badge inside says it in words. */
+const READY_TONE: Record<string, { panel: string; avatar: string }> = {
+  RED: { panel: 'border-red-200 bg-red-50', avatar: 'bg-red-50 text-red-800' },
+  AMBER: { panel: 'border-amber-200 bg-amber-50', avatar: 'bg-amber-50 text-amber-900' },
+  GREEN: { panel: 'border-green-200 bg-green-50', avatar: 'bg-green-50 text-green-800' },
+  GREY: { panel: 'border-slate-200 bg-slate-50', avatar: 'bg-slate-100 text-slate-700' },
+};
+
+/** One "label: value" line in the profile header, with an icon. */
+function Fact({ icon, label, children }: { icon: IconName; label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <span className="mt-0.5 text-slate-400">
+        <Icon name={icon} size={16} />
+      </span>
+      <dt className="shrink-0 text-slate-500">{label}</dt>
+      <dd className="min-w-0 font-semibold text-slate-900">{children}</dd>
+    </div>
+  );
+}
+
 export function StaffProfile() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { me } = useApp();
@@ -115,62 +145,78 @@ export function StaffProfile() {
 
   return (
     <div className="space-y-4">
-      <nav aria-label="Breadcrumb" className="text-sm">
-        <Link to="/staff" className="font-medium text-hub-teal-dark underline">
+      <nav aria-label="Breadcrumb" className="text-sm text-slate-600">
+        <Link to="/staff" className="font-semibold text-hub-teal underline underline-offset-2">
           Staff
         </Link>{' '}
-        / {s.staffNo}
+        / <span className="font-semibold text-slate-900">{s.staffNo}</span>
       </nav>
-      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-hub-card p-4">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {s.displayName} <span className="text-slate-600">/ {s.staffNo}</span>
+      <header className="card flex flex-wrap items-start gap-5 p-5">
+        <span
+          aria-hidden="true"
+          className={`grid h-16 w-16 shrink-0 place-items-center rounded-xl font-display text-xl font-extrabold ${(READY_TONE[readinessBadge(s).status] ?? READY_TONE.GREY!).avatar}`}
+        >
+          {initialsOf(s.displayName)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h1 className="flex flex-wrap items-center gap-3 text-3xl">
+            {s.displayName}
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-sans text-sm font-bold tracking-normal text-slate-700">
+              <span className="sr-only">/ </span>
+              {s.staffNo}
+            </span>
           </h1>
-          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-sm">
-            <dt className="font-semibold">Roles</dt>
-            <dd>{s.roles.length ? list(s.roles, ROLE_LABEL) : 'No approved role yet'}</dd>
-            <dt className="font-semibold">Lifecycle</dt>
-            <dd>{LIFECYCLE_LABEL[s.lifecycleState]}</dd>
-            <dt className="font-semibold">Restrictions</dt>
-            <dd>{list(s.activeRestrictions, RESTRICTION_LABEL)}</dd>
+          <dl className="mt-3 grid gap-x-8 gap-y-1.5 text-sm md:grid-cols-2">
+            <Fact icon="badge" label="Roles">
+              {s.roles.length ? list(s.roles, ROLE_LABEL) : 'No approved role yet'}
+            </Fact>
+            <Fact icon="check" label="Lifecycle">
+              {LIFECYCLE_LABEL[s.lifecycleState]}
+            </Fact>
+            <Fact icon="alert" label="Restrictions">
+              <span className={s.activeRestrictions?.length ? 'text-red-800' : ''}>
+                {list(s.activeRestrictions, RESTRICTION_LABEL)}
+              </span>
+            </Fact>
             {s.jobTitle && (
-              <>
-                <dt className="font-semibold">Job title</dt>
-                <dd>{s.jobTitle}</dd>
-              </>
+              <Fact icon="user" label="Job title">
+                {s.jobTitle}
+              </Fact>
             )}
             {!clearanceOnly && (
               <>
-                <dt className="font-semibold">Location</dt>
-                <dd>{s.locationName ?? 'Not recorded'}</dd>
-                <dt className="font-semibold">Line manager</dt>
-                <dd>{s.managerName ?? 'Not set'}</dd>
+                <Fact icon="pin" label="Location">
+                  {s.locationName ?? 'Not recorded'}
+                </Fact>
+                <Fact icon="people" label="Line manager">
+                  {s.managerName ?? 'Not set'}
+                </Fact>
                 {s.startDate && (
-                  <>
-                    <dt className="font-semibold">Start date</dt>
-                    <dd>{fmtDate(s.startDate)}</dd>
-                  </>
+                  <Fact icon="calendar" label="Start date">
+                    {fmtDate(s.startDate)}
+                  </Fact>
                 )}
                 {s.contractType && (
-                  <>
-                    <dt className="font-semibold">Contract</dt>
-                    <dd>{CONTRACT_LABEL[s.contractType] ?? 'Other'}</dd>
-                  </>
+                  <Fact icon="clipboard" label="Contract">
+                    {CONTRACT_LABEL[s.contractType] ?? 'Other'}
+                  </Fact>
                 )}
               </>
             )}
           </dl>
         </div>
         {!clearanceOnly && (
-          <div className="text-sm">
-            <span className="mr-2 font-semibold">Readiness</span>
+          <div
+            className={`rounded-xl border px-4 py-3 ${(READY_TONE[readinessBadge(s).status] ?? READY_TONE.GREY!).panel}`}
+          >
+            <p className="eyebrow mb-1.5 text-slate-700">Readiness</p>
             <StatusBadge {...readinessBadge(s)} />
           </div>
         )}
       </header>
 
       {clearanceOnly ? (
-        <p role="note" className="rounded border border-sky-700 bg-sky-50 p-3 text-sky-950">
+        <p role="note" className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sky-950">
           {DISPATCH_NOTE}
         </p>
       ) : (
@@ -178,7 +224,7 @@ export function StaffProfile() {
           <div
             role="tablist"
             aria-label="Staff profile sections"
-            className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-hub-card p-1.5"
+            className="flex flex-wrap gap-1 border-b border-hub-line"
           >
             {TABS.map((t) => (
               <button
@@ -188,7 +234,7 @@ export function StaffProfile() {
                 aria-selected={tab === t.id}
                 aria-controls="staff-panel"
                 onClick={() => setTab(t.id)}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-ink hover:bg-hub-row'}`}
+                className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-bold ${tab === t.id ? 'border-hub-teal text-hub-teal' : 'border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900'}`}
               >
                 {t.label}
               </button>
@@ -244,17 +290,47 @@ function Overview({ s }: { s: Row }) {
 
   return (
     <>
+      <div>
+        <h2 className="text-lg font-bold">Statutory and deployment requirements</h2>
+        <p className="text-sm text-slate-600">
+          What this person needs for their approved roles. Only verified evidence turns an item
+          green.
+        </p>
+      </div>
       <DataTable<Row>
         caption="Requirements"
         rows={reqs}
+        rowClassName={(r) =>
+          r.required && r.status === 'RED'
+            ? 'bg-red-50/60 [&>td:first-child]:shadow-[inset_3px_0_0_#dc2626]'
+            : r.required && r.status === 'AMBER'
+              ? 'bg-amber-50/50 [&>td:first-child]:shadow-[inset_3px_0_0_#d97706]'
+              : ''
+        }
         rowKey={(r) => r.id}
         emptyMessage="No checks apply yet. Start checks for a role below; if the role has none, set them up in Settings, Requirement library."
         columns={[
-          { key: 'req', header: 'Requirement', cell: (r) => r.templateTitle },
+          {
+            key: 'req',
+            header: 'Requirement',
+            cell: (r) => (
+              <span className={r.required ? 'font-bold text-slate-900' : 'text-slate-600'}>
+                {r.templateTitle}
+              </span>
+            ),
+          },
           {
             key: 'verified',
             header: 'Verified',
-            cell: (r) => (r.currentlyVerified ? 'Yes – verified evidence on file' : 'No'),
+            cell: (r) =>
+              r.currentlyVerified ? (
+                <span className="flex items-start gap-1.5 text-green-800">
+                  <Icon name="check" size={16} className="mt-0.5" />
+                  <span>Yes – verified evidence on file</span>
+                </span>
+              ) : (
+                <span className="text-slate-600">No</span>
+              ),
           },
           {
             key: 'next',

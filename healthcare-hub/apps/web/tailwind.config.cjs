@@ -1,15 +1,14 @@
 /** @type {import('tailwindcss').Config} */
 
 /**
- * "Neon Forest" theme, navy and teal edition: a bright, futuristic interface in the wireframe palette. The page and cards
- * are clean white on pale blue-grey, the sidebar and sign-in hero are navy (#1f3a52), and teal (#0f7c86) is the accent.
+ * Light console theme, from the product owner's interactive demo (Manrope, navy #0b3b60 on slate,
+ * white cards with hairline borders). Class names keep their old "teal" spelling: hub.teal is now
+ * the navy primary.
  *
- * Two things to know when reading class names in this codebase:
- *  1. `hub.ink`, `hub.muted`, `hub.teal`, `hub.teal-dark`, `hub.line` and `hub.edge` are CSS variables.
- *     They are dark-on-light by default and are remapped to light-on-dark inside any `.on-dark`
- *     container (the sidebar and the sign-in hero), so the same class reads correctly in both.
+ *  - hub.ink, hub.muted, hub.teal, hub.teal-dark, hub.line and hub.edge are CSS variables,
+ *    remapped to light-on-dark inside any .on-dark container (the sign-in hero).
  *
- * Contrast: all text pairings meet WCAG 2.2 AA on white and on the page (#f2f6fa).
+ * Contrast: all text pairings meet WCAG 2.2 AA on white and on the page (#f6f8fb).
  * Status is still conveyed by icon + words as well as colour (CLAUDE.md non-negotiable 8).
  */
 module.exports = {
@@ -18,9 +17,9 @@ module.exports = {
     extend: {
       colors: {
         hub: {
-          bg: '#f2f6fa', // page
-          navy: '#1f3a52', // sidebar / hero / table-header surface
-          'navy-2': '#2b4a66', // sidebar hover, raised dark controls
+          bg: '#f6f8fb', // page
+          navy: '#0b3b60', // primary surface (sign-in hero)
+          'navy-2': '#123f66', // raised dark controls
           card: '#ffffff', // panels and cards
           'card-2': '#ffffff', // popovers
           field: '#ffffff', // inputs
@@ -29,14 +28,16 @@ module.exports = {
           'teal-dark': 'rgb(var(--hub-teal-dark) / <alpha-value>)',
           line: 'rgb(var(--hub-line) / <alpha-value>)', // card borders
           edge: 'rgb(var(--hub-edge) / <alpha-value>)', // form control borders (>= 3:1)
-          row: '#f6f9fc', // alternate rows, hovers
+          row: '#f8fafc', // alternate rows, hovers
           muted: 'rgb(var(--hub-muted) / <alpha-value>)', // secondary text
-          glow: '#0f7c86',
-          mint: '#5ec8d4',
+          glow: '#0b3b60',
+          mint: '#a3caf6',
+          sky: '#eef5fc', // selected navigation, info tints
         },
       },
       fontFamily: {
         sans: [
+          '"Manrope Variable"',
           '"Inter Variable"',
           '"Segoe UI"',
           'system-ui',
@@ -47,7 +48,7 @@ module.exports = {
           'sans-serif',
         ],
         display: [
-          '"Space Grotesk Variable"',
+          '"Manrope Variable"',
           '"Inter Variable"',
           '"Segoe UI"',
           'system-ui',
@@ -55,11 +56,11 @@ module.exports = {
         ],
         mono: ['"JetBrains Mono Variable"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
-      borderRadius: { xl: '14px', '2xl': '18px' },
+      borderRadius: { xl: '12px', '2xl': '16px' },
       boxShadow: {
-        glow: '0 0 0 1px rgb(15 124 134 / 0.35), 0 10px 28px -8px rgb(15 124 134 / 0.4)',
-        'glow-sm': '0 6px 18px -6px rgb(15 124 134 / 0.4)',
-        panel: 'inset 0 1px 0 rgb(255 255 255 / 0.9), 0 12px 32px -16px rgb(31 58 82 / 0.22)',
+        glow: '0 1px 2px rgb(15 23 42 / 0.08)',
+        'glow-sm': '0 1px 2px rgb(15 23 42 / 0.08)',
+        panel: '0 1px 2px rgb(15 23 42 / 0.04)',
       },
       keyframes: {
         draw: {

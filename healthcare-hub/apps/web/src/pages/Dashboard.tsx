@@ -2,6 +2,7 @@ import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { fmtDate, fmtDateTime, saveBlob, useCan, useRun, words } from '../components.js';
+import { Icon, type IconName } from '../icons.js';
 import { useApp } from '../shell/AppContext.js';
 import { useList, useOne, usePeople } from './settings/hooks.js';
 
@@ -21,15 +22,39 @@ const TILES = [
 ] as const;
 /** Dental and care-home tiles (WORKFLOWS M): shown only when the server lists them. */
 const SECTOR_TILES = new Set<string>(['unverified', 'auditsOverdue']);
-/** Large tile figures in the wireframe colours; the badge beside each carries the words. */
-const TILE_COLOUR: Partial<Record<StatusKind, string>> = {
-  RED: 'text-red-700',
-  AMBER: 'text-amber-700',
-  GREY: 'text-hub-teal',
+/** Each tile's icon and the words after its figure ("3 items overdue"). */
+const TILE_META: Record<string, { icon: IconName; unit: string }> = {
+  overdue: { icon: 'alert', unit: 'items overdue' },
+  dueSoon: { icon: 'clock', unit: 'items due' },
+  blockedVehicles: { icon: 'vehicle', unit: 'vehicles blocked' },
+  jobsToday: { icon: 'clipboard', unit: 'jobs booked' },
+  unverified: { icon: 'people', unit: 'awaiting verification' },
+  auditsOverdue: { icon: 'shield', unit: 'audits overdue' },
 };
+/** Tile accent (top rule, label, icon chip); the badge in each tile carries the words. */
+type Tone = 'RED' | 'AMBER' | 'GREEN' | 'COUNT' | 'OFF';
+const TONE: Record<Tone, { bar: string; label: string; chip: string }> = {
+  RED: { bar: 'border-t-red-600', label: 'text-red-700', chip: 'bg-red-50 text-red-700' },
+  AMBER: { bar: 'border-t-amber-500', label: 'text-amber-800', chip: 'bg-amber-50 text-amber-700' },
+  GREEN: { bar: 'border-t-green-600', label: 'text-green-800', chip: 'bg-green-50 text-green-700' },
+  COUNT: { bar: 'border-t-hub-teal', label: 'text-hub-teal', chip: 'bg-hub-sky text-hub-teal' },
+  OFF: { bar: 'border-t-slate-300', label: 'text-slate-600', chip: 'bg-slate-50 text-slate-500' },
+};
+const MODULE_ICON: Record<string, IconName> = {
+  STAFF: 'people',
+  FLEET: 'vehicle',
+  COMPLIANCE: 'shield',
+  PREMISES: 'building',
+  EVENTS: 'event',
+  JOBS: 'clipboard',
+};
+/** Urgent rows stand out (tint and a red edge); the State badge still says why. */
+const urgentRow = (r: Row) =>
+  r.status === 'RED' ? 'bg-red-50/60 [&>td:first-child]:shadow-[inset_3px_0_0_#dc2626]' : '';
 /** Rows shown before "View all" (most urgent first, as returned by the API). */
 const PREVIEW = 8;
-const textAction = 'font-medium text-hub-ink underline-offset-2 hover:underline';
+const textAction = 'font-semibold text-hub-teal underline-offset-2 hover:underline';
+const field = 'field h-9 py-1 text-sm';
 const MODULE_LABEL: Record<string, string> = {
   STAFF: 'Staff',
   FLEET: 'Fleet',
@@ -120,8 +145,8 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Home dashboard</h1>
-        <p className="text-slate-700">
+        <h1 className="text-3xl">Home dashboard</h1>
+        <p className="mt-1 text-slate-600">
           What needs action in the areas your role covers
           {roleName ? ` (${roleName})` : ''}. Other areas are not shown here.
         </p>
@@ -131,7 +156,7 @@ export function Dashboard() {
       ) : !canView ? (
         <p role="alert">You do not have permission to view the dashboard for this organisation.</p>
       ) : summary.isError ? (
-        <div role="alert" className="rounded border border-red-700 bg-red-50 p-3 text-red-900">
+        <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-red-900">
           <strong>Source unavailable.</strong> The dashboard could not be loaded. Figures are not
           shown rather than shown out of date.
         </div>
@@ -139,13 +164,13 @@ export function Dashboard() {
         <>
           <form
             aria-label="Dashboard filters"
-            className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3 text-sm"
+            className="card flex flex-wrap items-end gap-3 px-4 py-3 text-sm"
             onSubmit={(e) => e.preventDefault()}
           >
-            <label className="flex flex-col">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Location
               <select
-                className="rounded border border-hub-line px-2 py-1"
+                className={field}
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
               >
@@ -157,10 +182,10 @@ export function Dashboard() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Service
               <select
-                className="rounded border border-hub-line px-2 py-1"
+                className={field}
                 value={serviceId}
                 onChange={(e) => setServiceId(e.target.value)}
               >
@@ -172,10 +197,10 @@ export function Dashboard() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Owner
               <select
-                className="rounded border border-hub-line px-2 py-1"
+                className={field}
                 value={ownerUserId}
                 onChange={(e) => setOwnerUserId(e.target.value)}
               >
@@ -191,20 +216,20 @@ export function Dashboard() {
                   ))}
               </select>
             </label>
-            <label className="flex flex-col">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Deadline from
               <input
                 type="date"
-                className="rounded border border-hub-line px-2 py-1"
+                className={field}
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
               />
             </label>
-            <label className="flex flex-col">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
               Deadline to
               <input
                 type="date"
-                className="rounded border border-hub-line px-2 py-1"
+                className={field}
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
               />
@@ -256,6 +281,18 @@ export function Dashboard() {
               const value = s ? (s.tiles[t.key] as number | null) : undefined;
               const connected = value !== null && value !== undefined;
               const selected = tile === t.key;
+              const unset = connected && notSetUp && value === 0 && REQUIREMENT_TILES.has(t.key);
+              const tone: Tone =
+                !connected || unset
+                  ? 'OFF'
+                  : value === 0
+                    ? 'GREEN'
+                    : t.kind === 'GREY'
+                      ? 'COUNT'
+                      : t.kind === 'RED'
+                        ? 'RED'
+                        : 'AMBER';
+              const meta = TILE_META[t.key] ?? { icon: 'alert' as IconName, unit: '' };
               return (
                 <button
                   key={t.key}
@@ -263,19 +300,29 @@ export function Dashboard() {
                   disabled={!connected}
                   aria-pressed={selected}
                   onClick={() => setTile(selected ? 'all' : t.key)}
-                  className={`hud rounded-lg border bg-hub-card px-5 py-4 text-left hover:border-hub-teal hover:shadow-glow-sm ${selected ? 'border-hub-teal ring-2 ring-hub-teal' : 'border-hub-line'}`}
+                  className={`card flex flex-col border-t-4 px-5 pb-4 pt-4 text-left hover:border-slate-300 hover:shadow-md ${TONE[tone].bar} ${selected ? 'ring-2 ring-hub-teal ring-offset-2' : ''}`}
                 >
-                  <div
-                    className={`font-display text-4xl font-bold leading-tight ${connected && value !== 0 ? TILE_COLOUR[t.kind] : 'text-hub-ink'}`}
-                    aria-label={
-                      connected ? `${t.label}: ${value}` : `${t.label}: not connected yet`
-                    }
-                  >
-                    {summary.isLoading ? '…' : connected ? value : '—'}
+                  <div className="flex items-start justify-between gap-2">
+                    <span className={`eyebrow ${TONE[tone].label}`}>{t.label}</span>
+                    <span
+                      className={`grid h-8 w-8 place-items-center rounded-lg ${TONE[tone].chip}`}
+                    >
+                      <Icon name={meta.icon} size={17} />
+                    </span>
                   </div>
-                  <div className="mt-1 text-sm text-hub-ink">{t.label}</div>
-                  <div className="mt-3">
-                    {connected && notSetUp && value === 0 && REQUIREMENT_TILES.has(t.key) ? (
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span
+                      className="font-display text-4xl font-extrabold leading-tight text-slate-900"
+                      aria-label={
+                        connected ? `${t.label}: ${value}` : `${t.label}: not connected yet`
+                      }
+                    >
+                      {summary.isLoading ? '…' : connected ? value : '—'}
+                    </span>
+                    {connected && <span className="text-sm text-slate-600">{meta.unit}</span>}
+                  </div>
+                  <div className="mt-3 flex w-full flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    {unset ? (
                       <StatusBadge status="GREY" reason="not set up" />
                     ) : connected ? (
                       <StatusBadge
@@ -287,25 +334,37 @@ export function Dashboard() {
                     ) : (
                       <StatusBadge status="GREY" reason="not connected yet" />
                     )}
+                    {connected && value !== 0 && !unset && (
+                      <span aria-hidden="true" className="text-hub-teal">
+                        <Icon name="arrow" size={16} />
+                      </span>
+                    )}
                   </div>
                 </button>
               );
             })}
           </section>
 
-          <div className="space-y-5">
-            <section
-              aria-labelledby="actions-h"
-              className="rounded-lg border border-hub-line bg-hub-card p-5"
-            >
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h2 id="actions-h" className="text-lg font-bold">
-                  Action required
-                  {tile !== 'all'
-                    ? ` – ${TILES.find((t) => t.key === tile)?.label ?? words(tile)}`
-                    : ''}
-                  {module ? ` – ${MODULE_LABEL[module] ?? words(module)} only` : ''}
-                </h2>
+          <div className="grid items-start gap-5 xl:grid-cols-3">
+            <section aria-labelledby="actions-h" className="card overflow-hidden xl:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hub-line px-5 py-4">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-hub-teal">
+                    <Icon name="gavel" />
+                  </span>
+                  <h2 id="actions-h" className="text-lg font-bold">
+                    Action required
+                    {tile !== 'all'
+                      ? ` – ${TILES.find((t) => t.key === tile)?.label ?? words(tile)}`
+                      : ''}
+                    {module ? ` – ${MODULE_LABEL[module] ?? words(module)} only` : ''}
+                  </h2>
+                  {!rows.isLoading && actions.length > 0 && (
+                    <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+                      {actions.length} {actions.length === 1 ? 'item' : 'items'}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 text-sm">
                   {(tile !== 'all' || module) && (
                     <>
@@ -323,21 +382,9 @@ export function Dashboard() {
                       )}
                     </>
                   )}
-                  {actions.length > PREVIEW && (
-                    <>
-                      <button
-                        className={textAction}
-                        aria-expanded={expanded}
-                        onClick={() => setExpanded(!expanded)}
-                      >
-                        {expanded ? 'Show fewer' : `View all (${actions.length})`}
-                      </button>
-                      {can('reports.export') && <span aria-hidden="true">|</span>}
-                    </>
-                  )}
                   {can('reports.export') && (
                     <button
-                      className={textAction}
+                      className="btn-ghost h-9 px-3"
                       onClick={() =>
                         void run(
                           async () =>
@@ -352,6 +399,7 @@ export function Dashboard() {
                         )
                       }
                     >
+                      <Icon name="download" size={16} />
                       Export
                     </button>
                   )}
@@ -360,8 +408,10 @@ export function Dashboard() {
               {msg}
               <DataTable<Row>
                 caption="Action required"
+                framed={false}
                 rows={expanded ? actions : actions.slice(0, PREVIEW)}
                 rowKey={(r) => r.key}
+                rowClassName={urgentRow}
                 loading={rows.isLoading}
                 error={rows.isError ? 'Could not load the action list.' : null}
                 emptyMessage="Nothing needs action."
@@ -370,12 +420,23 @@ export function Dashboard() {
                     key: 'item',
                     header: 'Item',
                     cell: (r) => (
-                      <Link
-                        {...destination(r)}
-                        className="font-medium text-hub-teal-dark underline"
-                      >
-                        {`${MODULE_LABEL[r.module] ?? r.module}: ${r.item}`}
-                      </Link>
+                      <span className="flex items-start gap-2.5">
+                        <span className="mt-0.5 text-slate-400">
+                          <Icon name={MODULE_ICON[r.module] ?? 'alert'} size={17} />
+                        </span>
+                        <Link
+                          {...destination(r)}
+                          aria-label={`${MODULE_LABEL[r.module] ?? r.module}: ${r.item}`}
+                          className="group/link block"
+                        >
+                          <span className="eyebrow block text-slate-600">
+                            {MODULE_LABEL[r.module] ?? r.module}
+                          </span>
+                          <span className="font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2 group-hover/link:decoration-hub-teal">
+                            {r.item}
+                          </span>
+                        </Link>
+                      </span>
                     ),
                   },
                   {
@@ -386,7 +447,11 @@ export function Dashboard() {
                   {
                     key: 'deadline',
                     header: 'Deadline',
-                    cell: (r) => (r.deadline ? fmtDate(r.deadline) : '—'),
+                    cell: (r) => (
+                      <span className="whitespace-nowrap">
+                        {r.deadline ? fmtDate(r.deadline) : '—'}
+                      </span>
+                    ),
                   },
                   {
                     key: 'state',
@@ -397,45 +462,86 @@ export function Dashboard() {
                   },
                 ]}
               />
-              {!expanded && actions.length > PREVIEW && (
-                <p className="mt-1 text-sm text-hub-muted">
-                  Showing the {PREVIEW} most urgent of {actions.length}.
-                </p>
-              )}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hub-line px-5 py-3 text-sm">
+                <span className="text-slate-600">
+                  {rows.isLoading
+                    ? 'Loading…'
+                    : actions.length > PREVIEW && !expanded
+                      ? `Showing the ${PREVIEW} most urgent of ${actions.length}.`
+                      : 'Most urgent first.'}
+                </span>
+                {actions.length > PREVIEW && (
+                  <button
+                    className="btn-ghost h-9 px-3"
+                    aria-expanded={expanded}
+                    onClick={() => setExpanded(!expanded)}
+                  >
+                    {expanded ? 'Show fewer' : `View all (${actions.length})`}
+                    {!expanded && <Icon name="arrow" size={16} />}
+                  </button>
+                )}
+              </div>
             </section>
 
-            <div className="grid gap-5 lg:grid-cols-3">
-              <section
-                aria-labelledby="modules-h"
-                className="rounded-lg border border-hub-line bg-hub-card p-4"
-              >
-                <h2 id="modules-h" className="mb-2 text-lg font-bold">
-                  Module status
-                </h2>
+            <div className="space-y-5">
+              <section aria-labelledby="modules-h" className="card p-5">
+                <div className="mb-1 flex items-center gap-2.5">
+                  <span className="text-hub-teal">
+                    <Icon name="modules" />
+                  </span>
+                  <h2 id="modules-h" className="text-lg font-bold">
+                    Module status
+                  </h2>
+                </div>
+                <p className="mb-3 text-sm text-slate-600">
+                  {module
+                    ? `Action required shows ${MODULE_LABEL[module] ?? words(module)} only. Select it again to show all modules.`
+                    : 'Select a module to list only its items under Action required.'}
+                </p>
                 <ul className="space-y-2">
-                  {(s?.modules ?? []).map((m: Row) => (
-                    <li key={m.module}>
-                      <button
-                        className="flex w-full items-center justify-between gap-2 text-left"
-                        aria-pressed={module === m.module}
-                        onClick={() => setModule(module === m.module ? '' : m.module)}
-                      >
-                        <span>
-                          {MODULE_LABEL[m.module]}
-                          {moduleNotSetUp.has(m.module) ? '' : ` (${m.count} ${m.label})`}
-                        </span>
-                        {moduleNotSetUp.has(m.module) ? (
-                          <StatusBadge status="GREY" reason="Not set up" />
-                        ) : (
-                          <StatusBadge status={m.status as StatusKind} />
-                        )}
-                      </button>
-                    </li>
-                  ))}
+                  {(s?.modules ?? []).map((m: Row) => {
+                    const unset = moduleNotSetUp.has(m.module);
+                    const tint =
+                      !unset && m.status === 'RED'
+                        ? 'border-red-200 bg-red-50/60'
+                        : 'border-hub-line bg-white';
+                    return (
+                      <li key={m.module}>
+                        <button
+                          className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left hover:border-slate-300 ${tint} ${module === m.module ? 'ring-2 ring-hub-teal' : ''}`}
+                          aria-pressed={module === m.module}
+                          onClick={() => setModule(module === m.module ? '' : m.module)}
+                        >
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <span className="text-slate-500">
+                              <Icon name={MODULE_ICON[m.module] ?? 'modules'} />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-bold text-slate-900">
+                                {MODULE_LABEL[m.module]}
+                              </span>{' '}
+                              {!unset && (
+                                <span className="block text-xs text-slate-600">
+                                  <span className="sr-only">(</span>
+                                  {m.count} {m.label}
+                                  <span className="sr-only">)</span>
+                                </span>
+                              )}
+                            </span>
+                          </span>
+                          {unset ? (
+                            <StatusBadge status="GREY" reason="Not set up" />
+                          ) : (
+                            <StatusBadge status={m.status as StatusKind} />
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
                 {module && (
-                  <p className="mt-2 flex items-center gap-2 text-sm">
-                    <span className="rounded-full border border-hub-teal px-2 py-0.5">
+                  <p className="mt-3 flex items-center gap-2 text-sm">
+                    <span className="rounded-md border border-hub-teal/40 bg-hub-sky px-2 py-0.5 font-semibold text-hub-teal">
                       Filter: {MODULE_LABEL[module] ?? words(module)}
                     </span>
                     <button
@@ -447,58 +553,74 @@ export function Dashboard() {
                     </button>
                   </p>
                 )}
-                <p className="mt-2 text-sm text-slate-700">
-                  {module
-                    ? `Action required shows ${MODULE_LABEL[module] ?? words(module)} only. Select it again to show all modules.`
-                    : 'Select a module to list only its items under Action required.'}
-                </p>
               </section>
-              <section
-                aria-labelledby="ops-h"
-                className="rounded-lg border border-hub-line bg-hub-card p-4"
-              >
-                <h2 id="ops-h" className="mb-2 text-lg font-bold">
-                  Today in operations
-                </h2>
-                <dl className="grid grid-cols-[1fr_auto] gap-y-1 text-sm">
+              <section aria-labelledby="ops-h" className="card p-5">
+                <div className="mb-3 flex items-center gap-2.5">
+                  <span className="text-hub-teal">
+                    <Icon name="pulse" />
+                  </span>
+                  <h2 id="ops-h" className="text-lg font-bold">
+                    Today in operations
+                  </h2>
+                </div>
+                <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 text-sm">
                   {shows('JOBS') && (
                     <>
-                      <dt>Jobs awaiting allocation</dt>
-                      <dd>{s?.operations.jobsAwaitingAllocation ?? 'not connected yet'}</dd>
-                      <dt>Crew acknowledgements due</dt>
-                      <dd>{s?.operations.acknowledgementsDue ?? 'not connected yet'}</dd>
+                      <dt className="text-slate-700">Jobs awaiting allocation</dt>
+                      <dd className="text-right font-bold text-slate-900">
+                        {s?.operations.jobsAwaitingAllocation ?? 'not connected yet'}
+                      </dd>
+                      <dt className="text-slate-700">Crew acknowledgements due</dt>
+                      <dd className="text-right font-bold text-slate-900">
+                        {s?.operations.acknowledgementsDue ?? 'not connected yet'}
+                      </dd>
                     </>
                   )}
-                  <dt>Critical findings open</dt>
-                  <dd>{s?.criticalOpen ?? '—'}</dd>
+                  <dt className="text-slate-700">Critical findings open</dt>
+                  <dd className="text-right font-bold text-slate-900">{s?.criticalOpen ?? '—'}</dd>
                 </dl>
-                <p className="mt-2 text-sm text-slate-700">
+                <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                   Critical findings remain visible until verified closed.
                 </p>
               </section>
               {s && (
-                <section
-                  aria-labelledby="cov-h"
-                  className="rounded-lg border border-hub-line bg-hub-card p-4 text-sm"
-                >
-                  <h2 id="cov-h" className="mb-1 text-lg font-bold">
-                    Evidence coverage
-                  </h2>
-                  <p>
+                <section aria-labelledby="cov-h" className="card p-5 text-sm">
+                  <div className="mb-2 flex items-center gap-2.5">
+                    <span className="text-hub-teal">
+                      <Icon name="check" />
+                    </span>
+                    <h2 id="cov-h" className="text-lg font-bold">
+                      Evidence coverage
+                    </h2>
+                  </div>
+                  <p className="font-display text-3xl font-extrabold text-slate-900">
                     {s.coverage.percent === null
                       ? 'No applicable requirements.'
-                      : `${s.coverage.percent}%`}{' '}
-                    ({s.coverage.numerator} verified and current of {s.coverage.denominator}{' '}
-                    applicable; {s.coverage.exclusions} not applicable excluded)
+                      : `${s.coverage.percent}%`}
                   </p>
-                  <p className="mt-1 font-semibold">{s.coverage.label}</p>
+                  {s.coverage.percent !== null && (
+                    <div
+                      aria-hidden="true"
+                      className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"
+                    >
+                      <div
+                        className="h-full rounded-full bg-hub-teal"
+                        style={{ width: `${Math.min(100, Math.max(0, s.coverage.percent))}%` }}
+                      />
+                    </div>
+                  )}
+                  <p className="mt-2 text-slate-700">
+                    {s.coverage.numerator} verified and current of {s.coverage.denominator}{' '}
+                    applicable; {s.coverage.exclusions} not applicable excluded.
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{s.coverage.label}</p>
                 </section>
               )}
             </div>
           </div>
           {orgCount > 1 && <GroupPanel />}
           {s && (
-            <p className="text-sm text-slate-700">
+            <p className="text-xs text-slate-600">
               Last refreshed {fmtDateTime(s.lastRefreshedAt)}.{' '}
               {s.sources
                 .filter((x: Row) => !x.ok)

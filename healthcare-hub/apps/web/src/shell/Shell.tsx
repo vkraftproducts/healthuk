@@ -110,12 +110,12 @@ const ICON_PATHS: Record<string, ReactNode> = {
   ),
 };
 
-function NavIcon({ to }: { to: string }) {
+function Icon({ children, size = 18 }: { children: ReactNode; size?: number }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      width="18"
-      height="18"
+      width={size}
+      height={size}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.8"
@@ -125,8 +125,36 @@ function NavIcon({ to }: { to: string }) {
       focusable="false"
       className="shrink-0"
     >
-      {ICON_PATHS[to] ?? <circle cx="12" cy="12" r="8" />}
+      {children}
     </svg>
+  );
+}
+
+function NavIcon({ to }: { to: string }) {
+  return <Icon>{ICON_PATHS[to] ?? <circle cx="12" cy="12" r="8" />}</Icon>;
+}
+
+const CalendarIcon = () => (
+  <Icon size={16}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 10h18M8 3v4M16 3v4" />
+  </Icon>
+);
+const RefreshIcon = () => (
+  <Icon size={16}>
+    <path d="M20 12a8 8 0 0 1-14.3 4.9M4 12A8 8 0 0 1 18.3 7.1" />
+    <path d="M18.5 3v4.2h-4.2M5.5 21v-4.2h4.2" />
+  </Icon>
+);
+const BellIcon = () => <Icon size={18}>{ICON_PATHS['/alerts']}</Icon>;
+
+/** One "Label: value" item in the top bar's scope line. */
+function ScopeItem({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-1">
+      <span className="text-xs text-slate-500">{label}:</span>
+      <span className="truncate font-semibold text-slate-900">{value}</span>
+    </span>
   );
 }
 
@@ -182,42 +210,36 @@ export function Shell() {
     <div className="flex min-h-screen flex-col md:flex-row">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded-lg focus:bg-hub-card-2 focus:p-3 focus:text-hub-ink"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:text-hub-ink"
       >
         Skip to main content
       </a>
 
-      <aside className="on-dark relative flex shrink-0 flex-col border-b border-hub-line bg-hub-navy/95 text-white md:sticky md:top-0 md:h-screen md:w-64 md:overflow-y-auto md:border-b-0">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 hidden w-px bg-gradient-to-b from-transparent via-hub-teal/50 to-transparent md:block"
-        />
-        <div className="px-5 pb-4 pt-6">
+      <aside className="relative flex shrink-0 flex-col border-b border-hub-line bg-white md:sticky md:top-0 md:h-screen md:w-64 md:overflow-y-auto md:border-b-0 md:border-r">
+        <div className="flex h-16 items-center border-b border-hub-line px-5">
           <BrandMark compact />
         </div>
-        <div aria-hidden="true" className="neon-rule mx-5 mb-3" />
-        <nav aria-label="Primary" className="px-3">
-          <ul className="flex flex-wrap gap-1 md:block md:space-y-1">
+        <nav aria-label="Primary" className="px-3 py-4">
+          <ul className="flex flex-wrap gap-1 md:block md:space-y-0.5">
             {NAV_ITEMS.filter((item) => canSee(item, me.permissions, scope.packs)).map((item) => (
               <li key={item.to}>
                 <Link
                   to={item.to}
                   activeOptions={{ exact: item.to === '/' }}
-                  className="group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm"
+                  className="group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold"
                   inactiveProps={{
-                    className: 'text-slate-100 hover:bg-hub-navy-2 hover:text-white',
+                    className: 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
                   }}
                   activeProps={{
                     'aria-current': 'page',
-                    className:
-                      'bg-hub-teal/10 font-semibold text-white shadow-[inset_0_0_0_1px_rgb(94_200_212/0.4),0_0_22px_-8px_rgb(94_200_212/0.5)]',
+                    className: 'bg-hub-sky text-hub-teal',
                   }}
                 >
                   <span
                     aria-hidden="true"
-                    className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-hub-teal opacity-0 shadow-[0_0_10px_rgb(94_200_212)] group-aria-[current=page]:opacity-100"
+                    className="absolute -left-3 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r bg-hub-teal opacity-0 group-aria-[current=page]:opacity-100"
                   />
-                  <span className="text-hub-muted transition-colors group-hover:text-hub-teal group-aria-[current=page]:text-hub-teal">
+                  <span className="text-slate-400 transition-colors group-hover:text-slate-600 group-aria-[current=page]:text-hub-teal">
                     <NavIcon to={item.to} />
                   </span>
                   <span>
@@ -231,14 +253,14 @@ export function Shell() {
           </ul>
         </nav>
 
-        <div className="mt-auto space-y-3 px-5 pb-5 pt-6 text-xs text-slate-200">
+        <div className="mt-auto space-y-3 border-t border-hub-line px-5 pb-5 pt-4 text-xs text-slate-600">
           <div className="flex flex-col gap-1">
-            <label htmlFor="org-switcher" className="text-hub-muted">
+            <label htmlFor="org-switcher" className="font-semibold text-slate-500">
               Organisation
             </label>
             <select
               id="org-switcher"
-              className="field bg-hub-navy-2 px-2 py-1.5 text-sm text-white"
+              className="field px-2 py-1.5 text-sm font-semibold"
               value={orgId ?? ''}
               onChange={(e) => setOrgId(e.target.value)}
             >
@@ -249,17 +271,16 @@ export function Shell() {
               ))}
             </select>
           </div>
-          <div className="neon-rule" aria-hidden="true" />
           <div className="flex items-center gap-3">
             <span
               aria-hidden="true"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-hub-teal/60 bg-hub-navy-2 font-display text-sm font-semibold text-hub-teal shadow-glow-sm"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hub-sky font-display text-sm font-bold text-hub-teal"
             >
               {initials(me.user.displayName)}
             </span>
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-white">{me.user.displayName}</div>
-              {scope.role && <div className="truncate text-hub-muted">{scope.role}</div>}
+              <div className="truncate text-sm font-bold text-slate-900">{me.user.displayName}</div>
+              {scope.role && <div className="truncate text-slate-500">{scope.role}</div>}
             </div>
           </div>
           {signOut && (
@@ -270,102 +291,143 @@ export function Shell() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 space-y-5 p-4 md:p-6">
-        <header className="hud glass sticky top-3 z-20 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-hub-line px-5 py-3.5 shadow-panel">
-          <nav aria-label="Breadcrumb">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hub-line bg-white px-4 py-2.5 md:px-6">
+          <nav aria-label="Breadcrumb" className="min-w-0">
             <button
               type="button"
               onClick={goBack}
               title="Go back"
               aria-label={`Go back: ${crumbs.join(' / ')}`}
-              className="flex flex-wrap gap-x-3 text-left font-display font-semibold text-hub-ink underline-offset-2 hover:underline"
+              className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 rounded-md text-left text-sm hover:bg-slate-50"
             >
-              {crumbs.map((crumb, i) => (
-                <span key={crumb} className="flex gap-x-3">
-                  {i > 0 && (
-                    <span aria-hidden="true" className="text-hub-teal">
-                      /
-                    </span>
-                  )}
-                  {crumb}
-                </span>
-              ))}
+              <ScopeItem label="Organisation" value={crumbs[0]!} />
+              <span aria-hidden="true" className="text-slate-300">
+                /
+              </span>
+              <ScopeItem label="Location" value={crumbs[1]!} />
+              <span aria-hidden="true" className="text-slate-300">
+                /
+              </span>
+              <ScopeItem label="Service" value={crumbs[2]!} />
+              {crumbs[3] && (
+                <>
+                  <span aria-hidden="true" className="text-slate-300">
+                    /
+                  </span>
+                  <span className="font-bold text-hub-teal">{crumbs[3]}</span>
+                </>
+              )}
             </button>
           </nav>
-          <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-hub-muted">
-            {typeof alerts.data?.open === 'number' && (
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-sm text-slate-600">
+            <span className="inline-flex items-center gap-1.5 px-1">
+              <CalendarIcon />
+              <time dateTime={new Date().toISOString()} className="font-semibold text-slate-700">
+                {londonDate.format(new Date())}
+              </time>
+            </span>
+            {sourceOk ? (
+              <span
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                  live && live !== 'live'
+                    ? 'border-amber-300 bg-amber-50 text-amber-900'
+                    : 'border-green-200 bg-green-50 text-green-900'
+                }`}
+              >
+                <span>
+                  Last updated{' '}
+                  <span className="tabular-nums">
+                    {lastUpdated ? londonTime.format(lastUpdated) : '—'}
+                  </span>
+                </span>
+                <span aria-hidden="true" className="opacity-50">
+                  ·
+                </span>
+                {live ? (
+                  <span data-testid="live-state" className="inline-flex items-center gap-1.5">
+                    <span aria-hidden="true" className="relative flex h-2 w-2">
+                      {live === 'live' && (
+                        <span className="absolute inline-flex h-full w-full animate-beacon rounded-full bg-green-600" />
+                      )}
+                      <span
+                        className={`relative h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-600' : 'bg-amber-600'}`}
+                      />
+                    </span>
+                    {live === 'live'
+                      ? 'Live'
+                      : live === 'connecting'
+                        ? 'Connecting…'
+                        : 'Reconnecting… figures may be out of date'}
+                  </span>
+                ) : null}
+                <span aria-hidden="true" className="opacity-50">
+                  ·
+                </span>
+                <span>All sources available</span>
+              </span>
+            ) : (
               <>
-                <Link
-                  to="/alerts"
-                  className="font-medium text-hub-ink underline-offset-2 hover:underline"
-                  aria-label={
-                    `Alerts: ${alerts.data.open} open` +
-                    (alerts.data.critical ? `, ${alerts.data.critical} critical` : '')
-                  }
-                >
-                  Alerts {alerts.data.open}
-                  {alerts.data.critical > 0 && ` (${alerts.data.critical} critical)`}
-                </Link>
-                <span aria-hidden="true">|</span>
+                <span className="text-xs">
+                  Last updated{' '}
+                  <span className="tabular-nums">
+                    {lastUpdated ? londonTime.format(lastUpdated) : '—'}
+                  </span>
+                </span>
+                {live && (
+                  <span data-testid="live-state" className="text-xs">
+                    {live === 'live'
+                      ? 'Live'
+                      : live === 'connecting'
+                        ? 'Connecting…'
+                        : 'Reconnecting… figures may be out of date'}
+                  </span>
+                )}
+                <StatusBadge status="RED" reason="source unavailable" />
               </>
             )}
-            <time dateTime={new Date().toISOString()} className="font-mono text-xs">
-              {londonDate.format(new Date())}
-            </time>
-            <span aria-hidden="true">|</span>
-            <button
-              type="button"
-              onClick={refresh}
-              className="font-medium text-hub-ink underline-offset-2 hover:text-hub-teal-dark hover:underline"
-            >
+            <button type="button" onClick={refresh} className="btn-ghost h-9 gap-1.5 px-3">
+              <RefreshIcon />
               Refresh
             </button>
-            <span aria-hidden="true">|</span>
-            <span>
-              Last updated{' '}
-              <span className="font-mono text-xs">
-                {lastUpdated ? londonTime.format(lastUpdated) : '—'}
-              </span>
-            </span>
-            {live && (
-              <>
-                <span aria-hidden="true">|</span>
-                <span data-testid="live-state" className="inline-flex items-center gap-1.5">
-                  <span aria-hidden="true" className="relative flex h-2 w-2">
-                    {live === 'live' && (
-                      <span className="absolute inline-flex h-full w-full animate-beacon rounded-full bg-green-700" />
-                    )}
-                    <span
-                      className={`relative h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
-                    />
+            {typeof alerts.data?.open === 'number' && (
+              <Link
+                to="/alerts"
+                className="relative grid h-9 w-9 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                aria-label={
+                  `Alerts: ${alerts.data.open} open` +
+                  (alerts.data.critical ? `, ${alerts.data.critical} critical` : '')
+                }
+              >
+                <BellIcon />
+                {alerts.data.open > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className={`absolute -right-1.5 -top-1.5 min-w-[18px] rounded-full px-1 text-center text-[10px] font-bold leading-[18px] text-white ${
+                      alerts.data.critical > 0 ? 'bg-red-700' : 'bg-hub-teal'
+                    }`}
+                  >
+                    {alerts.data.open}
                   </span>
-                  {live === 'live'
-                    ? 'Live'
-                    : live === 'connecting'
-                      ? 'Connecting…'
-                      : 'Reconnecting… figures may be out of date'}
-                </span>
-              </>
-            )}
-            {sourceOk ? (
-              <StatusBadge status="GREEN" reason="all sources available" />
-            ) : (
-              <StatusBadge status="RED" reason="source unavailable" />
+                )}
+              </Link>
             )}
           </div>
         </header>
-        {support && (
-          <div
-            role="status"
-            className="rounded-xl border border-amber-700 bg-amber-50 px-5 py-3 text-sm text-amber-950"
-          >
-            <strong>Support access, read-only.</strong>{' '}
-            {supportBannerText(fmtDateTime(support.endsAt))}
-          </div>
-        )}
-        <main id="main" tabIndex={-1} className="rise-in">
-          <Outlet />
-        </main>
+        <div className="flex-1 space-y-5 p-4 md:p-6 lg:px-8">
+          {support && (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-3 text-sm text-amber-950"
+            >
+              <strong>Support access, read-only.</strong>{' '}
+              {supportBannerText(fmtDateTime(support.endsAt))}
+            </div>
+          )}
+          <main id="main" tabIndex={-1} className="rise-in">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </div>
   );
