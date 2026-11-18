@@ -1,0 +1,17 @@
+﻿/* Extracted from healthcare-hub-uk-v36.html — chrome layout tokens (Phase 0). */
+:root {
+  --v36-primary: #1667d9;
+  --v36-primary-hover: #3c88e6;
+  --v36-primary-active: #094ab3;
+  --v36-bg-layout: #f5f5f5;
+  --v36-bg-container: #ffffff;
+  --v36-text: rgba(0, 0, 0, 0.88);
+  --v36-text-secondary: rgba(0, 0, 0, 0.65);
+  --v36-border: #d9d9d9;
+  --v36-split: rgba(5, 5, 5, 0.06);
+  --v36-sider-w: 232px;
+  --v36-hdr-h: 56px;
+  --v36-pad: 16px;
+  --v36-radius: 6px;
+  --v36-font: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
