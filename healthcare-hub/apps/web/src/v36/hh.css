@@ -1,0 +1,409 @@
+/* App glue for the v36 stylesheet (v36.css is copied verbatim from the v36 HTML). */
+#root {
+  height: 100%;
+}
+.hh-shell {
+  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: row;
+}
+.hh-shell .mainwrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.hh-shell .scroller {
+  flex: 1;
+  overflow: auto;
+}
+
+.hh-slot-tabs:empty,
+.hh-slot-top:empty {
+  display: none;
+}
+.hh-about {
+  margin: 4px 0 8px;
+  max-width: 760px;
+  color: var(--ant-color-text-secondary);
+  font-size: 14px;
+}
+/* The account button in the top bar is a button, not a div as in v36. */
+.top button.me {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.top a.ib {
+  color: inherit;
+}
+#nav a {
+  text-decoration: none;
+}
+.top .only-sm {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .top .only-sm {
+    display: inline-flex;
+  }
+}
+.wf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.wk-list a {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.wk-list a:hover .tx b {
+  color: var(--hh-accent, #1667d9);
+}
+.wf-task .wf-go {
+  color: rgba(0, 0, 0, 0.45);
+  flex: none;
+}
+.wf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ant-input-affix-wrapper .ant-input,
+.ant-input-affix-wrapper .ant-input:focus {
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  background: transparent;
+}
+.wf-rc.on {
+  border-color: var(--hh-accent, #1667d9);
+  box-shadow: 0 0 0 1px var(--hh-accent, #1667d9) inset;
+}
+.pc-tabs .ant-tabs-extra-content:empty {
+  display: none;
+}
+.hh-crumb {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.pc-bc ol {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pc-bc li {
+  display: inline-flex;
+}
+.pc-bc .ant-breadcrumb-separator {
+  margin: 0 8px;
+}
+.hh-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  margin-right: 8px;
+}
+.hh-live .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d48806;
+}
+.hh-live.ok .dot {
+  background: #389e0d;
+}
+.hh-org {
+  padding: 12px 16px;
+  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  margin-top: auto;
+}
+.hh-org label {
+  display: block;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  margin-bottom: 4px;
+}
+.hh-org select {
+  width: 100%;
+}
+.side {
+  display: flex;
+  flex-direction: column;
+}
+.hh-section > .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pl-row {
+  position: relative;
+}
+.pl-row.on {
+  outline: 2px solid var(--ant-color-primary, #1667d9);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.pl-track .pl-shift {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: rgba(56, 158, 13, 0.08);
+  border-radius: 4px;
+}
+.pl-track .pl-job {
+  position: absolute;
+}
+.pl-v .pl-act {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+.hh-two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.wf-t td .sub {
+  display: block;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+}
+/* v36 forms: grouped fields in a responsive grid */
+.hh-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.hh-form fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hh-form legend {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+  padding: 0;
+}
+.hh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px 16px;
+  align-items: end;
+}
+.hh-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+}
+.hh-form input:not([type='checkbox']):not([type='radio']),
+.hh-form select,
+.hh-form textarea {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+  box-sizing: border-box;
+}
+.hh-form input:focus,
+.hh-form select:focus,
+.hh-form textarea:focus {
+  outline: none;
+  border-color: #1667d9;
+  box-shadow: 0 0 0 2px rgba(22, 103, 217, 0.15);
+}
+.hh-form .hh-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.hh-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.hh-help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.6));
+}
+.hh-more {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.hh-more > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.hh-more[open] > summary {
+  margin-bottom: 12px;
+}
+.hh-more > * + * {
+  margin-top: 12px;
+}
+.hh-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.hh-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* forms shown in a dialog: no card around them */
+.hh-modal .wf-card {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.hh-modal .wf-card > .wf-ch {
+  display: none;
+}
+.hh-modal .wf-card > .ant-card-body {
+  padding: 0;
+}
+.hh-alert-row > td:first-child {
+  box-shadow: inset 3px 0 0 #cf1322;
+}
+.wf-cqs {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.hh-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.hh-rules {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+/* v36 row actions: primary button then the kebab, kept on one line at the right. */
+#hh-wf .hh-acts {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+  width: 100%;
+}
+#hh-wf td:last-child:has(.hh-acts) {
+  text-align: right;
+  width: 1%;
+}
+
+/* Our layout wrappers space their children with a 16px flex gap; drop the v36 sibling margins
+   inside them so the space between pills, cards and tables is 16px, as in v36, not 32px. */
+#hh-wf .pc-body [style*='gap'] > .ant-card,
+#hh-wf .pc-body [style*='gap'] > .wf-card,
+#hh-wf .pc-body [style*='gap'] > .wf-tabs.ant-tb,
+#hh-wf .pc-body [style*='gap'] > .wf-seg2,
+#hh-wf .pc-body [style*='gap'] > .wf-warn,
+#hh-wf .pc-body [style*='gap'] > .pc-kpis {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* v36 matrix: each chip opens the cell's detail; the button itself is invisible. */
+#hh-wf .hh-chipbtn {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+}
+#hh-wf .hh-chipbtn:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1667d9);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+#hh-wf .wf-t th.ant-table-cell {
+  white-space: normal;
+}
+
+/* A card whose body is a table runs the table edge to edge, as v36 `.has-tbl` does. */
+#hh-wf .pc-body .ant-card > .ant-card-body:has(> .wf-tw) {
+  padding: 0 0 1px !important;
+}
+#hh-wf .pc-body .ant-card > .ant-card-body:has(> .wf-tw) > *:not(.wf-tw) {
+  margin: 16px 24px;
+}
+
+/* v36 vehicle history head: icon, name, line under it, status. */
+#hh-wf .hh-vhead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+#hh-wf .hh-vhead .ic {
+  color: var(--ant-color-primary, #1667d9);
+  font-size: 28px;
+  display: inline-flex;
+}
+#hh-wf .hh-vhead .ic .ms {
+  width: 30px;
+  height: 30px;
+}
+#hh-wf .hh-vhead b {
+  font-size: 15px;
+}
+#hh-wf .hh-dl {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 16px;
+  margin: 0;
+}
+#hh-wf .hh-dl dt {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+}
+#hh-wf .hh-dl dd {
+  margin: 0;
+}
+#hh-wf .wf-pills.col {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}

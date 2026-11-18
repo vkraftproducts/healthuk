@@ -16,16 +16,12 @@ export interface DataTableProps<T> {
   /** Message shown when the source could not be read (never show stale data as current). */
   error?: string | null;
   emptyMessage?: string;
-  /** Extra classes for a row, e.g. to tint a blocked item. Never the only signal: rows keep their badge. */
-  rowClassName?: (row: T) => string;
-  /** false when the table sits inside a panel that already has a border. */
-  framed?: boolean;
 }
 
-// Light console style: a white panel, a quiet uppercase header row and hairline row dividers.
+// Neon Forest style: glowing header bar, each row a dark glass strip (alternate rows tinted, hover lit).
 const CELL =
-  'border-t border-slate-100 px-4 py-3 align-top transition-colors group-hover:bg-slate-50';
-const EMPTY = 'border-t border-slate-100 px-4 py-5';
+  'border-y border-hub-line bg-hub-card px-3 py-2.5 align-top transition-colors first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-even:bg-hub-row group-hover:bg-sky-50 group-hover:border-teal-600/50';
+const EMPTY = 'rounded-lg border border-hub-line bg-hub-card px-3 py-4';
 
 /** Plain, keyboard- and screen-reader-friendly table with explicit loading/error/empty states. */
 export function DataTable<T>({
@@ -36,22 +32,17 @@ export function DataTable<T>({
   loading,
   error,
   emptyMessage = 'Nothing to show.',
-  rowClassName,
-  framed = true,
 }: DataTableProps<T>) {
   if (error) {
     return (
-      <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-red-900">
+      <div role="alert" className="rounded-lg border border-red-700 bg-red-50 p-3 text-red-900">
         <strong>Source unavailable.</strong> {error}
       </div>
     );
   }
   return (
-    <div
-      className={`overflow-x-auto bg-white ${framed ? 'rounded-xl border border-hub-line' : ''}`}
-      aria-busy={loading ? 'true' : 'false'}
-    >
-      <table className="w-full border-collapse text-left text-sm text-slate-900">
+    <div className="overflow-x-auto" aria-busy={loading ? 'true' : 'false'}>
+      <table className="w-full border-separate border-spacing-y-1.5 text-left text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
@@ -59,7 +50,7 @@ export function DataTable<T>({
               <th
                 key={c.key}
                 scope="col"
-                className="bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.06em] text-slate-600"
+                className="border-y border-hub-navy bg-hub-navy px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-white first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r"
               >
                 {c.header}
               </th>
@@ -81,7 +72,7 @@ export function DataTable<T>({
             </tr>
           ) : (
             rows.map((row) => (
-              <tr key={rowKey(row)} className={`group ${rowClassName?.(row) ?? ''}`}>
+              <tr key={rowKey(row)} className="group">
                 {columns.map((c) => (
                   <td key={c.key} className={CELL}>
                     {c.cell(row)}
