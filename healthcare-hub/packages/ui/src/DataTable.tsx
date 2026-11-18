@@ -6,6 +6,8 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
 }
 
+export type RowTone = 'red' | 'amber' | 'purple';
+
 export interface DataTableProps<T> {
   /** Accessible name for the table (rendered as a visually hidden caption). */
   caption: string;
@@ -16,12 +18,19 @@ export interface DataTableProps<T> {
   /** Message shown when the source could not be read (never show stale data as current). */
   error?: string | null;
   emptyMessage?: string;
+  /** Optional row highlight for overdue / blocked / attention states. */
+  rowTone?: (row: T) => RowTone | null | undefined;
 }
 
 // Neon Forest style: glowing header bar, each row a dark glass strip (alternate rows tinted, hover lit).
 const CELL =
   'border-y border-hub-line bg-hub-card px-3 py-2.5 align-top transition-colors first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-even:bg-hub-row group-hover:bg-sky-50 group-hover:border-teal-600/50';
 const EMPTY = 'rounded-lg border border-hub-line bg-hub-card px-3 py-4';
+const TONE_ROW: Record<RowTone, string> = {
+  red: '[&>td:first-child]:border-l-red-600 [&>td:first-child]:border-l-4',
+  amber: '[&>td:first-child]:border-l-amber-500 [&>td:first-child]:border-l-4',
+  purple: '[&>td:first-child]:border-l-violet-600 [&>td:first-child]:border-l-4',
+};
 
 /** Plain, keyboard- and screen-reader-friendly table with explicit loading/error/empty states. */
 export function DataTable<T>({
@@ -32,6 +41,7 @@ export function DataTable<T>({
   loading,
   error,
   emptyMessage = 'Nothing to show.',
+  rowTone,
 }: DataTableProps<T>) {
   if (error) {
     return (
@@ -71,15 +81,18 @@ export function DataTable<T>({
               </td>
             </tr>
           ) : (
-            rows.map((row) => (
-              <tr key={rowKey(row)} className="group">
-                {columns.map((c) => (
-                  <td key={c.key} className={CELL}>
-                    {c.cell(row)}
-                  </td>
-                ))}
-              </tr>
-            ))
+            rows.map((row) => {
+              const tone = rowTone?.(row) ?? null;
+              return (
+                <tr key={rowKey(row)} className={`group${tone ? ` ${TONE_ROW[tone]}` : ''}`}>
+                  {columns.map((c) => (
+                    <td key={c.key} className={CELL}>
+                      {c.cell(row)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

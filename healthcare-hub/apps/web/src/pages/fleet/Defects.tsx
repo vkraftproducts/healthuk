@@ -88,7 +88,7 @@ export const SEVERITY_GUIDANCE: Record<string, string> = {
 };
 
 /** D4: report a defect on a vehicle or equipment, with optional photos. */
-function ReportDefect({ vehicleId, onClose }: { vehicleId?: string; onClose: () => void }) {
+export function ReportDefect({ vehicleId, onClose }: { vehicleId?: string; onClose: () => void }) {
   const { api, orgId } = useApp();
   const [on, setOn] = useState<'VEHICLE' | 'ASSET'>('VEHICLE');
   const [subjectId, setSubjectId] = useState(vehicleId ?? '');
