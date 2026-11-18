@@ -699,14 +699,17 @@ function ReadinessWindow({ roles }: { roles: string[] }) {
 }
 
 /** Staff requests waiting for a decision: corrections, date changes, reviews and supervision. */
-export function StaffRequestsQueue() {
+export function StaffRequestsQueue({ withCorrections = true }: { withCorrections?: boolean } = {}) {
   const { api, orgId } = useApp();
   const can = useCan();
   const manage = can('staff.profile.manage');
   const due = can('compliance.due_date.change');
   const verify = can('compliance.evidence.verify');
   const requests = useOne<{ data: Row[] }>('/api/v1/staff/self-requests', manage || due || verify);
-  const corrections = useOne<{ data: Row[] }>('/api/v1/staff/corrections', manage);
+  const corrections = useOne<{ data: Row[] }>(
+    '/api/v1/staff/corrections',
+    withCorrections && manage,
+  );
   const [deciding, setDeciding] = useState<{ row: Row; accept: boolean } | null>(null);
   const [correcting, setCorrecting] = useState<{ row: Row; apply: boolean } | null>(null);
   const [bookedFor, setBookedFor] = useState('');
@@ -759,7 +762,7 @@ export function StaffRequestsQueue() {
           },
         ]}
       />
-      {manage && (
+      {withCorrections && manage && (
         <DataTable<Row>
           caption="Correction requests waiting for HR"
           rows={corrections.data?.data ?? []}
