@@ -423,6 +423,30 @@ export async function applyAutoRequirements(
   return n;
 }
 
+/**
+ * Default owner + review/repair dates for a new defect (0042_ownership_escalation):
+ * first active Fleet lead, with review-by CRITICAL +3 / MAJOR +7 / MINOR +14 days.
+ */
+export async function defaultDefectOwnership(
+  tx: TenantTx,
+  orgId: string,
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR',
+  discoveredAt: Date,
+): Promise<{ ownerUserId: string | null; reviewBy: Date; repairDeadline: Date }> {
+  const days = severity === 'CRITICAL' ? 3 : severity === 'MAJOR' ? 7 : 14;
+  const due = new Date(`${addDays(londonDate(discoveredAt), days)}T00:00:00.000Z`);
+  const lead = await tx.membership.findFirst({
+    where: {
+      organisationId: orgId,
+      validTo: null,
+      role: { key: 'FLEET_LEAD' },
+    },
+    orderBy: { validFrom: 'asc' },
+    select: { userId: true },
+  });
+  return { ownerUserId: lead?.userId ?? null, reviewBy: due, repairDeadline: due };
+}
+
 /** Raises the control-room alert for a stop-use defect (deduplicated per defect). */
 export async function raiseDefectAlert(
   tx: TenantTx,

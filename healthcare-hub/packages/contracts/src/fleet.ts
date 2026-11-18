@@ -530,8 +530,12 @@ export const CleaningDto = z.object({
   vehicleId: uuid,
   type: z.enum(['PRE_SHIFT', 'BETWEEN_PATIENT', 'ENHANCED']),
   cleanedBy: uuid,
+  cleanedByName: z.string().nullable().optional(),
+  checkedBy: uuid.nullable().optional(),
+  checkedByName: z.string().nullable().optional(),
   capturedAt: isoDateTime,
   receivedAt: isoDateTime,
+  notes: z.string().nullable().optional(),
   duplicate: z.boolean(),
 });
 

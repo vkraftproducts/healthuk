@@ -26,3 +26,4 @@ export * from './regulatory.js';
 export * from './visibility.js';
 export * from './incidents.js';
 export * from './audits.js';
+export * from './rota.js';

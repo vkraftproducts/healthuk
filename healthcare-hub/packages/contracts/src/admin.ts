@@ -282,6 +282,9 @@ const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date');
 export const ItemRule = z.strictObject({
   kind: z.enum(ITEM_KINDS),
   recipients: z.array(z.enum(RECIPIENTS)).min(1).max(3),
+  /** Optional per-kind override of the org escalation timings. */
+  leadAfterDays: z.number().int().min(0).max(90).optional(),
+  managerAfterDays: z.number().int().min(1).max(180).optional(),
 });
 export const Deputy = z
   .strictObject({
