@@ -999,6 +999,16 @@ export const TrainingPlanDto = z.object({
 export type TrainingPlanDto = z.infer<typeof TrainingPlanDto>;
 
 // ---- deep clean status (Vehicles › Fleet care › Deep cleans) ------------------------------------
+/** Office-recorded deep clean: cleaner and a different checker (four-eyes). */
+export const DeepCleanCreate = z.strictObject({
+  vehicleId: uuid,
+  cleanedOn: isoDate,
+  cleanedBy: uuid,
+  checkedBy: uuid,
+  note: z.string().trim().min(3).max(500).optional(),
+});
+export type DeepCleanCreate = z.infer<typeof DeepCleanCreate>;
+
 /** One row per vehicle: the last deep clean and when the next is due (every 28 days). */
 export const DeepCleanStatusDto = z.object({
   vehicleId: uuid,

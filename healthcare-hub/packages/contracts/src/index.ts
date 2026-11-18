@@ -20,3 +20,4 @@ export * from './privacy.js';
 export * from './integrations.js';
 export * from './speakup.js';
 export * from './regulatory.js';
+export * from './v36.js';

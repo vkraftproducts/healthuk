@@ -51,7 +51,14 @@ export async function createAction(
   a: {
     organisationId: string;
     sourceType:
-      'FINDING' | 'EVENT' | 'RISK' | 'CORRESPONDENCE' | 'FEEDBACK' | 'MEETING' | 'PREMISES';
+      | 'FINDING'
+      | 'EVENT'
+      | 'RISK'
+      | 'CORRESPONDENCE'
+      | 'FEEDBACK'
+      | 'MEETING'
+      | 'PREMISES'
+      | 'CONTINUITY';
     sourceId: string;
     kind?: 'ACTION' | 'REAUDIT';
     title: string;
