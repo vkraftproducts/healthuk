@@ -1,13 +1,15 @@
 import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db } from '@hub/db';
+import { refreshVehicleStatus } from '@hub/domain';
+import { z as zod } from 'zod';
 import type { CleaningDto, DeepCleanStatusDto } from '@hub/contracts';
 import { DeepCleanCreate } from '@hub/contracts';
 import { addDays, daysUntil, londonDate, londonDateTime } from '@hub/rules';
 import type { z } from 'zod';
-import { RequirePermission } from '../../common/decorators.js';
+import { OrgMember, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequestContext } from '../../common/context.js';
-import { audit, body } from '../../common/http.js';
+import { audit, body, requireAny } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { assertActiveMember, escalationContext, idPipe } from './shared.js';
@@ -17,6 +19,7 @@ const FLEET = 'fleet.vehicle.manage';
 const VIEW = 'fleet.vdi.view';
 /** v36: vehicles are deep cleaned every 28 days. */
 const DEEP_EVERY_DAYS = 28;
+const InfectiousInput = zod.strictObject({ journey: zod.string().trim().max(40).optional() });
 type CleaningDtoT = z.infer<typeof CleaningDto>;
 
 /**
@@ -121,12 +124,28 @@ export class FleetCareController {
           notes: input.note ?? 'Scheduled deep clean',
         },
       });
-      // A deep clean clears an infectious-transfer quarantine.
-      if (v.quarantined && v.quarantineReason === INFECTIOUS_REASON) {
+      // v36: an ENHANCED deep clean (after infection) clears an infectious-transfer block; a
+      // scheduled one does not.
+      if (
+        v.quarantined &&
+        v.quarantineReason === INFECTIOUS_REASON &&
+        /enhanced/i.test(input.note ?? '')
+      ) {
         await tx.vehicle.update({
           where: { id: v.id },
           data: { quarantined: false, quarantineReason: null, updatedAt: new Date() },
         });
+        await tx.vehicleStatusChange.create({
+          data: {
+            organisationId: v.organisationId,
+            vehicleId: v.id,
+            flag: 'QUARANTINE',
+            setOn: false,
+            reason: 'Enhanced deep clean recorded and checked',
+            changedBy: hub.user.id,
+          },
+        });
+        await refreshVehicleStatus(tx, v.id);
       }
       await audit(this.db, tx, hub, {
         action: 'fleet.cleaning.deep',
@@ -155,15 +174,21 @@ export class FleetCareController {
     });
   }
 
-  @RequirePermission(FLEET)
+  /** v36 dcFlag: anyone who works for the organisation (not a read-only reviewer) can flag it. */
+  @OrgMember()
   @Post('vehicles/:id/infectious-transfer')
   infectious(
     @Hub() hub: HubRequestContext,
     @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
   ): Promise<{ id: string; quarantined: boolean; quarantineReason: string | null }> {
+    requireAny(hub, FLEET, 'events.event.report');
+    const input = body(InfectiousInput, raw ?? {});
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const v = await tx.vehicle.findUnique({ where: { id } });
       if (!v) throw notFound();
+      if (v.quarantined && v.quarantineReason === INFECTIOUS_REASON)
+        throw new HubError('CONFLICT', 409, 'Already blocked for an enhanced deep clean');
       const updated = await tx.vehicle.update({
         where: { id },
         data: {
@@ -172,6 +197,12 @@ export class FleetCareController {
           updatedAt: new Date(),
         },
       });
+      // When and by whom (v36 shows it on the vehicle), with the journey if one was given.
+      await tx.$executeRaw`
+        INSERT INTO vehicle_status_change (organisation_id, vehicle_id, flag, set_on, reason, changed_by, journey_ref)
+        VALUES (${v.organisationId}::uuid, ${id}::uuid, 'QUARANTINE', true, ${INFECTIOUS_REASON},
+                ${hub.user.id}::uuid, ${input.journey || null})`;
+      await refreshVehicleStatus(tx, id);
       await audit(this.db, tx, hub, {
         action: 'fleet.vehicle.infectious',
         entity: 'vehicle',

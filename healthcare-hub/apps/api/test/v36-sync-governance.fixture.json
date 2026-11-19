@@ -1,0 +1,1683 @@
+{
+ "people": {
+  "ST-0051": {
+   "n": "Jordan Reed",
+   "job": "Emergency care assistant",
+   "stage": "Checks in progress"
+  },
+  "ST-0072": {
+   "n": "Kiran Shah",
+   "job": "Care assistant",
+   "stage": "Checks in progress"
+  },
+  "ST-0088": {
+   "n": "Maya Collins",
+   "job": "Technician",
+   "stage": "Ready for review"
+  },
+  "ST-0094": {
+   "n": "Ben Okoro",
+   "job": "Driver",
+   "stage": "Candidate"
+  },
+  "ST-0042": {
+   "n": "Alex Morgan",
+   "job": "Paramedic",
+   "stage": "Active"
+  },
+  "ST-0043": {
+   "n": "Lee Davies",
+   "job": "Driver",
+   "stage": "Active"
+  },
+  "ST-0089": {
+   "n": "Ellis Grant",
+   "job": "Care assistant",
+   "stage": "Active"
+  },
+  "ST-0101": {
+   "n": "Tom Hughes",
+   "job": "Driver",
+   "stage": "Active"
+  },
+  "ST-0102": {
+   "n": "Grace Bennett",
+   "job": "Care assistant",
+   "stage": "Active"
+  },
+  "ST-0103": {
+   "n": "Daniel Price",
+   "job": "Emergency care assistant",
+   "stage": "Active"
+  },
+  "ST-0104": {
+   "n": "Aisha Khan",
+   "job": "Technician",
+   "stage": "Active"
+  },
+  "ST-0105": {
+   "n": "Owen Clarke",
+   "job": "Driver",
+   "stage": "Active"
+  },
+  "ST-0106": {
+   "n": "Megan Lloyd",
+   "job": "Paramedic",
+   "stage": "Active"
+  },
+  "ST-0107": {
+   "n": "Ravi Patel",
+   "job": "Care assistant",
+   "stage": "Active"
+  },
+  "ST-0108": {
+   "n": "Chloe Turner",
+   "job": "Technician",
+   "stage": "Active"
+  },
+  "ST-0109": {
+   "n": "Sam Wright",
+   "job": "Emergency care assistant",
+   "stage": "Active"
+  }
+ },
+ "tpl": {
+  "AC-01": {
+   "n": "Recruitment and Schedule 3 files",
+   "kq": "Well-led",
+   "v": 2,
+   "state": "Published",
+   "by": "Sarah Jenkins",
+   "pub": "Dr. A. Vance",
+   "ctl": [
+    "Schedule 3 items complete and verified before start (sample 5 files)",
+    "Approval for role signed by the Registered Manager",
+    "DBS level matches the role",
+    "References include the last employer",
+    "Gaps in employment explained"
+   ]
+  },
+  "AC-02": {
+   "n": "Induction and competence",
+   "kq": "Effective",
+   "v": 1,
+   "state": "Published",
+   "by": "Sarah Jenkins",
+   "pub": "Dr. Helen Price",
+   "ctl": [
+    "Induction signed before first shift",
+    "Competency sign-off for role tasks",
+    "Mandatory training in date"
+   ]
+  },
+  "AC-03": {
+   "n": "Supervision and appraisal",
+   "kq": "Well-led",
+   "v": 1,
+   "state": "Draft",
+   "by": "Dr. Helen Price",
+   "ctl": [
+    "Supervision every 8 weeks",
+    "Missed supervisions rebooked within 14 days",
+    "Probation reviews at 3 and 6 months"
+   ]
+  },
+  "AC-04": {
+   "n": "Safeguarding",
+   "kq": "Safe",
+   "v": 1,
+   "state": "Published",
+   "by": "Dr. Helen Price",
+   "pub": "Dr. A. Vance",
+   "ctl": [
+    "Concerns referred within 24 hours",
+    "Staff trained to level 2",
+    "Lead named and contactable"
+   ]
+  },
+  "AC-05": {
+   "n": "Complaints and incidents",
+   "kq": "Responsive",
+   "v": 1,
+   "state": "Published",
+   "by": "Dr. Helen Price",
+   "pub": "Rachel Hughes",
+   "ctl": [
+    "Incidents triaged within 2 days",
+    "Duty of candour steps on time",
+    "Learning shared at governance meeting"
+   ]
+  },
+  "AC-07": {
+   "n": "Premises, vehicles and equipment",
+   "kq": "Safe",
+   "v": 1,
+   "state": "Published",
+   "by": "Dave Evans",
+   "pub": "Dr. Helen Price",
+   "ctl": [
+    "Pre-shift IPC clean recorded for every vehicle used (sample 5 shifts)",
+    "Deep clean every 28 days, ATP swab under 100 RLU",
+    "Cleaning products in date, COSHH sheet present",
+    "Daily check done before first job",
+    "Stop-use defects not used until returned to service"
+   ]
+  },
+  "AC-09": {
+   "n": "Dignity and involvement",
+   "kq": "Caring",
+   "v": 1,
+   "state": "Published",
+   "by": "Dr. Helen Price",
+   "pub": "Dr. A. Vance",
+   "ctl": [
+    "Patient privacy kept during transfers",
+    "Relatives updated on delays",
+    "Feedback collected after journeys"
+   ]
+  },
+  "AC-11": {
+   "n": "Governance and oversight",
+   "kq": "Well-led",
+   "v": 1,
+   "state": "Draft",
+   "by": "Rachel Hughes",
+   "ctl": [
+    "Governance meeting quorate monthly",
+    "Risk register reviewed quarterly",
+    "Overdue actions escalated"
+   ]
+  }
+ },
+ "prog": [
+  [
+   "AC-01",
+   [
+    "2026-11",
+    "2027-05"
+   ]
+  ],
+  [
+   "AC-02",
+   [
+    "2027-01",
+    "2027-07"
+   ]
+  ],
+  [
+   "AC-04",
+   [
+    "2026-12",
+    "2027-06"
+   ]
+  ],
+  [
+   "AC-05",
+   [
+    "2026-11",
+    "2027-02",
+    "2027-05",
+    "2027-08"
+   ]
+  ],
+  [
+   "AC-07",
+   [
+    "2026-10",
+    "2026-11",
+    "2026-12",
+    "2027-03",
+    "2027-06",
+    "2027-09"
+   ]
+  ],
+  [
+   "AC-09",
+   [
+    "2027-02",
+    "2027-08"
+   ]
+  ]
+ ],
+ "aud": {
+  "AUD-099": {
+   "id": "AUD-099",
+   "tpl": "AC-07",
+   "t": "Vehicle equipment audit",
+   "auditor": "Dr. Helen Price",
+   "owner": "Dave Evans",
+   "due": "2026-10-26",
+   "stage": "Closed",
+   "res": {
+    "0": "Pass",
+    "1": "Pass",
+    "2": "Fail",
+    "3": "Pass",
+    "4": "Pass"
+   },
+   "acts": [
+    "ACT-212"
+   ],
+   "dec": {
+    "k": "Accepted",
+    "by": "Dave Evans",
+    "on": "2026-10-27 09:00"
+   }
+  },
+  "AUD-101": {
+   "id": "AUD-101",
+   "tpl": "AC-05",
+   "t": "Incidents and complaints handling",
+   "auditor": "Rachel Hughes",
+   "owner": "Dr. Helen Price",
+   "due": "2026-11-12",
+   "stage": "Scheduled"
+  },
+  "AUD-102": {
+   "id": "AUD-102",
+   "tpl": "AC-07",
+   "t": "Vehicle cleaning audit",
+   "auditor": "Dr. Helen Price",
+   "owner": "Dave Evans",
+   "due": "2026-11-16",
+   "stage": "Submitted – actions open",
+   "res": {
+    "0": "Fail",
+    "1": "Pass",
+    "2": "Pass",
+    "3": "Pass",
+    "4": "Pass"
+   },
+   "notes": {
+    "0": "AMB-02 used on 13 Nov with no pre-shift clean recorded."
+   },
+   "method": "Records and observation, sample 5 shifts",
+   "acts": [
+    "ACT-218",
+    "ACT-219"
+   ],
+   "dec": {
+    "k": "Accepted",
+    "by": "Dave Evans",
+    "on": "2026-11-17 08:40"
+   }
+  },
+  "AUD-103": {
+   "id": "AUD-103",
+   "tpl": "AC-07",
+   "t": "Re-audit: vehicle cleaning",
+   "auditor": "Dr. Helen Price",
+   "owner": "Dave Evans",
+   "due": "2026-12-01",
+   "stage": "Scheduled"
+  },
+  "AUD-104": {
+   "id": "AUD-104",
+   "tpl": "AC-01",
+   "t": "Recruitment files audit",
+   "auditor": "Dr. Helen Price",
+   "owner": "Sarah Jenkins",
+   "due": "2026-11-23",
+   "stage": "Scheduled"
+  }
+ },
+ "inc": {
+  "EVT-2026-040": {
+   "id": "EVT-2026-040",
+   "type": [
+    "Complaint"
+   ],
+   "title": "Complaint – crew did not explain delay to relative",
+   "when": "2026-10-28 11:00",
+   "place": "Lister Hospital – Outpatients",
+   "what": "Relative complained the crew did not explain why the return journey was late.",
+   "imm": "Apology given by phone on 29 Oct.",
+   "by": "Dispatcher",
+   "on": "2026-10-28 15:40",
+   "harm": "No harm",
+   "lead": "Dr. Helen Price",
+   "stage": "Closed",
+   "nhs": true,
+   "findings": "Delay caused by earlier job overrunning; crew were not told to update relatives.",
+   "learning": "Dispatcher now sends an ETA update script to crews when a job is more than 20 minutes late.",
+   "acts": [],
+   "closed": {
+    "by": "Dr. A. Vance",
+    "on": "2026-11-11 10:12",
+    "note": "Response letter sent within 14 days. Reporter told outcome."
+   },
+   "fb": "Thanks – we have changed how we update relatives about delays.",
+   "stamps": {
+    "Reported": "2026-10-28 15:40",
+    "Triaged": "2026-10-29 09:10",
+    "Investigating": "2026-10-29 09:10",
+    "Findings & learning": "2026-11-04 14:00",
+    "Actions in progress": "2026-11-04 14:00",
+    "Awaiting closure": "2026-11-10 16:30",
+    "Closed": "2026-11-11 10:12"
+   }
+  },
+  "EVT-2026-042": {
+   "id": "EVT-2026-042",
+   "type": [
+    "Incident"
+   ],
+   "title": "Patient collected 52 minutes late",
+   "when": "2026-11-17 06:15",
+   "place": "Watford General – discharge lounge",
+   "what": "Booking J-105 delayed after AMB-03 was grounded. Patient waited 52 minutes.",
+   "imm": "Ward and patient told; welfare check done.",
+   "jobs": "J-105",
+   "by": "Lee Davies",
+   "on": "2026-11-17 06:15",
+   "harm": "No harm",
+   "lead": "Dr. Helen Price",
+   "stage": "Triaged",
+   "nhs": true,
+   "acts": [],
+   "stamps": {
+    "Reported": "2026-11-17 06:15",
+    "Triaged": "2026-11-17 08:05"
+   }
+  },
+  "EVT-2026-043": {
+   "id": "EVT-2026-043",
+   "type": [
+    "Accident"
+   ],
+   "title": "Staff back strain during stretcher transfer",
+   "when": "2026-11-04 10:20",
+   "place": "Hemel Hempstead Hospital – ambulance bay",
+   "what": "Crew member felt back strain lifting stretcher; powered height adjust not working.",
+   "imm": "Crew member stood down; stretcher tagged out of use.",
+   "by": "Lee Davies",
+   "on": "2026-11-04 10:45",
+   "harm": "Low harm",
+   "lead": "Dr. Helen Price",
+   "stage": "Actions in progress",
+   "nhs": false,
+   "findings": "Powered stretcher height-adjust fault not reported at daily check; two-person technique not used.",
+   "learning": "Daily check now includes stretcher function. Manual handling refresher for powered stretchers.",
+   "acts": [
+    "ACT-215"
+   ],
+   "riddor": "Over-7-day injury: not met (returned to work after 3 days).",
+   "stamps": {
+    "Reported": "2026-11-04 10:45",
+    "Triaged": "2026-11-04 13:00",
+    "Investigating": "2026-11-04 13:00",
+    "Findings & learning": "2026-11-09 15:30",
+    "Actions in progress": "2026-11-09 15:30"
+   },
+   "psirf": {
+    "resp": "After-action review (AAR)",
+    "why": "Moderate harm to staff; known risk with clear system factors – plan says AAR",
+    "by": "Dr. Helen Price",
+    "on": "2026-11-10"
+   }
+  },
+  "EVT-2026-044": {
+   "id": "EVT-2026-044",
+   "type": [
+    "Incident",
+    "Accident"
+   ],
+   "title": "Patient slipped from carry chair on stairs",
+   "when": "2026-11-15 14:40",
+   "place": "Patient home – internal stairs",
+   "what": "Carry chair tipped on the third step; patient slid onto the stairs. Suspected wrist fracture, taken to A&E.",
+   "imm": "First aid, patient conveyed to A&E, family told at scene.",
+   "jobs": "J-098",
+   "by": "Alex Morgan",
+   "on": "2026-11-15 15:30",
+   "harm": "Moderate harm",
+   "lead": "Dr. Helen Price",
+   "stage": "Investigating",
+   "nhs": true,
+   "acts": [
+    "ACT-221"
+   ],
+   "risk": false,
+   "doc": {
+    "need": true,
+    "steps": [
+     {
+      "k": "Told the patient / family in person",
+      "done": "2026-11-15 15:00",
+      "by": "Alex Morgan"
+     },
+     {
+      "k": "Apology given",
+      "done": "2026-11-16 10:30",
+      "by": "Dr. A. Vance"
+     },
+     {
+      "k": "Written follow-up within 10 working days",
+      "due": "2026-11-29"
+     },
+     {
+      "k": "Investigation findings shared",
+      "due": ""
+     }
+    ]
+   },
+   "cqc": {
+    "need": true,
+    "type": "Serious injury",
+    "state": "Draft",
+    "by": "Dr. Helen Price",
+    "on": "2026-11-16 11:00"
+   },
+   "stamps": {
+    "Reported": "2026-11-15 15:30",
+    "Triaged": "2026-11-15 17:10",
+    "Investigating": "2026-11-15 17:10"
+   }
+  },
+  "EVT-2026-045": {
+   "id": "EVT-2026-045",
+   "type": [
+    "Near miss"
+   ],
+   "title": "Oxygen cylinder found unsecured in saloon",
+   "when": "2026-11-17 07:50",
+   "place": "Watford station – AMB-01",
+   "what": "Found during daily check: one CD cylinder loose in the saloon bracket. Secured before use.",
+   "imm": "Cylinder secured; bracket strap replaced.",
+   "jobs": "",
+   "by": "Alex Morgan",
+   "on": "2026-11-17 07:55",
+   "harm": null,
+   "lead": null,
+   "stage": "Reported",
+   "nhs": false,
+   "acts": [],
+   "stamps": {
+    "Reported": "2026-11-17 07:55"
+   }
+  }
+ },
+ "riddor": {
+  "EVT-2026-043": {
+   "cls": "Not reportable",
+   "why": "Returned to work after 3 days (over-7-day not met)",
+   "by": "Dr. Helen Price",
+   "on": "2026-11-09"
+  }
+ },
+ "risk": [
+  {
+   "id": "RSK-01",
+   "h": "Back injury lifting patients on powered stretchers",
+   "who": "Crew",
+   "l0": 4,
+   "i0": 3,
+   "ctl": "Two-person technique (SOP MH-02 v2); daily stretcher function check; refresher training",
+   "l1": 2,
+   "i1": 3,
+   "owner": "Sarah Jenkins",
+   "review": "2026-12-27",
+   "acts": [
+    "ACT-215"
+   ],
+   "state": "Open",
+   "hist": [
+    {
+     "on": "2026-04-27",
+     "s": 12
+    },
+    {
+     "on": "2026-07-27",
+     "s": 9
+    },
+    {
+     "on": "2026-10-27",
+     "s": 6
+    }
+   ]
+  },
+  {
+   "id": "RSK-02",
+   "h": "Vehicle unavailable – tail-lift failure",
+   "who": "Patients awaiting transport",
+   "l0": 3,
+   "i0": 4,
+   "ctl": "LOLER every 6 months; daily tail-lift check; spare vehicle cover",
+   "l1": 2,
+   "i1": 3,
+   "owner": "Dave Evans",
+   "review": "2026-12-11",
+   "acts": [],
+   "state": "Open",
+   "hist": [
+    {
+     "on": "2026-04-27",
+     "s": 12
+    },
+    {
+     "on": "2026-07-27",
+     "s": 9
+    },
+    {
+     "on": "2026-10-27",
+     "s": 6
+    }
+   ]
+  },
+  {
+   "id": "RSK-03",
+   "h": "Sexual harassment of staff by patients or the public",
+   "who": "Crew, control room",
+   "l0": 3,
+   "i0": 4,
+   "ctl": "Reporting route via Speak up; crew may withdraw; conflict training",
+   "l1": 2,
+   "i1": 4,
+   "owner": "Sarah Jenkins",
+   "review": "2026-12-26",
+   "acts": [],
+   "state": "Open",
+   "harass": true,
+   "hist": [
+    {
+     "on": "2026-04-27",
+     "s": 12
+    },
+    {
+     "on": "2026-07-27",
+     "s": 10
+    },
+    {
+     "on": "2026-10-27",
+     "s": 8
+    }
+   ]
+  },
+  {
+   "id": "RSK-04",
+   "h": "Patient data seen on crew phones",
+   "who": "Patients",
+   "l0": 2,
+   "i0": 4,
+   "ctl": "Patient references only on phones; device PIN and remote wipe",
+   "l1": 1,
+   "i1": 4,
+   "owner": "Dr. A. Vance",
+   "review": "2027-02-05",
+   "acts": [],
+   "state": "Open",
+   "hist": [
+    {
+     "on": "2026-04-27",
+     "s": 8
+    },
+    {
+     "on": "2026-07-27",
+     "s": 6
+    },
+    {
+     "on": "2026-10-27",
+     "s": 4
+    }
+   ]
+  },
+  {
+   "id": "RSK-05",
+   "h": "Oxygen store fire or cylinder failure",
+   "who": "Staff, public",
+   "l0": 2,
+   "i0": 5,
+   "ctl": "Ventilated store, signage, daily sign-off, cylinders secured (CI-01)",
+   "l1": 1,
+   "i1": 5,
+   "owner": "Dave Evans",
+   "review": "2027-01-15",
+   "acts": [],
+   "state": "Open",
+   "hist": [
+    {
+     "on": "2026-04-27",
+     "s": 10
+    },
+    {
+     "on": "2026-07-27",
+     "s": 8
+    },
+    {
+     "on": "2026-10-27",
+     "s": 5
+    }
+   ]
+  },
+  {
+   "id": "RSK-06",
+   "h": "Lone working during phased return",
+   "who": "Crew on phased return",
+   "l0": 3,
+   "i0": 3,
+   "ctl": "Restriction on record; dispatcher sees it; double-crewing",
+   "l1": 1,
+   "i1": 3,
+   "owner": "Dr. A. Vance",
+   "review": "2026-11-25",
+   "acts": [],
+   "state": "Open",
+   "hist": [
+    {
+     "on": "2026-04-27",
+     "s": 9
+    },
+    {
+     "on": "2026-07-27",
+     "s": 6
+    },
+    {
+     "on": "2026-10-27",
+     "s": 3
+    }
+   ]
+  }
+ ],
+ "pol": [
+  {
+   "id": "POL-01",
+   "code": "SG-01",
+   "t": "Safeguarding adults and children",
+   "type": "Policy",
+   "owner": "Dr. Helen Price",
+   "v": 3,
+   "state": "Published",
+   "roles": "All",
+   "pub": "Dr. A. Vance",
+   "on": "2026-09-25",
+   "review": "2027-09-25",
+   "ack": {
+    "ST-0042": "2026-09-27",
+    "ST-0043": "2026-09-28",
+    "ST-0089": "2026-09-29",
+    "ST-0101": "2026-09-30",
+    "ST-0102": "2026-10-01",
+    "ST-0103": "2026-10-02",
+    "ST-0104": "2026-10-03",
+    "ST-0106": "2026-10-05",
+    "ST-0107": "2026-10-06",
+    "ST-0108": "2026-10-07",
+    "ST-0109": "2026-10-08"
+   }
+  },
+  {
+   "id": "POL-02",
+   "code": "MH-02",
+   "t": "Manual handling and powered stretchers",
+   "type": "SOP",
+   "owner": "Sarah Jenkins",
+   "v": 2,
+   "state": "Published",
+   "roles": "All",
+   "pub": "Dr. Helen Price",
+   "on": "2026-11-10",
+   "review": "2027-05-11",
+   "summary": "Adds two-person technique and daily stretcher function check (learning from EVT-2026-043).",
+   "ack": {
+    "ST-0043": "2026-11-11",
+    "ST-0101": "2026-11-12",
+    "ST-0102": "2026-11-13",
+    "ST-0104": "2026-11-14",
+    "ST-0106": "2026-11-15"
+   }
+  },
+  {
+   "id": "POL-03",
+   "code": "IPC-03",
+   "t": "Infection prevention and vehicle cleaning",
+   "type": "SOP",
+   "owner": "Dr. Helen Price",
+   "v": 4,
+   "state": "Published",
+   "roles": "All",
+   "pub": "Dr. A. Vance",
+   "on": "2026-06-27",
+   "review": "2027-06-27",
+   "ack": {
+    "ST-0042": "2026-09-27",
+    "ST-0043": "2026-09-28",
+    "ST-0089": "2026-09-29",
+    "ST-0101": "2026-09-30",
+    "ST-0102": "2026-10-01",
+    "ST-0104": "2026-10-03",
+    "ST-0105": "2026-10-04",
+    "ST-0106": "2026-10-05",
+    "ST-0107": "2026-10-06",
+    "ST-0108": "2026-10-07"
+   }
+  },
+  {
+   "id": "POL-04",
+   "code": "HR-07",
+   "t": "Preventing harassment and sexual harassment",
+   "type": "Policy",
+   "owner": "Sarah Jenkins",
+   "v": 1,
+   "state": "Draft",
+   "roles": "All",
+   "drafted": "Sarah Jenkins",
+   "summary": "New policy: duty to prevent sexual harassment (Worker Protection Act 2023), how to report, how concerns are handled.",
+   "ack": {}
+  },
+  {
+   "id": "POL-05",
+   "code": "GOV-02",
+   "t": "Duty of candour",
+   "type": "Policy",
+   "owner": "Dr. A. Vance",
+   "v": 2,
+   "state": "Published",
+   "roles": "Paramedic,Technician,Emergency care assistant",
+   "pub": "Rachel Hughes",
+   "on": "2026-04-05",
+   "review": "2027-04-05",
+   "ack": {
+    "ST-0042": "2026-09-27",
+    "ST-0043": "2026-09-28",
+    "ST-0089": "2026-09-29",
+    "ST-0101": "2026-09-30",
+    "ST-0102": "2026-10-01",
+    "ST-0103": "2026-10-02",
+    "ST-0104": "2026-10-03",
+    "ST-0105": "2026-10-04",
+    "ST-0106": "2026-10-05",
+    "ST-0107": "2026-10-06",
+    "ST-0109": "2026-10-08"
+   }
+  },
+  {
+   "id": "POL-06",
+   "code": "CI-01",
+   "t": "Medical oxygen cylinders – handling and storage",
+   "type": "Critical instruction",
+   "owner": "Dave Evans",
+   "v": 1,
+   "state": "Published",
+   "roles": "All",
+   "pub": "Dr. Helen Price",
+   "on": "2026-11-15",
+   "review": "2027-11-15",
+   "summary": "Cylinders secured in brackets at all times; check at daily inspection (near miss EVT-2026-045).",
+   "ack": {
+    "ST-0043": "2026-11-16",
+    "ST-0106": "2026-11-16"
+   }
+  }
+ ],
+ "act": {
+  "ACT-212": {
+   "id": "ACT-212",
+   "t": "Replace damaged sharps bins on RRV-01",
+   "src": "Audit AUD-099",
+   "owner": "Dave Evans",
+   "due": "2026-11-05",
+   "state": "Verified",
+   "ev": {
+    "file": "Photo_SharpsBins_RRV01.jpg",
+    "by": "Dave Evans",
+    "on": "2026-11-03 12:10"
+   },
+   "ver": {
+    "by": "Dr. Helen Price",
+    "on": "2026-11-04 09:00"
+   }
+  },
+  "ACT-215": {
+   "id": "ACT-215",
+   "t": "Update manual handling risk assessment for powered stretchers",
+   "src": "Event EVT-2026-043",
+   "owner": "Sarah Jenkins",
+   "due": "2026-11-10",
+   "state": "Open",
+   "next": "Upload the updated risk assessment"
+  },
+  "ACT-218": {
+   "id": "ACT-218",
+   "t": "Investigate missed pre-shift clean on AMB-02",
+   "src": "Audit AUD-102",
+   "owner": "Dave Evans",
+   "due": "2026-11-24",
+   "state": "Ready for verification",
+   "ev": {
+    "file": "Cleaning_Log_DeepClean_AMB02.pdf",
+    "by": "Dave Evans",
+    "on": "2026-11-17 09:15",
+    "note": "Crew had not ticked the clean; deep clean done and ATP swab 18 RLU."
+   }
+  },
+  "ACT-219": {
+   "id": "ACT-219",
+   "t": "Re-audit vehicle cleaning",
+   "src": "Audit AUD-102",
+   "owner": "Dr. Helen Price",
+   "due": "2026-12-01",
+   "state": "Open",
+   "next": "Complete re-audit AUD-103"
+  },
+  "ACT-221": {
+   "id": "ACT-221",
+   "t": "Carry-chair stair technique refresher for all crews",
+   "src": "Event EVT-2026-044",
+   "owner": "Sarah Jenkins",
+   "due": "2026-12-06",
+   "state": "Open",
+   "next": "Book sessions and record attendance"
+  }
+ },
+ "meet": [
+  {
+   "id": "GM-09",
+   "type": "Clinical governance",
+   "t": "Clinical governance – September",
+   "held": "2026-10-20",
+   "chair": "Dr. A. Vance",
+   "att": "Dr. A. Vance, Dr. Helen Price, Sarah Jenkins, Dave Evans",
+   "apol": "Rachel Hughes",
+   "quorate": true,
+   "minutes": "Reviewed Q3 incidents and the AC-07 audit plan. Agreed carry-chair refresher.",
+   "dec": [
+    {
+     "t": "Book carry-chair refresher for all crews",
+     "act": "ACT-221"
+    }
+   ]
+  },
+  {
+   "id": "GM-10",
+   "type": "Health and safety",
+   "t": "Health and safety – October",
+   "held": "2026-11-03",
+   "chair": "Rachel Hughes",
+   "att": "Rachel Hughes, Dave Evans, Dr. Helen Price",
+   "apol": "",
+   "quorate": true,
+   "minutes": "Oxygen store inspection; tail-lift reliability; car park lighting fixed.",
+   "dec": []
+  }
+ ],
+ "fpp": [
+  {
+   "id": "FPP-04",
+   "who": "Rachel Hughes",
+   "role": "Director",
+   "on": "2025-12-06",
+   "by": "Dr. A. Vance",
+   "checks": 9,
+   "out": "Fit and proper",
+   "next": "2026-12-06",
+   "ev": {
+    "0": "Passport_Hughes.pdf",
+    "1": "DBS_certificate.pdf",
+    "2": "Insolvency_search.pdf",
+    "3": "Companies_House_search.pdf"
+   }
+  },
+  {
+   "id": "FPP-05",
+   "who": "Dr. A. Vance",
+   "role": "Nominated individual",
+   "on": "2026-03-28",
+   "by": "Rachel Hughes",
+   "checks": 9,
+   "out": "Fit and proper",
+   "next": "2027-03-28",
+   "ev": {
+    "0": "Passport_Vance.pdf",
+    "1": "DBS_certificate.pdf",
+    "2": "Insolvency_search.pdf",
+    "3": "Companies_House_search.pdf"
+   }
+  },
+  {
+   "id": "FPP-02",
+   "who": "Rachel Hughes",
+   "role": "Director",
+   "on": "2024-11-30",
+   "by": "Dr. A. Vance",
+   "checks": 9,
+   "out": "Fit and proper",
+   "next": "2025-11-30",
+   "ev": {
+    "0": "Passport_Hughes.pdf",
+    "1": "DBS_certificate.pdf",
+    "2": "Insolvency_search.pdf",
+    "3": "Companies_House_search.pdf"
+   }
+  }
+ ],
+ "su": [
+  {
+   "id": "SU-07",
+   "cat": "Bullying",
+   "text": "Repeated belittling comments from a colleague on night shifts.",
+   "anon": true,
+   "code": "K7Q-4M2",
+   "on": "2026-11-03",
+   "state": "Being looked into",
+   "ack": "2026-11-04",
+   "handler": "Sarah Jenkins",
+   "notes": [
+    {
+     "on": "2026-11-04",
+     "t": "Acknowledged via progress code; asked what would help."
+    }
+   ],
+   "fb": "We have started looking into this and will update you through your code."
+  },
+  {
+   "id": "SU-08",
+   "cat": "Patient safety",
+   "text": "Carry chair stair technique not taught to new bank staff.",
+   "anon": false,
+   "by": "Lee Davies",
+   "on": "2026-11-10",
+   "state": "Acknowledged",
+   "ack": "2026-11-11",
+   "handler": "Sarah Jenkins",
+   "notes": [],
+   "fb": "Thank you – linked to action ACT-221."
+  },
+  {
+   "id": "SU-09",
+   "cat": "Sexual harassment",
+   "text": "A patient’s relative made repeated sexual comments to a crew member at pickup.",
+   "anon": true,
+   "code": "P3X-9TD",
+   "on": "2026-11-15",
+   "state": "Waiting to be acknowledged",
+   "handler": "",
+   "notes": [],
+   "about3p": true
+  },
+  {
+   "id": "SU-05",
+   "cat": "Staff safety",
+   "text": "Station car park lighting broken – unsafe at night.",
+   "anon": false,
+   "by": "Grace Bennett",
+   "on": "2026-08-30",
+   "state": "Closed",
+   "ack": "2026-08-31",
+   "handler": "Sarah Jenkins",
+   "notes": [],
+   "fb": "Lighting repaired 7 Sep. Thank you for raising it.",
+   "det": true
+  }
+ ],
+ "guardian": "Sarah Jenkins",
+ "cmp": [
+  {
+   "id": "CMP-031",
+   "on": "2026-11-09",
+   "via": "Email",
+   "pt": "PT-4402",
+   "cat": "Timeliness",
+   "sum": "Pickup for dialysis 50 minutes late; patient missed start of session.",
+   "state": "Investigating",
+   "ack": "2026-11-10",
+   "lead": "Dr. Helen Price",
+   "consent": true,
+   "pref": "Email"
+  },
+  {
+   "id": "CMP-032",
+   "on": "2026-11-16",
+   "via": "Phone",
+   "pt": "PT-4471",
+   "cat": "Staff attitude",
+   "sum": "Relative felt the crew were rushed and did not explain the plan.",
+   "state": "Received",
+   "lead": "",
+   "consent": false,
+   "pref": "Letter"
+  },
+  {
+   "id": "CMP-027",
+   "on": "2026-09-25",
+   "via": "Letter",
+   "pt": "PT-4310",
+   "cat": "Property",
+   "sum": "Walking frame left at the hospital.",
+   "state": "Closed",
+   "ack": "2026-09-27",
+   "resp": "2026-10-15",
+   "out": "Upheld",
+   "learning": "Add “belongings and aids” to the handover checklist.",
+   "share": true
+  }
+ ],
+ "cmpT": {
+  "ack": 3,
+  "resp": 20
+ },
+ "compl": [
+  {
+   "id": "CPL-12",
+   "on": "2026-11-13",
+   "about": "Crew of AMB-01",
+   "text": "Kind and patient with my mother on the stairs.",
+   "theme": "Kindness"
+  },
+  {
+   "id": "CPL-13",
+   "on": "2026-11-14",
+   "about": "Control room",
+   "text": "Kept us informed when the vehicle was delayed.",
+   "theme": "Communication"
+  }
+ ],
+ "fft": [
+  [
+   "2026-06",
+   112,
+   94
+  ],
+  [
+   "2026-07",
+   121,
+   96
+  ],
+  [
+   "2026-08",
+   98,
+   92
+  ],
+  [
+   "2026-09",
+   105,
+   95
+  ],
+  [
+   "2026-10",
+   117,
+   93
+  ],
+  [
+   "2026-11",
+   64,
+   90
+  ]
+ ],
+ "sgr": [
+  {
+   "id": "SGR-14",
+   "on": "2026-11-06",
+   "who": "Adult",
+   "cat": "Self-neglect",
+   "pt": "PT-4390",
+   "by": "Alex Morgan",
+   "to": "Hertfordshire County Council – adult safeguarding",
+   "ref": "HCC-ASC-77812",
+   "state": "Referred – awaiting outcome",
+   "evt": "",
+   "cqc": false
+  },
+  {
+   "id": "SGR-15",
+   "on": "2026-11-14",
+   "who": "Adult",
+   "cat": "Financial or material abuse",
+   "pt": "PT-4462",
+   "by": "Lee Davies",
+   "to": "",
+   "ref": "",
+   "state": "Raised internally",
+   "evt": "",
+   "cqc": false
+  },
+  {
+   "id": "SGR-11",
+   "on": "2026-08-29",
+   "who": "Child",
+   "cat": "Neglect",
+   "pt": "PT-4201",
+   "by": "Grace Bennett",
+   "to": "Hertfordshire Children’s Services",
+   "ref": "HCS-55120",
+   "state": "Closed – outcome received",
+   "out": "Family support plan put in place",
+   "cqc": false
+  }
+ ],
+ "ntf": [
+  {
+   "id": "NTF-07",
+   "type": "Death of a person using the service",
+   "reg": "Reg 16",
+   "on": "2026-10-08",
+   "about": "PT-4277 – died during transfer (expected, end of life)",
+   "state": "Submitted",
+   "sub": "2026-10-08",
+   "ref": "CQC-NTF-998871",
+   "by": "Dr. A. Vance"
+  },
+  {
+   "id": "NTF-08",
+   "type": "Registered Manager absence (28 days or more)",
+   "reg": "Reg 14",
+   "on": "2026-11-15",
+   "about": "Planned absence 27 Dec – 31 Jan; Rachel Hughes to manage",
+   "state": "Draft",
+   "due": "2026-11-29",
+   "by": "Dr. A. Vance"
+  }
+ ],
+ "brc": [
+  {
+   "id": "BR-05",
+   "aware": "2026-11-16",
+   "at": "16:20",
+   "what": "Journey sheet with two patient references emailed to the wrong NHS trust address.",
+   "n": 2,
+   "risk": "Low",
+   "state": "Assessed – not reportable",
+   "decision": "Recipient is an NHS organisation, confirmed deletion within an hour; low risk to individuals.",
+   "by": "Dr. Helen Price"
+  },
+  {
+   "id": "BR-06",
+   "aware": "2026-11-17",
+   "at": "08:05",
+   "what": "Crew tablet left unlocked in a hospital corridor for about 10 minutes.",
+   "n": 0,
+   "risk": "Not yet assessed",
+   "state": "Being assessed",
+   "by": "Dr. Helen Price"
+  }
+ ],
+ "sar": [
+  {
+   "id": "SAR-09",
+   "on": "2026-10-29",
+   "who": "Former patient",
+   "idv": true,
+   "state": "Collecting records",
+   "due": "2026-11-29"
+  },
+  {
+   "id": "SAR-10",
+   "on": "2026-11-15",
+   "who": "Member of staff",
+   "idv": false,
+   "state": "Waiting for ID",
+   "due": "2026-12-16"
+  }
+ ],
+ "dspt": {
+  "year": "2026-27",
+  "due": "2027-07-26",
+  "last": "2026-07-20",
+  "lastOut": "Standards met",
+  "assert": [
+   [
+    "Staff data security training at 95% or more",
+    false
+   ],
+   [
+    "Data protection officer named",
+    true
+   ],
+   [
+    "Information asset register reviewed this year",
+    true
+   ],
+   [
+    "Business continuity plan tested this year",
+    false
+   ],
+   [
+    "Unsupported software removed",
+    true
+   ],
+   [
+    "Breach reporting process tested",
+    true
+   ],
+   [
+    "Data processing contracts in place",
+    true
+   ],
+   [
+    "Backups tested by restore",
+    false
+   ]
+  ]
+ },
+ "kpi": [
+  [
+   "2026-06",
+   812,
+   93.1,
+   6,
+   22
+  ],
+  [
+   "2026-07",
+   845,
+   91.8,
+   9,
+   24
+  ],
+  [
+   "2026-08",
+   802,
+   89.4,
+   11,
+   27
+  ],
+  [
+   "2026-09",
+   780,
+   90.6,
+   8,
+   25
+  ],
+  [
+   "2026-10",
+   866,
+   92.2,
+   7,
+   23
+  ],
+  [
+   "2026-11",
+   598,
+   94,
+   4,
+   19
+  ]
+ ],
+ "kpiT": {
+  "ontime": 90,
+  "aborts": 1,
+  "wait": 30
+ },
+ "bcp": [
+  {
+   "id": "BCP-1",
+   "t": "Two vehicles off the road at once",
+   "steps": "Move journeys by priority (renal, discharge, outpatients); call Bluebird Ambulance (mutual aid, 2 vehicles within 2h); tell commissioners of delays over 60 min.",
+   "last": "2026-05-14",
+   "out": "Passed – 2 journeys late",
+   "owner": "Dave Evans"
+  },
+  {
+   "id": "BCP-2",
+   "t": "IT system or internet outage",
+   "steps": "Switch to printed day sheet (exported 18:00 nightly); radio and mobile phones; key in afterwards with original times.",
+   "last": "2026-06-29",
+   "out": "Passed",
+   "owner": "Dr. A. Vance"
+  },
+  {
+   "id": "BCP-3",
+   "t": "30% of crew off sick",
+   "steps": "Bank and agency first; cancel non-urgent outpatient journeys with 24h notice; managers who hold licences drive.",
+   "last": "2025-12-16",
+   "out": "Actions raised",
+   "owner": "Sarah Jenkins"
+  },
+  {
+   "id": "BCP-4",
+   "t": "Fuel shortage",
+   "steps": "Priority fuel card agreement; keep tanks above half; group journeys.",
+   "last": "",
+   "out": "",
+   "owner": "Dave Evans"
+  }
+ ],
+ "bcpLog": [
+  {
+   "on": "2026-05-14",
+   "p": "BCP-1",
+   "how": "Tabletop exercise",
+   "out": "Passed – 2 journeys late",
+   "by": "Dave Evans"
+  },
+  {
+   "on": "2026-06-29",
+   "p": "BCP-2",
+   "how": "Live test (2h offline)",
+   "out": "Passed",
+   "by": "Dr. A. Vance"
+  },
+  {
+   "on": "2025-12-16",
+   "p": "BCP-3",
+   "how": "Tabletop exercise",
+   "out": "Actions raised",
+   "by": "Sarah Jenkins"
+  }
+ ],
+ "loc": [
+  {
+   "id": "LOC-1",
+   "n": "Watford",
+   "addr": "Station, Example Road, Watford",
+   "reg": "Patient transport services; Transport services, triage and medical advice provided remotely",
+   "rm": "Dr. A. Vance"
+  }
+ ],
+ "sop": [
+  {
+   "v": 3,
+   "on": "2025-12-27",
+   "by": "Dr. A. Vance",
+   "pub": "Rachel Hughes",
+   "state": "Published",
+   "sum": "Patient transport and remote triage from Watford; aims and objectives; registered manager; complaints.",
+   "ntf": "NTF-03"
+  }
+ ],
+ "ctr": [
+  {
+   "id": "CTR-01",
+   "n": "LiftSafe Engineering Ltd",
+   "work": "LOLER thorough examinations",
+   "ins": "2027-04-26",
+   "comp": "SAFed member; engineer cards checked",
+   "by": "Dave Evans",
+   "vby": "Dr. A. Vance",
+   "state": "Approved"
+  },
+  {
+   "id": "CTR-02",
+   "n": "MedEquip Services",
+   "work": "Defibrillator and suction servicing, calibration",
+   "ins": "2026-12-26",
+   "comp": "Manufacturer-approved engineer",
+   "by": "Dave Evans",
+   "vby": "Dr. Helen Price",
+   "state": "Approved"
+  },
+  {
+   "id": "CTR-03",
+   "n": "Watford Fleet Repairs",
+   "work": "Vehicle servicing and repairs",
+   "ins": "2026-11-10",
+   "comp": "IMI accredited",
+   "by": "Dave Evans",
+   "state": "Approved"
+  }
+ ],
+ "vis": [
+  {
+   "id": "VIS-801",
+   "n": "P. Okafor",
+   "from": "LiftSafe Engineering Ltd",
+   "why": "LOLER on AMB-03 tail-lift",
+   "in": "09:10",
+   "out": "",
+   "host": "Dave Evans",
+   "on": "2026-11-17"
+  }
+ ],
+ "ret": [
+  {
+   "id": "RT-1",
+   "rec": "Audit log",
+   "keep": "8 years",
+   "then": "List for review",
+   "state": "Approved",
+   "by": "Dr. A. Vance",
+   "appr": "Rachel Hughes"
+  },
+  {
+   "id": "RT-2",
+   "rec": "Staff files (leavers)",
+   "keep": "6 years after leaving",
+   "then": "List for review",
+   "state": "Approved",
+   "by": "Sarah Jenkins",
+   "appr": "Dr. A. Vance"
+  },
+  {
+   "id": "RT-3",
+   "rec": "Incident records",
+   "keep": "10 years",
+   "then": "List for review",
+   "state": "Approved",
+   "by": "Dr. Helen Price",
+   "appr": "Dr. A. Vance"
+  },
+  {
+   "id": "RT-4",
+   "rec": "Vehicle check records",
+   "keep": "3 years",
+   "then": "Delete",
+   "state": "Change pending",
+   "by": "Dave Evans",
+   "pend": "5 years",
+   "why": "Align with insurer requirement"
+  },
+  {
+   "id": "RT-5",
+   "rec": "DBS certificates",
+   "keep": "6 months after decision",
+   "then": "Delete",
+   "state": "Approved",
+   "by": "Sarah Jenkins",
+   "appr": "Dr. A. Vance"
+  }
+ ],
+ "esc": {
+  "Staff check / document": {
+   "warn": 30,
+   "lead": 3,
+   "rm": 7,
+   "email": true
+  },
+  "Vehicle document": {
+   "warn": 30,
+   "lead": 1,
+   "rm": 3,
+   "email": true
+  },
+  "Defect review date": {
+   "warn": 1,
+   "lead": 1,
+   "rm": 2,
+   "email": true
+  },
+  "Action": {
+   "warn": 7,
+   "lead": 3,
+   "rm": 7,
+   "email": true
+  },
+  "Audit": {
+   "warn": 7,
+   "lead": 3,
+   "rm": 7,
+   "email": false
+  },
+  "Incident stage deadline": {
+   "warn": 2,
+   "lead": 1,
+   "rm": 3,
+   "email": true
+  },
+  "Duty of candour step": {
+   "warn": 3,
+   "lead": 0,
+   "rm": 1,
+   "email": true
+  },
+  "Supervision": {
+   "warn": 7,
+   "lead": 7,
+   "rm": 14,
+   "email": false
+  },
+  "Premises item": {
+   "warn": 14,
+   "lead": 3,
+   "rm": 7,
+   "email": true
+  }
+ },
+ "dep": [
+  {
+   "id": "DP-3",
+   "lead": "rm",
+   "dep": "dir",
+   "from": "2026-11-22",
+   "to": "2026-11-26",
+   "covers": "Approvals, returns to service and incident closure",
+   "by": "Dr. A. Vance",
+   "on": "2026-11-10 10:00"
+  }
+ ],
+ "cqA": {
+  "0-0": "P",
+  "0-1": "P",
+  "0-2": "P",
+  "0-3": "P",
+  "0-4": "A",
+  "0-5": "P",
+  "0-6": "P",
+  "0-7": "P",
+  "0-8": "",
+  "0-9": "P",
+  "0-10": "N",
+  "0-11": "N",
+  "0-12": "N",
+  "0-13": "N",
+  "0-14": "N",
+  "1-0": "A",
+  "1-1": "F",
+  "1-2": "",
+  "1-3": "P",
+  "1-4": "P",
+  "1-5": "P",
+  "1-6": "P",
+  "1-7": "P",
+  "1-8": "P",
+  "1-9": "P",
+  "1-10": "",
+  "1-11": "P",
+  "1-12": "A",
+  "1-13": "",
+  "2-0": "P",
+  "2-1": "P",
+  "2-2": "P",
+  "2-3": "P",
+  "2-4": "P",
+  "2-5": "",
+  "2-6": "",
+  "2-7": "P",
+  "2-8": "P",
+  "2-9": "P",
+  "2-10": "P",
+  "3-0": "P",
+  "3-1": "A",
+  "3-2": "P",
+  "3-3": "P",
+  "3-4": "P",
+  "3-5": "P",
+  "3-6": "P",
+  "3-7": "P",
+  "3-8": "",
+  "3-9": "",
+  "3-10": "P",
+  "3-11": "P"
+ },
+ "cqSub": null,
+ "rules": {
+  "restH": {
+   "v": 11,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "weekH": {
+   "v": 48,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "shiftH": {
+   "v": 12,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "driveH": {
+   "v": 10,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "restMode": {
+   "v": "warn",
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "ipcBlock": {
+   "v": true,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "cdScope": {
+   "v": "stock",
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "cmpAck": {
+   "v": 3,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "cmpResp": {
+   "v": 20,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "dvlaM": {
+   "v": 6,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "dvlaHiPts": {
+   "v": 6,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "dvlaHiM": {
+   "v": 3,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  },
+  "dvlaRestr": {
+   "v": 9,
+   "by": "Product owner",
+   "on": "2026-12-09",
+   "conf": true
+  }
+ },
+ "ruleProp": [],
+ "secure": {
+  "idle": 15,
+  "step": true
+ },
+ "sector": "ambulance",
+ "stageT": {
+  "Candidate": 5,
+  "Checks in progress": 21,
+  "Ready for review": 3,
+  "Approved for role": 7
+ }
+}

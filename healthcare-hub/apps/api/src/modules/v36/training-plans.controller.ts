@@ -8,6 +8,7 @@ import { audit, body } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { day, idPipe, nextRegisterCode, ymd } from './shared.js';
+import { nextV36Code } from './sync/staff-lib.js';
 
 const VIEW = 'staff.profile.view_basic';
 const MANAGE = 'staff.profile.manage';
@@ -152,7 +153,7 @@ export class TrainingPlansController {
       if (input.inviteDue) {
         invited = (await dueStaffIds(tx, input.courseCode)).slice(0, input.places);
       }
-      const code = await nextRegisterCode(tx, hub.orgId as string, 'TP', 1);
+      const code = await nextV36Code(tx, hub.orgId as string, 'TP', 'training_plan', 2);
       const [row] = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO training_plan (
           organisation_id, code, course_code, planned_on, places, invited_staff_ids, created_by

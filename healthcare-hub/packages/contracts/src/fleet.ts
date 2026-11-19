@@ -471,6 +471,8 @@ export const VdiSubmit = z.strictObject({
   odometer: z.number().int().min(0).max(2_000_000),
   capturedAt: isoDateTime,
   notes: z.string().trim().max(1000).optional(),
+  /** v36: a failed non-critical item is raised as a Major defect (default Minor). */
+  failedSeverity: z.enum(['MINOR', 'MAJOR']).optional(),
   results: z
     .array(
       z.strictObject({
@@ -568,6 +570,10 @@ export const DefectCreate = z
     /** Set by the crew app's offline outbox: a retried submission returns the original defect. */
     clientSubmissionId: uuid.optional(),
     photoEvidenceItemIds: z.array(uuid).max(6).default([]),
+    /** v36 "Anything the repairer should know". */
+    note: z.string().trim().max(1000).optional(),
+    /** v36 counts photos taken on the phone (the files themselves are not sent). */
+    photoCount: z.number().int().min(0).max(50).optional(),
   })
   .refine((d) => !!d.vehicleId !== !!d.assetId, 'Give either a vehicle or an asset');
 export const DefectPatch = z

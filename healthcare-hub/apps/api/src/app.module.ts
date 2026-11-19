@@ -73,10 +73,13 @@ import {
   StatementOfPurposeController,
 } from './modules/v36/governance-records.controller.js';
 import { RecordsController } from './modules/v36/records.controller.js';
+import { V36WorkspaceController } from './modules/v36/workspace.controller.js';
+import { V36SyncController } from './modules/v36/sync.controller.js';
 import { CqcSelfAuditController } from './modules/v36/cqc-self-audit.controller.js';
 import { WorkforceChecksController } from './modules/v36/workforce-checks.controller.js';
 import { TrainingPlansController } from './modules/v36/training-plans.controller.js';
 import { FleetCareController } from './modules/v36/fleet-care.controller.js';
+import { StaffChecksController } from './modules/v36/staff-checks.controller.js';
 import { LiveChanges } from './modules/live/live.service.js';
 import { BLOB_STORE, LocalBlobStore, type BlobStore } from './storage/blob-store.js';
 import { BasicScanner, SCANNER, type Scanner } from './storage/scanner.js';
@@ -122,10 +125,13 @@ export const CONTROLLERS = [
   LocalAuthAdminController,
   // v36 registers (17 Nov 2026)
   RecordsController,
+  V36WorkspaceController,
+  V36SyncController,
   CqcSelfAuditController,
   WorkforceChecksController,
   TrainingPlansController,
   FleetCareController,
+  StaffChecksController,
   SafeguardingReferralsController,
   VehicleAccidentsController,
   VehicleStockController,

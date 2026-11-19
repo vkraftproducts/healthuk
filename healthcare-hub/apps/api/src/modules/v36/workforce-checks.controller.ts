@@ -24,6 +24,7 @@ import {
   ymd,
   type EscalationContext,
 } from './shared.js';
+import { nextV36Code } from './sync/staff-lib.js';
 
 const VIEW = 'staff.profile.view_basic';
 const MANAGE = 'staff.profile.manage';
@@ -188,7 +189,7 @@ export class WorkforceChecksController {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       if (input.confirmationExpiresOn < input.confirmationReceivedOn)
         throw new HubError('VALIDATION_FAILED', 400, 'The confirmation cannot expire before it was received');
-      const code = await nextRegisterCode(tx, hub.orgId as string, 'AG', 1);
+      const code = await nextV36Code(tx, hub.orgId as string, 'AG', 'agency_worker', 2);
       const [row] = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO agency_worker (
           organisation_id, code, name, agency, role, confirmation_items,

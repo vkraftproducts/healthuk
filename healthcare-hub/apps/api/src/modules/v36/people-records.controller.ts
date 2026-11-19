@@ -37,6 +37,7 @@ import {
   nextRegisterCode,
   ymd,
 } from './shared.js';
+import { nextV36Code } from './sync/staff-lib.js';
 
 type ReviewRow = Prisma.StaffReviewGetPayload<object>;
 type AbsenceRow = Prisma.StaffAbsenceGetPayload<object>;
@@ -107,7 +108,7 @@ export class StaffReviewsController {
       const r = await tx.staffReview.create({
         data: {
           organisationId: hub.orgId as string,
-          code: await nextRegisterCode(tx, hub.orgId as string, 'REV'),
+          code: await nextV36Code(tx, hub.orgId as string, 'REV', 'staff_review'),
           staffId: s.id,
           kind: input.kind,
           dueOn: day(input.dueOn),
@@ -182,7 +183,12 @@ export class StaffReviewsController {
         await tx.staffReview.create({
           data: {
             organisationId: r.organisationId,
-            code: await nextRegisterCode(tx, r.organisationId, 'REV'),
+            code: await nextV36Code(
+              tx,
+              r.organisationId,
+              next.kind === 'APPRAISAL' ? 'APR' : 'REV',
+              'staff_review',
+            ),
             staffId: r.staffId,
             kind: next.kind,
             dueOn: day(next.dueOn),
@@ -364,7 +370,7 @@ export class StaffAbsencesController {
         const open = await tx.staffAbsence.count({ where: { staffId: s.id, lastDay: null } });
         if (open) throw new HubError('CONFLICT', 409, 'This person already has an open absence');
       }
-      const code = await nextRegisterCode(tx, hub.orgId as string, 'ABS');
+      const code = await nextV36Code(tx, hub.orgId as string, 'ABS', 'staff_absence');
       let offRestrictionId: string | null = null;
       if (!input.lastDay) {
         const r = await tx.staffRestriction.create({
@@ -568,7 +574,7 @@ export class LeaversController {
       const l = await tx.leaverRecord.create({
         data: {
           organisationId: hub.orgId as string,
-          code: await nextRegisterCode(tx, hub.orgId as string, 'LV'),
+          code: await nextV36Code(tx, hub.orgId as string, 'LV', 'leaver_record', 2),
           staffId: s.id,
           lastDay: day(input.lastDay),
           reason: input.reason,
