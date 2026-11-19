@@ -22,7 +22,7 @@ export interface ApiClient {
   /** Generic authenticated calls for the admin screens (responses are validated by the caller). */
   get(path: string, orgId: string | null): Promise<unknown>;
   send(
-    method: 'POST' | 'PATCH' | 'DELETE',
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     orgId: string | null,
     body: unknown,

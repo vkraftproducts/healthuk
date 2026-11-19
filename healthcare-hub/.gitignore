@@ -9,3 +9,7 @@ packages/db/src/generated
 .data
 test-results
 playwright-report
+
+# Generated from docs/design/healthcare-hub-uk-v36.html by apps/web/scripts/build-v36-app.mjs
+apps/web/public/v36/
+.stack.env

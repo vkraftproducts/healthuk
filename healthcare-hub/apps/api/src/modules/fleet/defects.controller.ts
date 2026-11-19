@@ -19,7 +19,7 @@ import {
   refreshVehicleStatus,
   resolveDefectAlert,
 } from '@hub/domain';
-import { canReleaseVehicle, londonDate } from '@hub/rules';
+import { addDays, canReleaseVehicle, londonDate } from '@hub/rules';
 import {
   DefectCreate,
   DefectListQuery,
@@ -117,6 +117,13 @@ export class DefectsController {
         input.severity,
         discovered,
       );
+      // v36: review in 2 days (critical), 7 (major) or 14 (minor).
+      ownership.reviewBy = day(
+        addDays(
+          londonDate(discovered),
+          input.severity === 'CRITICAL' ? 2 : input.severity === 'MAJOR' ? 7 : 14,
+        ),
+      );
       const d = await tx.defect.create({
         data: {
           organisationId: hub.orgId as string,
@@ -135,6 +142,10 @@ export class DefectsController {
         },
         include: { release: true },
       });
+      if (input.note || input.photoCount !== undefined)
+        await tx.$executeRaw`
+          UPDATE defect SET report_note = ${input.note || null}, photo_count = ${input.photoCount ?? null}
+           WHERE id = ${d.id}::uuid`;
       let affected: string[] = [];
       if (stopUse) {
         await raiseDefectAlert(tx, d, subject.label);
@@ -218,7 +229,13 @@ export class DefectsController {
           422,
           'A critical defect cannot be downgraded; release it after repair',
         );
-      if (!stopUse && severity === 'MINOR' && !(input.repairDeadline ?? d.repairDeadline))
+      // Asked when a defect is classified as minor (not when only the owner or review date move).
+      if (
+        input.severity !== undefined &&
+        !stopUse &&
+        severity === 'MINOR' &&
+        !(input.repairDeadline ?? d.repairDeadline)
+      )
         throw new HubError(
           'VALIDATION_FAILED',
           400,
@@ -254,6 +271,9 @@ export class DefectsController {
         },
       });
       if (r.count === 0) throw staleOrNotFound(true);
+      // v36 keeps what was repaired (sign-off) apart from the plan; repairNotes stays the full log.
+      if (input.status === 'REPAIRED' && input.repairNotes)
+        await tx.$executeRaw`UPDATE defect SET repair_work = ${input.repairNotes} WHERE id = ${id}::uuid`;
       const u = await tx.defect.findUniqueOrThrow({ where: { id }, include: { release: true } });
       let affected: string[] = [];
       if (stopUse && !d.stopUse) {
@@ -298,6 +318,12 @@ export class DefectsController {
           ),
         },
       });
+      // v36 detail shows the last send-back (by whom, when, why); the sign-off it replaced goes.
+      await tx.$executeRaw`
+        UPDATE defect SET repair_work = NULL, job_sheet_ref = NULL, sent_back_at = now(),
+               sent_back_by = ${hub.user.id}::uuid,
+               sent_back_reason = ${input.reason}
+         WHERE id = ${id}::uuid`;
       if (d.vehicleId) await refreshVehicleStatus(tx, d.vehicleId);
       await audit(this.db, tx, hub, {
         action: 'fleet.defect.reopen',
