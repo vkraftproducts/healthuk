@@ -24,7 +24,7 @@ import { audit, body } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 
 const deviceDto = (d: {
   id: string;

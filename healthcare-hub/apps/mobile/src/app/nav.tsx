@@ -6,7 +6,8 @@ export type Route =
   | { name: 'cleaning' }
   | { name: 'job'; id: string }
   | { name: 'defect'; jobId?: string }
-  | { name: 'fuel' };
+  | { name: 'fuel' }
+  | { name: 'rota' };
 
 export interface Nav {
   tab: Tab;

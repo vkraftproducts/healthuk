@@ -1,134 +1,34 @@
-import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
 import { supportBannerText } from '@hub/contracts';
 import { StatusBadge } from '@hub/ui';
-import { BrandMark } from '../brand.js';
+import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
+import { Dropdown, type MenuProps } from 'antd';
+import { useCallback, useState } from 'react';
+import { BRAND } from '../brand.js';
 import { fmtDateTime } from '../components.js';
-import { NAV_ITEMS, canSee } from '../nav.js';
+import { NAV_MODULES, canSee, modulePathFor, navItemFor } from '../nav.js';
+import { HeadSlotsCtx, Ms, type HeadSlots } from '../v36/ui.js';
 import { useList, useOne } from '../pages/settings/hooks.js';
 import { useApp } from './AppContext.js';
+import { readTheme, toggleTheme, type ThemeMode } from './theme.js';
 
-const londonDate = new Intl.DateTimeFormat('en-GB', {
-  dateStyle: 'medium',
-  timeZone: 'Europe/London',
-});
-const londonTime = new Intl.DateTimeFormat('en-GB', {
-  timeStyle: 'short',
-  timeZone: 'Europe/London',
-});
-
-/** Sector pack -> service name shown in the breadcrumb (wireframe 01). */
+/** Sector pack -> service name shown in the in-page breadcrumb. */
 const SERVICE_NAME: Record<string, string> = {
   ambulance: 'Ambulance service',
   dental: 'Dental practice',
   care_home: 'Care home',
 };
 
-const ICON_PATHS: Record<string, ReactNode> = {
-  '/': (
-    <>
-      <rect x="3" y="3" width="7" height="9" rx="1.5" />
-      <rect x="14" y="3" width="7" height="5" rx="1.5" />
-      <rect x="14" y="12" width="7" height="9" rx="1.5" />
-      <rect x="3" y="16" width="7" height="5" rx="1.5" />
-    </>
-  ),
-  '/inspection': (
-    <>
-      <path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z" />
-      <path d="M8 6H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-2" />
-      <path d="m9 14 2 2 4-4" />
-    </>
-  ),
-  '/me': (
-    <>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" />
-    </>
-  ),
-  '/report': (
-    <>
-      <path d="M12 3 2 20h20z" />
-      <path d="M12 10v4M12 17h.01" />
-    </>
-  ),
-  '/alerts': (
-    <>
-      <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z" />
-      <path d="M10 21a2 2 0 0 0 4 0" />
-    </>
-  ),
-  '/staff': (
-    <>
-      <circle cx="9" cy="8" r="3.5" />
-      <path d="M2.5 20c0-3.5 2.9-5.5 6.5-5.5s6.5 2 6.5 5.5" />
-      <circle cx="17" cy="9" r="2.8" />
-      <path d="M17 14.5c2.8 0 4.5 1.6 4.5 4.5" />
-    </>
-  ),
-  '/vehicles': (
-    <>
-      <path d="M3 17V8a1 1 0 0 1 1-1h9v10" />
-      <path d="M13 10h4l3 3.5V17h-1.5M13 17h-3" />
-      <circle cx="7.5" cy="17.5" r="2" />
-      <circle cx="16.5" cy="17.5" r="2" />
-      <path d="M8 9.5v3.5M6.25 11.25h3.5" />
-    </>
-  ),
-  '/compliance': (
-    <>
-      <path d="M12 3 20 6v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z" />
-      <path d="m8.5 12 2.5 2.5 4.5-5" />
-    </>
-  ),
-  '/premises': (
-    <>
-      <path d="M4 21V6l8-3 8 3v15" />
-      <path d="M9 21v-5h6v5M8 10h.01M12 10h.01M16 10h.01M8 13h.01M12 13h.01M16 13h.01" />
-    </>
-  ),
-  '/planner': (
-    <>
-      <rect x="3" y="5" width="18" height="16" rx="2" />
-      <path d="M3 10h18M8 3v4M16 3v4" />
-      <path d="m9 15 2 2 4-4" />
-    </>
-  ),
-  '/reports': <path d="M4 20V10M10 20V4M16 20v-7M21 20H3" />,
-  '/speak-up': (
-    <>
-      <path d="M21 12a8 8 0 0 1-11.8 7L4 20l1.2-4.4A8 8 0 1 1 21 12z" />
-      <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
-    </>
-  ),
-  '/settings': (
-    <>
-      <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
-      <circle cx="16" cy="7" r="2" />
-      <circle cx="8" cy="17" r="2" />
-    </>
-  ),
+/** v36 module icons (Material Symbols names, as in the v36 side nav). */
+const MODULE_ICON: Record<string, string> = {
+  '/': 'space_dashboard',
+  '/staff': 'group',
+  '/vehicles': 'ambulance',
+  '/compliance': 'verified_user',
+  '/premises': 'domain',
+  '/planner': 'calendar_month',
+  '/reports': 'analytics',
+  '/settings': 'settings',
 };
-
-function NavIcon({ to }: { to: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-      className="shrink-0"
-    >
-      {ICON_PATHS[to] ?? <circle cx="12" cy="12" r="8" />}
-    </svg>
-  );
-}
 
 const initials = (name: string) =>
   name
@@ -138,7 +38,6 @@ const initials = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join('');
 
-/** "Exora International Ltd / London / Ambulance service" from the user's scope. */
 function useScope(orgId: string | null) {
   const { me } = useApp();
   const mine = me.memberships.filter((m) => m.organisationId === orgId);
@@ -156,89 +55,130 @@ function useScope(orgId: string | null) {
   return { location, service, role: mine[0]?.roleName ?? null, packs: known ?? null };
 }
 
+/**
+ * App chrome matching Healthcare Hub UK v36 HTML exactly: the light side nav (brand, eight modules
+ * with counts), the top bar (search, alerts, the signed-in person) and the content area whose head
+ * band holds each page's title and tabs (see PageHeader and Tabs in components.tsx).
+ */
 export function Shell() {
-  const { me, orgId, setOrgId, refresh, lastUpdated, sourceOk, live, signOut } = useApp();
+  const { me, orgId, setOrgId, refresh, sourceOk, live, signOut } = useApp();
+  const [mode, setMode] = useState<ThemeMode>(() => readTheme());
+  const [navOpen, setNavOpen] = useState(false);
+  const [slots, setSlots] = useState<HeadSlots>({ top: null, tabs: null });
+  const topRef = useCallback(
+    (el: HTMLDivElement | null) => setSlots((s) => (s.top === el ? s : { ...s, top: el })),
+    [],
+  );
+  const tabsRef = useCallback(
+    (el: HTMLDivElement | null) => setSlots((s) => (s.tabs === el ? s : { ...s, tabs: el })),
+    [],
+  );
   const orgs = [
     ...new Map(me.memberships.map((m) => [m.organisationId, m.organisationName])).entries(),
   ];
   const activeOrg = orgs.find(([id]) => id === orgId)?.[1];
   const scope = useScope(orgId);
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const page = NAV_ITEMS.filter((n) => n.to !== '/').find(
-    (n) => path === n.to || path.startsWith(`${n.to}/`),
-  );
-  const crumbs = [activeOrg ?? 'No organisation', scope.location, scope.service];
-  if (page) crumbs.push(page.label);
+  const modulePath = modulePathFor(path);
   const support = me.support ?? null;
   const alerts = useOne<{ open: number; critical: number }>(
     orgId && !support ? '/api/v1/alerts/count' : null,
   );
+
+  const brandSubtitle = [activeOrg, scope.location !== 'All locations' ? scope.location : null]
+    .filter(Boolean)
+    .join(' · ');
+  const items = NAV_MODULES.filter((item) => canSee(item, me.permissions, scope.packs));
+
+  // v36 breadcrumb: organisation / location / service / page; the last crumb goes back.
+  const page = navItemFor(path);
   const router = useRouter();
-  // Opened directly (nothing to go back to): the dashboard is the way out.
   const goBack = () =>
     router.history.canGoBack() ? router.history.back() : void router.navigate({ to: '/' });
+  const pageLabel =
+    page && page.to !== '/'
+      ? page.label
+      : modulePath === '/' && !me.permissions.includes('dashboard.view')
+        ? 'Home'
+        : (NAV_MODULES.find((m) => m.to === modulePath)?.label ?? 'Dashboard');
+  const crumbs = [activeOrg ?? 'No organisation', scope.location, scope.service];
+  if (modulePath !== '/' || pageLabel === 'Home' || (page && page.to !== '/'))
+    crumbs.push(pageLabel);
+
+  const meMenu: MenuProps = {
+    items: [
+      { key: 'theme', label: mode === 'dark' ? 'Light mode' : 'Dark mode' },
+      { key: 'refresh', label: 'Refresh data' },
+      ...(signOut ? [{ type: 'divider' as const }, { key: 'signout', label: 'Sign out' }] : []),
+    ],
+    onClick: ({ key }) => {
+      if (key === 'theme') setMode(toggleTheme());
+      else if (key === 'refresh') refresh();
+      else if (key === 'signout') signOut?.();
+    },
+  };
+
+  const banner = support ? (
+    <>
+      <strong>Support access, read-only.</strong> {supportBannerText(fmtDateTime(support.endsAt))}
+    </>
+  ) : !sourceOk ? (
+    <>
+      <StatusBadge status="RED" reason="source unavailable" /> A data source is unavailable – some
+      figures may be out of date.
+    </>
+  ) : null;
 
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded-lg focus:bg-hub-card-2 focus:p-3 focus:text-hub-ink"
-      >
-        Skip to main content
+    <div className={`ant-layout ant-layout-has-sider hh-shell${navOpen ? ' navopen' : ''}`}>
+      <a className="skip" href="#hh-wf">
+        Skip to content
       </a>
-
-      <aside className="on-dark relative flex shrink-0 flex-col border-b border-hub-line bg-hub-navy/95 text-white md:sticky md:top-0 md:h-screen md:w-64 md:overflow-y-auto md:border-b-0">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 hidden w-px bg-gradient-to-b from-transparent via-hub-teal/50 to-transparent md:block"
-        />
-        <div className="px-5 pb-4 pt-6">
-          <BrandMark compact />
+      <aside className="side ant-layout-sider ant-layout-sider-light" aria-label="Main navigation">
+        <div className="brand">
+          <span className="logo">
+            <Ms i="health_and_safety" />
+          </span>
+          <div>
+            <b>{BRAND.product}</b>
+            <small>{brandSubtitle || 'No organisation'}</small>
+          </div>
         </div>
-        <div aria-hidden="true" className="neon-rule mx-5 mb-3" />
-        <nav aria-label="Primary" className="px-3">
-          <ul className="flex flex-wrap gap-1 md:block md:space-y-1">
-            {NAV_ITEMS.filter((item) => canSee(item, me.permissions, scope.packs)).map((item) => (
-              <li key={item.to}>
-                <Link
-                  to={item.to}
-                  activeOptions={{ exact: item.to === '/' }}
-                  className="group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm"
-                  inactiveProps={{
-                    className: 'text-slate-100 hover:bg-hub-navy-2 hover:text-white',
-                  }}
-                  activeProps={{
-                    'aria-current': 'page',
-                    className:
-                      'bg-hub-teal/10 font-semibold text-white shadow-[inset_0_0_0_1px_rgb(94_200_212/0.4),0_0_22px_-8px_rgb(94_200_212/0.5)]',
-                  }}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-hub-teal opacity-0 shadow-[0_0_10px_rgb(94_200_212)] group-aria-[current=page]:opacity-100"
-                  />
-                  <span className="text-hub-muted transition-colors group-hover:text-hub-teal group-aria-[current=page]:text-hub-teal">
-                    <NavIcon to={item.to} />
+        <nav
+          id="nav"
+          aria-label="Primary"
+          className="ant-menu ant-menu-root ant-menu-inline ant-menu-light"
+        >
+          {items.map((item) => {
+            const on = modulePath === item.to;
+            const label =
+              item.to === '/' && !me.permissions.includes('dashboard.view') ? 'Home' : item.label;
+            const count = item.to === '/' ? alerts.data?.open : undefined;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                onClick={() => setNavOpen(false)}
+                className={`ant-menu-item${on ? ' on ant-menu-item-selected' : ''}`}
+                aria-current={on ? 'page' : undefined}
+              >
+                <Ms i={MODULE_ICON[item.to] ?? 'circle'} className="ant-menu-item-icon" />
+                <span className="lb ant-menu-title-content">{label}</span>
+                {typeof count === 'number' && count > 0 && (
+                  <span className="nb ant-badge-count" aria-label={`${count} waiting`}>
+                    {count > 99 ? '99+' : count}
                   </span>
-                  <span>
-                    {item.to === '/' && !me.permissions.includes('dashboard.view')
-                      ? 'Home'
-                      : item.label}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                )}
+              </Link>
+            );
+          })}
         </nav>
-
-        <div className="mt-auto space-y-3 px-5 pb-5 pt-6 text-xs text-slate-200">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="org-switcher" className="text-hub-muted">
-              Organisation
-            </label>
+        {orgs.length > 1 && (
+          <div className="hh-org">
+            <label htmlFor="org-switcher">Organisation</label>
             <select
               id="org-switcher"
-              className="field bg-hub-navy-2 px-2 py-1.5 text-sm text-white"
+              className="ant-sel"
               value={orgId ?? ''}
               onChange={(e) => setOrgId(e.target.value)}
             >
@@ -249,123 +189,116 @@ export function Shell() {
               ))}
             </select>
           </div>
-          <div className="neon-rule" aria-hidden="true" />
-          <div className="flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-hub-teal/60 bg-hub-navy-2 font-display text-sm font-semibold text-hub-teal shadow-glow-sm"
-            >
-              {initials(me.user.displayName)}
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-white">{me.user.displayName}</div>
-              {scope.role && <div className="truncate text-hub-muted">{scope.role}</div>}
-            </div>
-          </div>
-          {signOut && (
-            <button type="button" onClick={signOut} className="btn-ghost w-full">
-              Sign out
-            </button>
-          )}
-        </div>
+        )}
       </aside>
 
-      <div className="min-w-0 flex-1 space-y-5 p-4 md:p-6">
-        <header className="hud glass sticky top-3 z-20 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-hub-line px-5 py-3.5 shadow-panel">
-          <nav aria-label="Breadcrumb">
-            <button
-              type="button"
-              onClick={goBack}
-              title="Go back"
-              aria-label={`Go back: ${crumbs.join(' / ')}`}
-              className="flex flex-wrap gap-x-3 text-left font-display font-semibold text-hub-ink underline-offset-2 hover:underline"
-            >
-              {crumbs.map((crumb, i) => (
-                <span key={crumb} className="flex gap-x-3">
-                  {i > 0 && (
-                    <span aria-hidden="true" className="text-hub-teal">
-                      /
-                    </span>
-                  )}
-                  {crumb}
-                </span>
-              ))}
-            </button>
-          </nav>
-          <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-hub-muted">
-            {typeof alerts.data?.open === 'number' && (
-              <>
-                <Link
-                  to="/alerts"
-                  className="font-medium text-hub-ink underline-offset-2 hover:underline"
-                  aria-label={
-                    `Alerts: ${alerts.data.open} open` +
-                    (alerts.data.critical ? `, ${alerts.data.critical} critical` : '')
-                  }
-                >
-                  Alerts {alerts.data.open}
-                  {alerts.data.critical > 0 && ` (${alerts.data.critical} critical)`}
-                </Link>
-                <span aria-hidden="true">|</span>
-              </>
-            )}
-            <time dateTime={new Date().toISOString()} className="font-mono text-xs">
-              {londonDate.format(new Date())}
-            </time>
-            <span aria-hidden="true">|</span>
-            <button
-              type="button"
-              onClick={refresh}
-              className="font-medium text-hub-ink underline-offset-2 hover:text-hub-teal-dark hover:underline"
-            >
-              Refresh
-            </button>
-            <span aria-hidden="true">|</span>
-            <span>
-              Last updated{' '}
-              <span className="font-mono text-xs">
-                {lastUpdated ? londonTime.format(lastUpdated) : '—'}
-              </span>
-            </span>
-            {live && (
-              <>
-                <span aria-hidden="true">|</span>
-                <span data-testid="live-state" className="inline-flex items-center gap-1.5">
-                  <span aria-hidden="true" className="relative flex h-2 w-2">
-                    {live === 'live' && (
-                      <span className="absolute inline-flex h-full w-full animate-beacon rounded-full bg-green-700" />
-                    )}
-                    <span
-                      className={`relative h-2 w-2 rounded-full ${live === 'live' ? 'bg-green-700' : 'bg-amber-600'}`}
-                    />
-                  </span>
-                  {live === 'live'
-                    ? 'Live'
-                    : live === 'connecting'
-                      ? 'Connecting…'
-                      : 'Reconnecting… figures may be out of date'}
-                </span>
-              </>
-            )}
-            {sourceOk ? (
-              <StatusBadge status="GREEN" reason="all sources available" />
-            ) : (
-              <StatusBadge status="RED" reason="source unavailable" />
-            )}
-          </div>
-        </header>
-        {support && (
-          <div
-            role="status"
-            className="rounded-xl border border-amber-700 bg-amber-50 px-5 py-3 text-sm text-amber-950"
+      <div className="mainwrap ant-layout">
+        <header className="top ant-layout-header">
+          <button
+            type="button"
+            className="ib only-sm"
+            aria-label="Menu"
+            aria-controls="nav"
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen((o) => !o)}
           >
-            <strong>Support access, read-only.</strong>{' '}
-            {supportBannerText(fmtDateTime(support.endsAt))}
+            <Ms i="menu" />
+          </button>
+          <div className="sp" />
+          {live && (
+            <span
+              data-testid="live-state"
+              className={`hh-live${live === 'live' ? ' ok' : ''}`}
+              title={live === 'live' ? 'Figures update as records change' : undefined}
+            >
+              <span className="dot" aria-hidden="true" />
+              {live === 'live'
+                ? 'Live'
+                : live === 'connecting'
+                  ? 'Connecting…'
+                  : 'Reconnecting — figures may be out of date'}
+            </span>
+          )}
+          <button type="button" className="ib srch" title="Search (Ctrl+K)" aria-label="Search">
+            <Ms i="search" />
+            <span className="lbl">Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <Link
+            to="/alerts"
+            className="ib ant-btn ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-icon-only"
+            id="bellB"
+            aria-label={`Alerts${alerts.data ? `: ${alerts.data.open} open` : ''}`}
+          >
+            <span className="ant-badge">
+              <Ms i="notifications" />
+              {!!alerts.data?.open && (
+                <span className="dotn ant-badge-count">
+                  {alerts.data.open > 99 ? '99+' : alerts.data.open}
+                </span>
+              )}
+            </span>
+          </Link>
+          <Dropdown menu={meMenu} trigger={['click']} placement="bottomRight">
+            <button type="button" className="me" aria-haspopup="menu" aria-label="Your account">
+              <span className="av ant-avatar ant-avatar-circle">
+                {initials(me.user.displayName)}
+              </span>
+              <div>
+                <b>{me.user.displayName}</b>
+                <small>{scope.role ?? ''}</small>
+              </div>
+            </button>
+          </Dropdown>
+        </header>
+        {banner && (
+          <div className="banner ant-alert ant-alert-warning ant-alert-banner" role="status">
+            {banner}
           </div>
         )}
-        <main id="main" tabIndex={-1} className="rise-in">
-          <Outlet />
-        </main>
+        <div className="scroller ant-layout-content">
+          <main id="hh-wf" tabIndex={-1}>
+            <div className="wf">
+              <div className="pc">
+                <div className="pc-head wf-h">
+                  <nav className="ant-breadcrumb pc-bc" aria-label="Breadcrumb">
+                    <ol>
+                      {crumbs.map((c, i) => (
+                        <li key={`${i}-${c}`} className="ant-breadcrumb-item">
+                          {i > 0 && (
+                            <span className="ant-breadcrumb-separator" aria-hidden="true">
+                              /
+                            </span>
+                          )}
+                          {i === crumbs.length - 1 ? (
+                            <button
+                              type="button"
+                              className="ant-breadcrumb-link hh-crumb"
+                              onClick={goBack}
+                              title="Go back"
+                              aria-label={`Go back: ${crumbs.join(' / ')}`}
+                            >
+                              {c}
+                            </button>
+                          ) : (
+                            <span className="ant-breadcrumb-link">{c}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </nav>
+                  <div className="hh-slot-top" ref={topRef} />
+                  <div className="hh-slot-tabs" ref={tabsRef} />
+                </div>
+                <div className="pc-body">
+                  <HeadSlotsCtx.Provider value={slots}>
+                    <Outlet />
+                  </HeadSlotsCtx.Provider>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
       </div>
     </div>
   );

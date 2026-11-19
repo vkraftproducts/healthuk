@@ -1,3 +1,9 @@
+import {
+  chooseAntOption,
+  openAntSelect,
+  selectAntByLabel,
+  visibleAntOptions,
+} from './ant-testing.js';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -71,7 +77,7 @@ const template = (id: string, title: string, subjectType: string, status = 'EFFE
   versions: [{ id: `${id}v`, status, subjectType }],
 });
 
-function renderFleet(permissions: string[], data: Record<string, unknown[]>) {
+function renderFleet(permissions: string[], data: Record<string, unknown[]>, url = '/vehicles') {
   const send = vi.fn(async () => ({}));
   const api: ApiClient = {
     me: async () => me(permissions),
@@ -79,17 +85,20 @@ function renderFleet(permissions: string[], data: Record<string, unknown[]>) {
     get: async (p) => ({ data: data[p.split('?')[0]!] ?? [], nextCursor: null }),
     send,
   };
-  render(<App api={api} history={createMemoryHistory({ initialEntries: ['/vehicles'] })} />);
+  render(<App api={api} history={createMemoryHistory({ initialEntries: [url] })} />);
   return { send };
 }
 beforeEach(() => sessionStorage.clear());
 
 describe('registers and forms [task 15]', () => {
   it('the expense register shows names and UK dates, and a rejection needs a reason', async () => {
-    const { send } = renderFleet(['fleet.vehicle.view', 'fleet.expense.approve'], {
-      '/api/v1/fuel-expenses': [claim({})],
-    });
-    await userEvent.click(await screen.findByRole('tab', { name: 'Fuel and expenses' }));
+    const { send } = renderFleet(
+      ['fleet.vehicle.view', 'fleet.expense.approve'],
+      {
+        '/api/v1/fuel-expenses': [claim({})],
+      },
+      '/vehicles?tab=equipment&view=expenses',
+    );
     const row = await screen.findByRole('row', { name: /AMB-03/ });
     expect(row).toHaveTextContent('2 Nov 2026');
     expect(row).toHaveTextContent('Alex Morgan');
@@ -111,10 +120,13 @@ describe('registers and forms [task 15]', () => {
   });
 
   it('nobody is offered approval of their own claim', async () => {
-    renderFleet(['fleet.vehicle.view', 'fleet.expense.approve'], {
-      '/api/v1/fuel-expenses': [claim({ submittedBy: ME, submittedByName: 'Dev' })],
-    });
-    await userEvent.click(await screen.findByRole('tab', { name: 'Fuel and expenses' }));
+    renderFleet(
+      ['fleet.vehicle.view', 'fleet.expense.approve'],
+      {
+        '/api/v1/fuel-expenses': [claim({ submittedBy: ME, submittedByName: 'Dev' })],
+      },
+      '/vehicles?tab=equipment&view=expenses',
+    );
     const row = await screen.findByRole('row', { name: /AMB-03/ });
     expect(row).toHaveTextContent('Someone else must approve your claim.');
     expect(within(row).queryByRole('button', { name: /^Approve/ })).toBeNull();
@@ -129,35 +141,30 @@ describe('registers and forms [task 15]', () => {
   });
 
   it('equipment without a regime is "not set up", and a regime uses a published template', async () => {
-    const { send } = renderFleet(['fleet.vehicle.view', 'fleet.vehicle.manage'], {
-      '/api/v1/equipment': [asset],
-      '/api/v1/requirements/templates': [
-        template('t1', 'LOLER thorough examination (6 monthly)', 'EQUIPMENT'),
-        template('t2', 'MOT', 'VEHICLE'),
-        template('t3', 'Draft service', 'EQUIPMENT', 'DRAFT'),
-      ],
-    });
-    await userEvent.click(await screen.findByRole('tab', { name: 'Equipment' }));
+    const { send } = renderFleet(
+      ['fleet.vehicle.view', 'fleet.vehicle.manage'],
+      {
+        '/api/v1/equipment': [asset],
+        '/api/v1/requirements/templates': [
+          template('t1', 'LOLER thorough examination (6 monthly)', 'EQUIPMENT'),
+          template('t2', 'MOT', 'VEHICLE'),
+          template('t3', 'Draft service', 'EQUIPMENT', 'DRAFT'),
+        ],
+      },
+      '/vehicles?tab=equipment&view=equipment',
+    );
     const row = await screen.findByRole('row', { name: /STR-04/ });
     expect(row).toHaveTextContent('No inspection regime set up');
-    expect(screen.getByRole('form', { name: 'Add equipment' })).toBeInTheDocument();
-    await userEvent.click(
-      within(row).getByRole('button', { name: 'Add inspection regime to STR-04' }),
-    );
-    const dialog = screen.getByRole('dialog');
-    const pick = within(dialog).getByLabelText('Requirement it follows');
+    expect(screen.getByRole('button', { name: /Add equipment/ })).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole('button', { name: 'More actions – STR-04' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Add inspection regime/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add inspection regime to STR-04' });
+    await openAntSelect('Requirement it follows');
     await waitFor(() =>
-      expect(
-        within(pick)
-          .getAllByRole('option')
-          .map((o) => o.textContent),
-      ).toEqual([
-        'Choose a published equipment requirement',
-        'LOLER thorough examination (6 monthly)',
-      ]),
+      expect(visibleAntOptions()).toEqual(['LOLER thorough examination (6 monthly)']),
     );
-    await userEvent.selectOptions(within(dialog).getByLabelText('Regime'), 'LOLER_THOROUGH');
-    await userEvent.selectOptions(pick, 't1');
+    await chooseAntOption('LOLER thorough examination (6 monthly)');
+    await selectAntByLabel('Regime', 'LOLER thorough examination');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add regime' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith('POST', '/api/v1/equipment/a1/regimes', ORG, {

@@ -6,8 +6,10 @@ import { SpeakUpDto, SpeakUpGuardianDto, SpeakUpProgressDto, SpeakUpThemesDto } 
 import {
   ReadinessWindowDto,
   RecordAckDto,
+  StaffRecordDto,
   SupervisionBookingDto,
   TrainingCourseDto,
+  TrainingRecordQueueItem,
 } from './staff.js';
 
 const list = <T extends z.ZodType>(t: T) => z.object({ data: z.array(t) });
@@ -75,6 +77,18 @@ export const peopleRoutes = {
     summary: 'Record one training session for several staff; each record is unverified',
     response: z.object({ created: z.number().int(), recordIds: z.array(z.string()) }),
   },
+  trainingRecordsAwaiting: {
+    method: 'get',
+    path: '/training-records/awaiting-verification',
+    summary: 'Training records not yet verified by HR (current records only)',
+    response: list(TrainingRecordQueueItem),
+  },
+  trainingRecordVerify: {
+    method: 'post',
+    path: '/training-records/{id}/verify',
+    summary: 'Verify a training record against the register (not the person who recorded it)',
+    response: StaffRecordDto,
+  },
   supervisionBookingList: {
     method: 'get',
     path: '/supervision-bookings',
@@ -91,6 +105,18 @@ export const peopleRoutes = {
     method: 'post',
     path: '/supervision-bookings/{id}/close',
     summary: 'Mark a booking held (with its record), cancelled or missed, optionally rebooking',
+    response: SupervisionBookingDto,
+  },
+  supervisionRequestMine: {
+    method: 'post',
+    path: '/staff/me/supervision-requests',
+    summary: 'Ask for a supervision for yourself; a manager confirms the supervisor and time',
+    response: SupervisionBookingDto,
+  },
+  supervisionBookingConfirm: {
+    method: 'post',
+    path: '/supervision-bookings/{id}/confirm',
+    summary: 'Confirm a requested supervision: set the supervisor and time (requested to booked)',
     response: SupervisionBookingDto,
   },
   staffRecordAcks: {

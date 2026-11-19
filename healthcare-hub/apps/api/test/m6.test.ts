@@ -5,7 +5,14 @@ import type { Db } from '@hub/db';
 import { jobTimingAlerts, jobTimingAll } from '@hub/domain';
 import { addDays, londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  addVerifiedLicence,
+  makeApp,
+  sign,
+  verifyVehicleDocuments,
+} from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -110,6 +117,7 @@ async function vehicle(extra: Record<string, unknown> = {}): Promise<string> {
     },
   });
   expect(r.status).toBe(201);
+  await verifyVehicleDocuments(app, SEED_IDS.orgExample, r.body.id as string);
   return r.body.id as string;
 }
 async function shift(
@@ -127,7 +135,7 @@ async function shift(
       crew,
     },
   });
-  expect(r.status).toBe(201);
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
   return r.body as J;
 }
 async function book(startH: number, extra: Record<string, unknown> = {}, recurrence?: unknown) {
@@ -292,20 +300,28 @@ describe('allocation validation [UAT-02, JOB-02, JOB-03]', () => {
     });
     const d2 = await crewMember();
     const a2 = await crewMember(['CARE_ASSISTANT']);
-    const s2 = await shift(
-      v,
-      [
-        { staffId: d2.staffId, role: 'DRIVER' },
-        { staffId: a2.staffId, role: 'CARE_ASSISTANT' },
-      ],
-      10,
-      18,
-    );
+    const crew2 = [
+      { staffId: d2.staffId, role: 'DRIVER' },
+      { staffId: a2.staffId, role: 'CARE_ASSISTANT' },
+    ];
+    // An expired MOT blocks the vehicle outright: it cannot even be put on a shift (finding 67).
+    const noShift = await call('POST', '/api/v1/shifts', {
+      body: {
+        locationId: SEED_IDS.locWatford,
+        vehicleId: v,
+        startsAt: at(10),
+        endsAt: at(18),
+        crew: crew2,
+      },
+    });
+    expect([noShift.status, noShift.body.code]).toEqual([422, 'OVERRIDE_NOT_PERMITTED']);
+    expect(noShift.body.detail).toMatch(/MOT expired/);
+    // Missing competence on a roadworthy vehicle is the only thing that can be excepted.
+    const s2 = await shift(await vehicle(), crew2, 10, 18);
     const [k] = await book(12, { requiredSkills: ['BARIATRIC'] });
     const res = await call('POST', `/api/v1/jobs/${k!.id}/validate`, { body: { shiftId: s2.id } });
     expect(res.body.checks.find((c: J) => c.code === 'VEHICLE_ROADWORTHY')).toMatchObject({
-      result: 'FAIL',
-      overridable: false,
+      result: 'PASS',
     });
     expect(res.body.checks.find((c: J) => c.code === 'COMPETENCE')).toMatchObject({
       result: 'FAIL',

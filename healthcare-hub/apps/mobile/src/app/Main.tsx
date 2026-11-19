@@ -10,6 +10,7 @@ import { Messages } from '../screens/Messages';
 import { MyShift } from '../screens/MyShift';
 import { Policies } from '../screens/Policies';
 import { Profile } from '../screens/Profile';
+import { Rota } from '../screens/Rota';
 import { Vdi } from '../screens/Vdi';
 import { colors, TOUCH } from '../ui/theme';
 import { NavCtx, type Nav, type Route, type Tab } from './nav';
@@ -72,6 +73,8 @@ export function Main({ pushRoute }: { pushRoute?: PushRoute | null }) {
               <JobDetail key={top.id} id={top.id} />
             ) : top.name === 'defect' ? (
               <Defect {...(top.jobId ? { jobId: top.jobId } : {})} />
+            ) : top.name === 'rota' ? (
+              <Rota />
             ) : (
               <Fuel />
             )

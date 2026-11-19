@@ -90,7 +90,7 @@ export function outboxKey(
 }
 
 type Settings = Partial<
-  Pick<OrgSettings, 'escalation' | 'deputies' | 'channels' | 'emailReminders'>
+  Pick<OrgSettings, 'escalation' | 'deputies' | 'channels' | 'emailReminders' | 'itemRules'>
 >;
 
 /** The organisation's channel switches: email needs both the channel and email reminders on. */
@@ -210,14 +210,21 @@ export async function planEscalationDeliveries(
   let created = 0;
   for (const a of alerts) {
     if (notificationsPaused(a.snoozedUntil, now)) continue;
-    const stage = escalationStage(a.raisedAt, now, esc, false);
+    const kind = alertItemKind(a.sourceType, subjects.get(a.sourceId));
+    // v36 escalation rules: a kind may set its own lead / manager days.
+    const rule = (cfg.itemRules ?? []).find((r) => r.kind === kind);
+    const kEsc = {
+      leadAfterDays: rule?.leadAfterDays ?? esc.leadAfterDays,
+      managerAfterDays: rule?.managerAfterDays ?? esc.managerAfterDays,
+    };
+    const stage = escalationStage(a.raisedAt, now, kEsc, false);
     if (stage === 'OWNER') continue;
     const daysOpen = -daysUntil(londonDate(a.raisedAt), now);
-    const leadRole = LEAD_ROLE_BY_KIND[alertItemKind(a.sourceType, subjects.get(a.sourceId))];
+    const leadRole = LEAD_ROLE_BY_KIND[kind];
     const reached: EscalatedStage[] = stage === 'MANAGER' ? ['LEAD', 'MANAGER'] : ['LEAD'];
     const rows: OutboxRow[] = [];
     for (const s of reached) {
-      const after = s === 'LEAD' ? esc.leadAfterDays : esc.managerAfterDays;
+      const after = s === 'LEAD' ? kEsc.leadAfterDays : kEsc.managerAfterDays;
       if (daysOpen - after > ESCALATION_CATCH_UP_DAYS) continue;
       const told = new Set<string>();
       for (const m of members.values()) {

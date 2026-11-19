@@ -63,7 +63,7 @@ import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 
 type Names = Map<string, string>;
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const P = 'privacy.manage';
 const d = (x: Date | null) => (x ? x.toISOString().slice(0, 10) : null);
 

@@ -12,6 +12,7 @@
     "db:migrate": "pnpm --filter @hub/db migrate",
     "db:seed": "pnpm --filter @hub/db seed",
     "db:seed:sectors": "pnpm --filter @hub/db seed:sectors",
+    "db:seed:v36": "pnpm --filter @hub/db seed:v36",
     "build": "turbo run build",
     "test": "turbo run test",
     "test:e2e": "pnpm --filter @hub/web e2e",
@@ -39,5 +40,11 @@
   },
   "lint-staged": {
     "*.{ts,tsx,mjs,cjs,json,md,yml,yaml}": "prettier --check"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "18.3.28",
+      "@types/react-dom": "18.3.7"
+    }
   }
 }

@@ -1,15 +1,14 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Button } from 'antd';
 import { addDays, londonDate, londonDateTime } from '@hub/rules';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   Section,
-  button,
   fmtDate,
   fmtDateTime,
   input,
-  smallButton,
   useCan,
   useRun,
 } from '../../components.js';
@@ -67,33 +66,24 @@ export function VehicleStatusPanel({ v }: { v: Row }) {
       </p>
       <div className="flex flex-wrap gap-2">
         {manage && !v.offRoad && (
-          <button className={smallButton} onClick={() => setChange({ flag: 'OFF_ROAD', on: true })}>
+          <Button size="small" onClick={() => setChange({ flag: 'OFF_ROAD', on: true })}>
             Take {v.callsign} off the road
-          </button>
+          </Button>
         )}
         {manage && !v.quarantined && (
-          <button
-            className={smallButton}
-            onClick={() => setChange({ flag: 'QUARANTINE', on: true })}
-          >
+          <Button size="small" onClick={() => setChange({ flag: 'QUARANTINE', on: true })}>
             Quarantine {v.callsign}
-          </button>
+          </Button>
         )}
         {manage && release && v.offRoad && (
-          <button
-            className={smallButton}
-            onClick={() => setChange({ flag: 'OFF_ROAD', on: false })}
-          >
+          <Button size="small" onClick={() => setChange({ flag: 'OFF_ROAD', on: false })}>
             Put {v.callsign} back on the road
-          </button>
+          </Button>
         )}
         {manage && release && v.quarantined && (
-          <button
-            className={smallButton}
-            onClick={() => setChange({ flag: 'QUARANTINE', on: false })}
-          >
+          <Button size="small" onClick={() => setChange({ flag: 'QUARANTINE', on: false })}>
             Lift quarantine on {v.callsign}
-          </button>
+          </Button>
         )}
       </div>
       {manage && !release && (v.offRoad || v.quarantined) && (
@@ -160,7 +150,8 @@ export function VehicleStatusPanel({ v }: { v: Row }) {
             <>
               <Field label="Why is it off the road?">
                 <select
-                  className={input}
+                  className="field"
+                  aria-label="Why is it off the road?"
                   value={reasonCode}
                   onChange={(e) => setReasonCode(e.target.value)}
                 >
@@ -175,7 +166,8 @@ export function VehicleStatusPanel({ v }: { v: Row }) {
               <Field label="Expected back (optional)">
                 <input
                   type="date"
-                  className={input}
+                  className="field"
+                  aria-label="Expected back (optional)"
                   value={backOn}
                   min={londonDate(new Date())}
                   onChange={(e) => setBackOn(e.target.value)}
@@ -216,9 +208,9 @@ export function MoveBase({ v }: { v: Row }) {
       <p>
         Based at: <strong>{current?.name ?? 'Unknown location'}</strong>
       </p>
-      <button className={smallButton} onClick={() => setOpen(true)}>
+      <Button size="small" onClick={() => setOpen(true)}>
         Move {v.callsign} to another base
-      </button>
+      </Button>
       <ActionDialog
         open={open}
         title={`Move ${v.callsign} to another base`}
@@ -241,9 +233,10 @@ export function MoveBase({ v }: { v: Row }) {
           <>
             <Field label="New base">
               <select
+                className="field"
+                aria-label="New base"
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
-                className={input}
               >
                 <option value="">Choose a location</option>
                 {all
@@ -258,7 +251,8 @@ export function MoveBase({ v }: { v: Row }) {
             <Field label="Takes effect on">
               <input
                 type="date"
-                className={input}
+                className="field"
+                aria-label="Takes effect on"
                 value={effectiveOn}
                 max={today}
                 onChange={(e) => setEffectiveOn(e.target.value)}
@@ -355,7 +349,9 @@ export function ReadinessCheck({ v }: { v: Row }) {
         <label className="flex items-center gap-2 text-sm">
           <input name="stretcher" type="checkbox" /> Stretcher needed
         </label>
-        <button className={button}>Check readiness</button>
+        <Button type="primary" htmlType="submit">
+          Check readiness
+        </Button>
       </form>
       {error && (
         <p role="alert" className="text-red-900">
@@ -440,7 +436,9 @@ export function MaintenanceAdd({ v }: { v: Row }) {
         <Field label="Odometer at last service">
           <input name="lastDoneOdometer" type="number" min={0} className={input} />
         </Field>
-        <button className={button}>Add plan</button>
+        <Button type="primary" htmlType="submit">
+          Add plan
+        </Button>
       </form>
     </>
   );

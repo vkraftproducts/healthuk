@@ -1,15 +1,14 @@
 import { londonDate } from '@hub/rules';
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Button, Input, Select } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   Section,
-  button,
   fmtDate,
   fmtDateTime,
   input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -228,14 +227,13 @@ export function MyRecord() {
                   key: 'u',
                   header: 'Evidence',
                   cell: (r: Row) => (
-                    <button
-                      type="button"
-                      className={smallButton}
+                    <Button
+                      size="small"
                       aria-label={`Upload a certificate for ${r.templateTitle}`}
                       onClick={() => setUploadFor(r)}
                     >
                       Upload certificate
-                    </button>
+                    </Button>
                   ),
                 },
               ]
@@ -248,9 +246,8 @@ export function MyRecord() {
                   cell: (r: Row) => (
                     <div className="flex flex-wrap gap-2">
                       {r.deadlineKind !== 'EXPIRY' && (
-                        <button
-                          type="button"
-                          className={smallButton}
+                        <Button
+                          size="small"
                           aria-label={`Ask to change the date for ${r.templateTitle}`}
                           onClick={() => {
                             setNewDate('');
@@ -258,16 +255,15 @@ export function MyRecord() {
                           }}
                         >
                           Change date
-                        </button>
+                        </Button>
                       )}
-                      <button
-                        type="button"
-                        className={smallButton}
+                      <Button
+                        size="small"
                         aria-label={`Request a review of ${r.templateTitle}`}
                         onClick={() => setReviewFor(r)}
                       >
                         Request review
-                      </button>
+                      </Button>
                     </div>
                   ),
                 },
@@ -311,25 +307,25 @@ export function MyRecord() {
               />
             </Field>
             <Field label="Supervisor (optional)">
-              <select
-                className={input}
-                value={supervisor}
-                onChange={(e) => setSupervisor(e.target.value)}
-              >
-                <option value="">Anyone available</option>
-                {people.map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.displayName}
-                    {x.roleNames.length ? ` – ${x.roleNames.join(', ')}` : ''}
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={supervisor || undefined}
+                placeholder="Anyone available"
+                onChange={(v) => setSupervisor(v ?? '')}
+                style={{ width: '100%' }}
+                allowClear
+                options={people.map((x) => ({
+                  value: x.id,
+                  label: `${x.displayName}${x.roleNames.length ? ` – ${x.roleNames.join(', ')}` : ''}`,
+                }))}
+              />
             </Field>
             <Field label="What would you like to talk about?">
               <textarea name="topic" required minLength={3} maxLength={1000} className={input} />
             </Field>
             <div className="flex items-end">
-              <button className={button}>Request supervision</button>
+              <Button type="primary" htmlType="submit">
+                Request supervision
+              </Button>
             </div>
           </form>
         </Section>
@@ -361,14 +357,13 @@ export function MyRecord() {
             header: 'Actions',
             cell: (r) =>
               update && r.status === 'OPEN' ? (
-                <button
-                  type="button"
-                  className={smallButton}
+                <Button
+                  size="small"
                   aria-label={`Withdraw ${REQUEST_KIND[r.kind] ?? ''} request: ${requestDetail(r)}`}
                   onClick={() => setWithdrawing(r)}
                 >
                   Withdraw
-                </button>
+                </Button>
               ) : (
                 ''
               ),
@@ -399,7 +394,9 @@ export function MyRecord() {
               <input name="reason" required minLength={3} maxLength={500} className={input} />
             </Field>
             <div className="flex items-end">
-              <button className={button}>Send to HR</button>
+              <Button type="primary" htmlType="submit">
+                Send to HR
+              </Button>
             </div>
           </form>
         </Section>
@@ -438,12 +435,7 @@ export function MyRecord() {
         onCancel={() => setDateFor(null)}
         fields={
           <Field label="New date">
-            <input
-              type="date"
-              className={input}
-              value={newDate}
-              onChange={(e) => setNewDate(e.target.value)}
-            />
+            <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
           </Field>
         }
         onConfirm={(reason) =>
@@ -639,31 +631,22 @@ function ReadinessWindow({ roles }: { roles: string[] }) {
           className="flex flex-wrap items-end gap-3"
         >
           <Field label="Role">
-            <select className={input} value={role} onChange={(e) => setRole(e.target.value)}>
-              {roles.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_LABEL[r] ?? words(r)}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={role}
+              onChange={setRole}
+              style={{ width: '100%' }}
+              options={roles.map((r) => ({ value: r, label: ROLE_LABEL[r] ?? words(r) }))}
+            />
           </Field>
           <Field label="From">
-            <input
-              type="datetime-local"
-              className={input}
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-            />
+            <Input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>
           <Field label="To">
-            <input
-              type="datetime-local"
-              className={input}
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
+            <Input type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} />
           </Field>
-          <button className={button}>Check readiness</button>
+          <Button type="primary" htmlType="submit">
+            Check readiness
+          </Button>
         </form>
       )}
       {error && <p role="alert">{error}</p>}
@@ -706,10 +689,7 @@ export function StaffRequestsQueue({ withCorrections = true }: { withCorrections
   const due = can('compliance.due_date.change');
   const verify = can('compliance.evidence.verify');
   const requests = useOne<{ data: Row[] }>('/api/v1/staff/self-requests', manage || due || verify);
-  const corrections = useOne<{ data: Row[] }>(
-    '/api/v1/staff/corrections',
-    withCorrections && manage,
-  );
+  const corrections = useOne<{ data: Row[] }>('/api/v1/staff/corrections', manage);
   const [deciding, setDeciding] = useState<{ row: Row; accept: boolean } | null>(null);
   const [correcting, setCorrecting] = useState<{ row: Row; apply: boolean } | null>(null);
   const [bookedFor, setBookedFor] = useState('');
@@ -736,9 +716,8 @@ export function StaffRequestsQueue({ withCorrections = true }: { withCorrections
             cell: (r) =>
               mayDecide(r) ? (
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={smallButton}
+                  <Button
+                    size="small"
                     aria-label={`Accept ${REQUEST_KIND[r.kind]} request from ${r.staffName}`}
                     onClick={() => {
                       setBookedFor('');
@@ -746,15 +725,14 @@ export function StaffRequestsQueue({ withCorrections = true }: { withCorrections
                     }}
                   >
                     Accept
-                  </button>
-                  <button
-                    type="button"
-                    className={smallButton}
+                  </Button>
+                  <Button
+                    size="small"
                     aria-label={`Decline ${REQUEST_KIND[r.kind]} request from ${r.staffName}`}
                     onClick={() => setDeciding({ row: r, accept: false })}
                   >
                     Decline
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 'Someone else decides this'
@@ -762,7 +740,7 @@ export function StaffRequestsQueue({ withCorrections = true }: { withCorrections
           },
         ]}
       />
-      {withCorrections && manage && (
+      {manage && withCorrections && (
         <DataTable<Row>
           caption="Correction requests waiting for HR"
           rows={corrections.data?.data ?? []}
@@ -782,22 +760,20 @@ export function StaffRequestsQueue({ withCorrections = true }: { withCorrections
               header: 'Decide',
               cell: (r) => (
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={smallButton}
+                  <Button
+                    size="small"
                     aria-label={`Mark correction to ${CORRECTION_FIELD[r.field] ?? 'record'} as applied`}
                     onClick={() => setCorrecting({ row: r, apply: true })}
                   >
                     Applied
-                  </button>
-                  <button
-                    type="button"
-                    className={smallButton}
+                  </Button>
+                  <Button
+                    size="small"
                     aria-label={`Reject correction to ${CORRECTION_FIELD[r.field] ?? 'record'}`}
                     onClick={() => setCorrecting({ row: r, apply: false })}
                   >
                     Reject
-                  </button>
+                  </Button>
                 </div>
               ),
             },

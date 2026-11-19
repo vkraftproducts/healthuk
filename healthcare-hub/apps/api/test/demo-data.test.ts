@@ -1,5 +1,6 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { bootstrap, migrate, seed } from '@hub/db/admin';
+import { londonDate } from '@hub/rules';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import type { Call } from '../scripts/crew-demo-lib.js';
@@ -64,22 +65,24 @@ afterAll(async () => {
 describe('demo data', () => {
   it('loads a working day through the real API, with nothing refused', async () => {
     const r = await loadDemoData(call, { locationId: SEED_IDS.locWatford }, putFile);
-    expect(r.problems).toEqual([]);
+    expect(r.problems, JSON.stringify(r.problems, null, 1)).toEqual([]);
     expect(r.alreadyLoaded).toBe(false);
-    expect(r.created).toEqual({
+    expect(r.created, JSON.stringify(r.created)).toEqual({
       staff: 10,
       vehicles: 6,
       defects: 2,
-      requirements: 17,
+      requirements: 19,
       premises: 3,
-      evidence: 47, // 34 role checks (verified by a second person) + 2 joiner uploads + 11 deadlines
+      // 66 role checks (the starter configuration's role maps, verified by a second person)
+      // + 2 joiner uploads + 13 deadlines
+      evidence: 81,
       shifts: 2,
       jobs: 8,
       risks: 3,
       events: 3,
     });
     expect(r.jobsRefused).toEqual([]);
-    expect(r.jobsAllocated).toBe(5);
+    expect(r.jobsAllocated, JSON.stringify(r.jobsRefused)).toBe(5);
   });
 
   it('gives the dashboard real figures, worked out by the real rules', async () => {
@@ -90,7 +93,13 @@ describe('demo data', () => {
     expect(s.tiles.blockedVehicles).toBeGreaterThan(0);
     expect(s.tiles.unverified).toBeGreaterThan(0);
     expect(s.tiles.jobsToday).toBeGreaterThan(0);
-    expect(s.operations.jobsAwaitingAllocation).toBe(3);
+    // Three jobs are left for the dispatcher (5, 6 and 7 hours from now); late in the evening some
+    // fall on tomorrow and leave today's count.
+    const today = londonDate(new Date());
+    const leftToday = [5, 6, 7].filter(
+      (h) => londonDate(new Date(Date.now() + h * 3_600_000)) === today,
+    ).length;
+    expect(s.operations.jobsAwaitingAllocation).toBe(leftToday);
     expect(s.coverage.numerator).toBeGreaterThan(0);
     const fleet = (await call('GET', '/api/v1/vehicles', 'dev|manager')).body.data as {
       callsign: string;
@@ -116,7 +125,7 @@ describe('demo data', () => {
       .length;
     const r = await loadDemoData(call, { locationId: SEED_IDS.locWatford }, putFile);
     expect(r.alreadyLoaded).toBe(true);
-    expect(r.created).toEqual({});
+    expect(r.created, JSON.stringify(r.created)).toEqual({});
     const after = ((await call('GET', '/api/v1/staff', 'dev|manager')).body.data as unknown[])
       .length;
     expect(after).toBe(before);

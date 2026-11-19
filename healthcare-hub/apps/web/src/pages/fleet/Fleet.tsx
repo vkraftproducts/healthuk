@@ -1,18 +1,18 @@
 import { EQUIPMENT_CATEGORIES as EQUIPMENT_CATEGORY_LIST } from '@hub/contracts';
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { Alert, Button, Input, Modal, Select, Space, Typography } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
+  PageHeader,
   Section,
   Tabs,
-  button,
   fmtDate,
   input,
   pounds,
   saveBlob,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -20,7 +20,16 @@ import {
 import { useApp } from '../../shell/AppContext.js';
 import { uploadFile } from '../evidence/Evidence.js';
 import { useOne } from '../settings/hooks.js';
-import { Defects } from './Defects.js';
+import { DefectsV36, ReportDefect } from './Defects.js';
+import { FleetCards, VehicleHistory } from './v36/FleetCards.js';
+import { DailyHistory, DailyToday } from './v36/Checks.js';
+import { MileageServicing } from './v36/Care.js';
+import { Ms, RowActions, WfCard, WfSearch, WfSelect, WfTag } from '../../v36/ui.js';
+import { EvidenceDialog } from '../evidence/Evidence.js';
+import { CrewApp, FleetCare } from './v36/Care.js';
+import { Accidents, MedicinesAndGases } from '../registers/FleetSafety.js';
+import { Views } from '../../v36/kit.js';
+import { Deeper } from '../../v36/ui.js';
 import {
   AddVehicle,
   EquipmentDetail,
@@ -63,6 +72,13 @@ const REGIMES: Record<string, string> = {
   PRE_USE: 'Pre-use check',
   PAT: 'Portable appliance test',
 };
+const REGIME_SHORT: Record<string, string> = {
+  LOLER_THOROUGH: 'LOLER',
+  SERVICE: 'Service',
+  CALIBRATION: 'Calibration',
+  PRE_USE: 'Pre-use',
+  PAT: 'PAT',
+};
 const CAPABILITY: Record<string, string> = {
   STRETCHER: 'Stretcher',
   WHEELCHAIR: 'Wheelchair',
@@ -85,68 +101,193 @@ export const EXPENSE_STATUS: Record<string, { kind: StatusKind; text: string }> 
 const londonToday = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
 
+type FleetTab = 'vehicles' | 'checks' | 'equipment' | 'crew';
+/** Links made before the v36 layout keep working. */
+const LEGACY: Record<string, { tab: FleetTab; view: string }> = {
+  defects: { tab: 'checks', view: 'defects' },
+  checklists: { tab: 'checks', view: 'checklists' },
+  expenses: { tab: 'equipment', view: 'care' },
+};
+
+/** v36 Vehicles and assets: Vehicles · Checks & defects · Equipment & care · Crew app. */
 export function Fleet() {
   const can = useCan();
   const { orgId } = useApp();
-  const [tab, setTab] = useState('vehicles');
-  if (!orgId) return <p role="status">Select an organisation to continue.</p>;
-  // Finding 21: the expenses tab (and its fetch) only for people who submit or approve claims.
+  // Finding 21: the expenses view (and its fetch) only for people who submit or approve claims.
   const expenses = can('fleet.expense.submit') || can('fleet.expense.approve');
-  if (!can('fleet.vehicle.view') && !expenses)
-    return (
-      <p role="alert" className="rounded-lg border border-hub-line bg-hub-card p-3">
-        You do not have access to vehicles and assets.
-      </p>
-    );
-  const current = !can('fleet.vehicle.view')
-    ? 'expenses'
-    : tab === 'expenses' && !expenses
-      ? 'vehicles'
-      : tab;
+  const view_ = can('fleet.vehicle.view');
+  const tabs = [
+    { id: 'vehicles', label: 'Vehicles', show: view_ },
+    { id: 'checks', label: 'Checks & defects', show: view_ },
+    { id: 'equipment', label: 'Equipment & care', show: view_ || expenses },
+    { id: 'crew', label: 'Crew app', show: view_ },
+  ];
+  const search = useSearch({ strict: false }) as { tab?: string; view?: string; vehicle?: string };
+  const legacy = search.tab ? LEGACY[search.tab] : undefined;
+  const navigate = useNavigate();
+  const go = (tab: string, view?: string) =>
+    void navigate({ to: '/vehicles', search: view ? { tab, view } : { tab } });
+  const [adding, setAdding] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  if (!orgId)
+    return <Typography.Text role="status">Select an organisation to continue.</Typography.Text>;
+  if (!view_ && !expenses)
+    return <Alert type="error" showIcon message="You do not have access to vehicles and assets." />;
+  const wanted = legacy?.tab ?? search.tab;
+  const current = (tabs.find((t) => t.id === wanted && t.show)?.id ??
+    (view_ ? 'vehicles' : 'equipment')) as FleetTab;
+  const view = legacy?.view ?? search.view;
+  type Opt = { value: string; label: string };
+  // v36: each tab has a blue switch (subs) and, under some, teal view pills.
+  const subs: Record<FleetTab, { id: string; label: string; views: Opt[] }[]> = {
+    vehicles: [
+      { id: 'fleet', label: 'Fleet', views: [{ value: 'fleet', label: 'Fleet' }] },
+      {
+        id: 'history',
+        label: 'Vehicle history',
+        views: [{ value: 'history', label: 'Vehicle history' }],
+      },
+    ],
+    checks: [
+      {
+        id: 'daily',
+        label: 'Daily checks',
+        views: [
+          { value: 'today', label: 'Today' },
+          { value: 'checks', label: 'History' },
+          { value: 'checklists', label: 'Check list versions' },
+        ],
+      },
+      { id: 'defects', label: 'Defects', views: [{ value: 'defects', label: 'Defects' }] },
+    ],
+    equipment: [
+      ...(view_
+        ? [
+            {
+              id: 'equipment',
+              label: 'Equipment',
+              views: [{ value: 'equipment', label: 'Equipment' }],
+            },
+          ]
+        : []),
+      {
+        id: 'care',
+        label: 'Fleet care',
+        views: [
+          { value: 'care', label: 'Deep cleans' },
+          ...(view_ || can('fleet.defect.create')
+            ? [{ value: 'accidents', label: 'Accidents & damage' }]
+            : []),
+          ...(view_ ? [{ value: 'mileage', label: 'Mileage & servicing' }] : []),
+          ...(view_ || can('fleet.vdi.submit')
+            ? [{ value: 'medicines', label: 'Medicines & gases' }]
+            : []),
+          // Fuel claims are not in v36; the pill shows only for people who submit or approve them.
+          ...(expenses ? [{ value: 'expenses', label: 'Fuel & expenses' }] : []),
+        ],
+      },
+    ],
+    crew: [],
+  };
+  const views: Record<FleetTab, Opt[]> = {
+    // 'list' (the register table) stays reachable by link; v36 shows no switch for it.
+    vehicles: [...subs.vehicles.flatMap((x) => x.views), { value: 'list', label: 'List' }],
+    checks: subs.checks.flatMap((x) => x.views),
+    equipment: subs.equipment.flatMap((x) => x.views),
+    crew: [],
+  };
+  const v = views[current].find((x) => x.value === view)?.value ?? views[current][0]?.value;
+  const sub = subs[current].find((x) => x.views.some((o) => o.value === v));
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Vehicles and assets</h1>
-      <Tabs
-        label="Fleet sections"
-        current={current}
-        onChange={setTab}
-        tabs={[
-          { id: 'vehicles', label: 'Vehicles', show: can('fleet.vehicle.view') },
-          { id: 'equipment', label: 'Equipment', show: can('fleet.vehicle.view') },
-          { id: 'defects', label: 'Defects', show: can('fleet.vehicle.view') },
-          { id: 'checklists', label: 'Inspection checklists', show: can('fleet.vehicle.view') },
-          { id: 'expenses', label: 'Fuel and expenses', show: expenses },
-        ]}
-      >
-        {current === 'vehicles' && <Vehicles />}
-        {current === 'equipment' && <Equipment />}
-        {current === 'defects' && <Defects />}
-        {current === 'checklists' && <VdiChecklists />}
-        {current === 'expenses' && <Expenses />}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
+      <PageHeader
+        title="Vehicles and assets"
+        description="Fleet status, daily checks, defects, equipment and fleet care."
+        extra={
+          <Space wrap>
+            {can('fleet.vehicle.manage') && current === 'vehicles' && v === 'list' && (
+              <Button onClick={() => setAdding(true)}>Add a vehicle</Button>
+            )}
+            {can('fleet.defect.create') && (
+              <Button type="primary" icon={<Ms i="report" />} onClick={() => setReporting(true)}>
+                Report a defect
+              </Button>
+            )}
+          </Space>
+        }
+      />
+      <Tabs label="Fleet sections" current={current} onChange={(t) => go(t)} tabs={tabs}>
+        {subs[current].length > 1 && (
+          <Views
+            label={`${tabs.find((t) => t.id === current)?.label ?? ''} sections`}
+            value={sub?.id ?? ''}
+            onChange={(id) => go(current, subs[current].find((x) => x.id === id)!.views[0]!.value)}
+            options={subs[current].map((x) => ({ value: x.id, label: x.label }))}
+          />
+        )}
+        {sub && sub.views.length > 1 && (
+          <Deeper>
+            <Views
+              label={`${sub.label} view`}
+              value={v ?? ''}
+              onChange={(x) => go(current, x)}
+              options={sub.views}
+            />
+          </Deeper>
+        )}
+        {current === 'vehicles' && v === 'fleet' && (
+          <FleetCards
+            onHistory={(id) =>
+              void navigate({
+                to: '/vehicles',
+                search: { tab: 'vehicles', view: 'history', vehicle: id },
+              })
+            }
+          />
+        )}
+        {current === 'vehicles' && v === 'history' && <VehicleHistory initial={search.vehicle} />}
+        {current === 'vehicles' && v === 'list' && <Vehicles />}
+        {current === 'checks' && v === 'today' && <DailyToday />}
+        {current === 'checks' && v === 'checks' && <DailyHistory />}
+        {current === 'checks' && v === 'defects' && <DefectsV36 />}
+        {current === 'checks' && v === 'checklists' && <VdiChecklists />}
+        {current === 'equipment' && v === 'equipment' && <Equipment />}
+        {current === 'equipment' && v === 'care' && <FleetCare />}
+        {current === 'equipment' && v === 'expenses' && <Expenses />}
+        {current === 'equipment' && v === 'accidents' && <Accidents />}
+        {current === 'equipment' && v === 'mileage' && <MileageServicing />}
+        {current === 'equipment' && v === 'medicines' && <MedicinesAndGases />}
+        {current === 'crew' && <CrewApp />}
       </Tabs>
+      <Modal
+        open={adding}
+        title="Add a vehicle"
+        onCancel={() => setAdding(false)}
+        footer={null}
+        width={960}
+        destroyOnHidden
+      >
+        <AddVehicle />
+      </Modal>
+      {reporting && <ReportDefect onClose={() => setReporting(false)} />}
     </div>
   );
 }
 
 function Vehicles() {
-  const can = useCan();
   const [status, setStatus] = useState('');
   const res = useOne<{ data: Row[] }>(`/api/v1/vehicles${status ? `?status=${status}` : ''}`);
   return (
     <>
       <Field label="Status">
-        <select
-          className={`${input} w-56`}
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">All</option>
-          {Object.entries(VEHICLE_STATUS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v.text}
-            </option>
-          ))}
-        </select>
+        <Select
+          style={{ width: 220 }}
+          value={status || undefined}
+          onChange={(v) => setStatus(v ?? '')}
+          allowClear
+          placeholder="All"
+          options={Object.entries(VEHICLE_STATUS).map(([k, v]) => ({ value: k, label: v.text }))}
+        />
       </Field>
       <DataTable<Row>
         caption="Vehicles"
@@ -163,7 +304,7 @@ function Vehicles() {
               <Link
                 to="/vehicles/$id"
                 params={{ id: r.id }}
-                className="font-medium text-hub-teal-dark underline"
+                className="font-medium text-[#1667d9] underline"
               >
                 {r.callsign}
               </Link>
@@ -182,7 +323,6 @@ function Vehicles() {
           { key: 'st', header: 'Status', cell: (r) => <VehicleBadge v={r} /> },
         ]}
       />
-      {can('fleet.vehicle.manage') && <AddVehicle />}
     </>
   );
 }
@@ -208,141 +348,275 @@ function Equipment() {
       : r.locationId
         ? `At ${locationName.get(r.locationId) ?? 'a base'}`
         : 'Not assigned';
+  const assets = res.data?.data ?? [];
+  const tagOf = (g: Row) => {
+    const short = REGIME_SHORT[g.regime] ?? REGIMES[g.regime] ?? words(g.regime);
+    const nd = g.nextDate
+      ? new Date(`${g.nextDate as string}T12:00:00Z`).toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+        })
+      : null;
+    if (g.status === 'GREEN')
+      return {
+        tone: 'green' as const,
+        icon: 'check_circle',
+        text: `${short}: In date${nd ? ` to ${nd}` : ''}`,
+      };
+    if (g.status === 'AMBER')
+      return { tone: 'amber' as const, icon: 'schedule', text: `${short}: Due ${nd ?? 'soon'}` };
+    if (g.status === 'RED') {
+      const late = g.nextDate
+        ? Math.max(
+            1,
+            Math.floor((Date.now() - Date.parse(`${g.nextDate as string}T12:00:00Z`)) / 86_400_000),
+          )
+        : null;
+      return {
+        tone: 'red' as const,
+        icon: 'error',
+        text: `${short}: Overdue${late ? ` ${late}d` : ''} – out of use`,
+      };
+    }
+    return { tone: 'grey' as const, icon: 'radio_button_unchecked', text: `${short}: Not set up` };
+  };
+  const statusOf = (r: Row) =>
+    r.status === 'RETIRED'
+      ? { tone: 'grey' as const, icon: 'block', text: 'Retired' }
+      : r.status !== 'AVAILABLE'
+        ? {
+            tone: 'red' as const,
+            icon: 'error',
+            text: `Out of use – ${r.quarantineReason ?? 'quarantined'}`,
+          }
+        : (r.regimes as Row[]).some((g) => g.status === 'RED')
+          ? { tone: 'red' as const, icon: 'error', text: 'Out of use – inspection overdue' }
+          : { tone: 'green' as const, icon: 'check_circle', text: 'In service' };
+  const [text, setText] = useState('');
+  const [st, setSt] = useState('');
+  const [recording, setRecording] = useState<{ instanceId: string; title: string } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const t = text.trim().toLowerCase();
+  const shown = assets
+    .filter((r) => !st || statusOf(r).text === st)
+    .filter(
+      (r) => !t || `${r.assetTag} ${words(r.category)} ${where(r)}`.toLowerCase().includes(t),
+    );
+  const statuses = new Map<string, number>();
+  assets.forEach((r) => statuses.set(statusOf(r).text, (statuses.get(statusOf(r).text) ?? 0) + 1));
+  // What each vehicle can do now: the capabilities its fitted, in-service equipment gives.
+  const caps = (vehicles.data?.data ?? []).map((v) => {
+    const fitted = assets.filter((a) => a.vehicleId === v.id && a.capability);
+    const by = new Map<string, boolean>();
+    for (const a of fitted) {
+      const ok = statusOf(a).tone === 'green';
+      by.set(a.capability, (by.get(a.capability) ?? false) || ok);
+    }
+    return { v, caps: [...by].sort((x, y) => Number(x[1]) - Number(y[1])) };
+  });
   return (
     <>
-      <DataTable<Row>
-        caption="Equipment"
-        rows={res.data?.data ?? []}
-        rowKey={(r) => r.id}
-        loading={res.isLoading}
-        error={res.isError ? 'Could not load equipment.' : null}
-        emptyMessage="No equipment."
-        columns={[
-          {
-            key: 'tag',
-            header: 'Asset',
-            cell: (r) => (
-              <>
-                <span className="font-medium">{r.assetTag}</span>
-                {(r.manufacturer || r.model) && (
-                  <span className="block text-xs">
-                    {[r.manufacturer, r.model].filter(Boolean).join(' ')}
-                    {r.serial ? ` · serial ${r.serial}` : ''}
-                  </span>
-                )}
-              </>
-            ),
-          },
-          { key: 'cat', header: 'Category', cell: (r) => words(r.category) },
-          { key: 'where', header: 'Where', cell: where },
-          {
-            key: 'swl',
-            header: 'Safe working load',
-            cell: (r) => (r.swlKg ? `${r.swlKg} kg` : '—'),
-          },
-          {
-            key: 'reg',
-            header: 'Inspection regimes',
-            cell: (r) =>
-              r.regimes.length === 0 ? (
-                <StatusBadge status="GREY" reason="No inspection regime set up" />
-              ) : (
-                <ul className="space-y-1">
-                  {r.regimes.map((g: Row) => (
-                    <li key={g.regime}>
-                      {REGIMES[g.regime] ?? words(g.regime)}:{' '}
-                      <StatusBadge status={g.status as StatusKind} reason={g.reasonText} />
-                    </li>
-                  ))}
-                </ul>
-              ),
-          },
-          {
-            key: 'st',
-            header: 'Status',
-            cell: (r) => (
-              <StatusBadge
-                status={
-                  r.status === 'AVAILABLE' ? 'GREEN' : r.status === 'RETIRED' ? 'GREY' : 'RED'
-                }
-                reason={
-                  r.status === 'AVAILABLE'
-                    ? 'In service'
-                    : r.status === 'RETIRED'
-                      ? 'Retired'
-                      : `Quarantined – ${r.quarantineReason ?? ''}`
-                }
-              />
-            ),
-          },
-          {
-            key: 'act',
-            header: 'Action',
-            cell: (r) => (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className={smallButton}
-                  aria-label={`${viewing === r.id ? 'Hide' : 'Show'} details of ${r.assetTag}`}
-                  aria-expanded={viewing === r.id}
-                  onClick={() => setViewing(viewing === r.id ? null : r.id)}
-                >
-                  {viewing === r.id ? 'Hide details' : 'Details'}
-                </button>
-                {r.status !== 'RETIRED' && can('fleet.vehicle.manage') && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Edit ${r.assetTag}`}
-                    onClick={() => setEditing(r)}
-                  >
-                    Edit
-                  </button>
-                )}
-                {r.status !== 'RETIRED' && can('fleet.vehicle.manage') && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Add inspection regime to ${r.assetTag}`}
-                    onClick={() => setRegimeFor(r)}
-                  >
-                    Add inspection regime
-                  </button>
-                )}
-                {r.status === 'AVAILABLE' && can('fleet.vehicle.manage') && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Quarantine ${r.assetTag}`}
-                    onClick={() => setActing({ r, kind: 'quarantine' })}
-                  >
-                    Quarantine
-                  </button>
-                )}
-                {r.status === 'QUARANTINED' &&
-                  can('fleet.return_to_service') &&
-                  (r.quarantinedBy === me.user.id ? (
-                    <span className="text-xs">
-                      You quarantined {r.assetTag}: someone else must release it.
-                    </span>
+      <WfCard title="What each vehicle can do now">
+        <div className="wf-cap">
+          {caps.map(({ v, caps: list }) => (
+            <div key={v.id}>
+              <b>{v.callsign}</b>
+              <div className="wf-pills">
+                {list.length === 0 && <span className="wf-mut">Nothing fitted</span>}
+                {list.map(([k, ok]) =>
+                  ok ? (
+                    <WfTag key={k} tone="green" icon="check">
+                      {CAPABILITY[k] ?? words(k)}
+                    </WfTag>
                   ) : (
-                    <button
-                      className={smallButton}
-                      aria-label={`Release ${r.assetTag}`}
-                      onClick={() => setActing({ r, kind: 'release' })}
-                    >
-                      Release
-                    </button>
-                  ))}
+                    <WfTag key={k} tone="red" icon="block">
+                      {CAPABILITY[k] ?? words(k)} out of use
+                    </WfTag>
+                  ),
+                )}
               </div>
-            ),
-          },
-        ]}
-      />
+            </div>
+          ))}
+        </div>
+      </WfCard>
+      <WfCard
+        title="Equipment register"
+        table
+        extra={
+          can('fleet.vehicle.manage') && (
+            <Button size="small" icon={<Ms i="add" />} onClick={() => setAdding(true)}>
+              Add equipment
+            </Button>
+          )
+        }
+      >
+        <div className="pc-tools rec-f in-card">
+          <WfSearch value={text} onChange={setText} />
+          <WfSelect
+            label="Filter by status"
+            value={st}
+            onChange={setSt}
+            options={[
+              { value: '', label: 'All statuses' },
+              ...[...statuses].map(([k, n]) => ({ value: k, label: `${k} (${n})` })),
+            ]}
+          />
+        </div>
+        <DataTable<Row>
+          caption="Equipment register"
+          rows={shown}
+          rowKey={(r) => r.id}
+          loading={res.isLoading}
+          error={res.isError ? 'Could not load equipment.' : null}
+          emptyMessage="No equipment."
+          rowTone={(r) => {
+            const x = statusOf(r).tone;
+            if (x === 'red') return 'red';
+            return (r.regimes as Row[]).some((g) => g.status === 'AMBER') ? 'amber' : null;
+          }}
+          columns={[
+            {
+              key: 'i',
+              header: 'Item',
+              cell: (r) => (
+                <>
+                  <b>
+                    {r.assetTag} · {words(r.category)}
+                  </b>
+                  <span className="sub">
+                    {[
+                      where(r),
+                      r.swlKg ? `SWL ${r.swlKg as number} kg` : null,
+                      r.capability
+                        ? `gives ${CAPABILITY[r.capability] ?? words(r.capability)}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </>
+              ),
+            },
+            {
+              key: 'reg',
+              header: 'Inspection regimes',
+              cell: (r) =>
+                (r.regimes as Row[]).length === 0 ? (
+                  <WfTag tone="grey" icon="radio_button_unchecked">
+                    No inspection regime set up
+                  </WfTag>
+                ) : (
+                  <div className="wf-pills col">
+                    {(r.regimes as Row[]).map((g) => {
+                      const x = tagOf(g);
+                      return (
+                        <WfTag key={g.regime} tone={x.tone} icon={x.icon}>
+                          {x.text}
+                        </WfTag>
+                      );
+                    })}
+                  </div>
+                ),
+            },
+            {
+              key: 'st',
+              header: 'Status',
+              cell: (r) => {
+                const x = statusOf(r);
+                return (
+                  <WfTag tone={x.tone} icon={x.icon}>
+                    {x.text}
+                  </WfTag>
+                );
+              },
+            },
+            {
+              key: 'act',
+              header: '',
+              cell: (r) => {
+                const manage = can('fleet.vehicle.manage');
+                const worst =
+                  (r.regimes as Row[]).find((g) => g.status === 'RED') ??
+                  (r.regimes as Row[]).find((g) => g.status === 'AMBER') ??
+                  (r.regimes as Row[])[0];
+                const more = [
+                  {
+                    label: viewing === r.id ? 'Hide details' : 'Details',
+                    icon: 'info',
+                    onClick: () => setViewing(viewing === r.id ? null : r.id),
+                  },
+                  ...(r.status !== 'RETIRED' && manage
+                    ? [
+                        { label: 'Edit', icon: 'edit', onClick: () => setEditing(r) },
+                        {
+                          label: 'Add inspection regime',
+                          icon: 'add',
+                          onClick: () => setRegimeFor(r),
+                        },
+                      ]
+                    : []),
+                  ...(r.status === 'AVAILABLE' && manage
+                    ? [
+                        {
+                          label: 'Quarantine',
+                          icon: 'block',
+                          danger: true,
+                          onClick: () => setActing({ r, kind: 'quarantine' as const }),
+                        },
+                      ]
+                    : []),
+                  ...(r.status === 'QUARANTINED' &&
+                  can('fleet.return_to_service') &&
+                  r.quarantinedBy !== me.user.id
+                    ? [
+                        {
+                          label: 'Release',
+                          icon: 'check',
+                          onClick: () => setActing({ r, kind: 'release' as const }),
+                        },
+                      ]
+                    : []),
+                ];
+                return (
+                  <RowActions
+                    name={r.assetTag}
+                    primary={
+                      worst
+                        ? {
+                            label: 'Record inspection',
+                            icon: 'fact_check',
+                            onClick: () =>
+                              setRecording({
+                                instanceId: worst.requirementInstanceId,
+                                title: `${r.assetTag as string} – ${REGIMES[worst.regime] ?? words(worst.regime)}`,
+                              }),
+                          }
+                        : null
+                    }
+                    more={more}
+                  />
+                );
+              },
+            },
+          ]}
+        />
+      </WfCard>
+      <EvidenceDialog target={recording} onClose={() => setRecording(null)} />
       {(res.data?.data ?? [])
         .filter((r) => r.id === viewing)
         .map((r) => (
           <EquipmentDetail key={r.id} asset={r} where={where(r)} />
         ))}
-      {can('fleet.vehicle.manage') && (
+      <Modal
+        open={adding}
+        title="Add equipment"
+        footer={null}
+        width={900}
+        onCancel={() => setAdding(false)}
+        destroyOnHidden
+      >
         <AddEquipment vehicles={vehicles.data?.data ?? []} locations={locations.data?.data ?? []} />
-      )}
+      </Modal>
       <EquipmentEditDialog
         asset={editing}
         vehicles={vehicles.data?.data ?? []}
@@ -516,7 +790,9 @@ function AddEquipment({ vehicles, locations }: { vehicles: Row[]; locations: Row
           </Field>
         </div>
         <div className="md:col-span-3">
-          <button className={button}>Add equipment</button>
+          <Button type="primary" htmlType="submit">
+            Add equipment
+          </Button>
         </div>
       </form>
       {msg}
@@ -557,36 +833,28 @@ function RegimeDialog({ asset, onClose }: { asset: Row | null; onClose: () => vo
       fields={
         <div className="grid gap-3">
           <Field label="Regime">
-            <select className={input} value={regime} onChange={(e) => setRegime(e.target.value)}>
-              {Object.entries(REGIMES).map(([k, v]) => (
-                <option key={k} value={k} disabled={taken.has(k)}>
-                  {v}
-                  {taken.has(k) ? ' (already set up)' : ''}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={regime}
+              onChange={setRegime}
+              style={{ width: '100%' }}
+              options={Object.entries(REGIMES).map(([k, v]) => ({
+                value: k,
+                label: `${v}${taken.has(k) ? ' (already set up)' : ''}`,
+                disabled: taken.has(k),
+              }))}
+            />
           </Field>
           <Field label="Requirement it follows">
-            <select
-              className={input}
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              <option value="">Choose a published equipment requirement</option>
-              {usable.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={templateId || undefined}
+              placeholder="Choose a published equipment requirement"
+              onChange={setTemplateId}
+              style={{ width: '100%' }}
+              options={usable.map((t) => ({ value: t.id, label: t.title }))}
+            />
           </Field>
           <Field label="Where the schedule comes from (optional)">
-            <input
-              className={input}
-              maxLength={300}
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-            />
+            <Input maxLength={300} value={source} onChange={(e) => setSource(e.target.value)} />
           </Field>
         </div>
       }
@@ -652,8 +920,8 @@ function Expenses() {
                 onChange={(e) => setTo(e.target.value)}
               />
             </Field>
-            <button
-              className={smallButton}
+            <Button
+              size="small"
               onClick={() =>
                 void run(async () => {
                   // D7: the export is approved claims for the chosen period.
@@ -668,7 +936,7 @@ function Expenses() {
               }
             >
               Export approved claims (CSV)
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -749,20 +1017,20 @@ function Expenses() {
                   <span className="text-xs">Someone else must approve your claim.</span>
                 ) : (
                   <div className="flex gap-2">
-                    <button
-                      className={smallButton}
+                    <Button
+                      size="small"
                       aria-label={`Approve: ${name(r)}`}
                       onClick={() => setDeciding({ r, d: 'APPROVED' })}
                     >
                       Approve
-                    </button>
-                    <button
-                      className={smallButton}
+                    </Button>
+                    <Button
+                      size="small"
                       aria-label={`Reject: ${name(r)}`}
                       onClick={() => setDeciding({ r, d: 'REJECTED' })}
                     >
                       Reject
-                    </button>
+                    </Button>
                   </div>
                 )
               ) : null,
@@ -906,7 +1174,9 @@ function SubmitExpense() {
         </Field>
         <ReceiptPicker file={receipt} onChange={setReceipt} />
         <div className="md:col-span-3">
-          <button className={button}>Submit claim</button>
+          <Button type="primary" htmlType="submit">
+            Submit claim
+          </Button>
         </div>
       </form>
       {msg}

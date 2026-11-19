@@ -1,7 +1,19 @@
-import { useState, type ReactNode } from 'react';
+﻿import { Alert, Button, Flex, Input, Modal, Typography } from 'antd';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useContext,
+  useId,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { ApiError } from './api.js';
 import { useInvalidate } from './pages/settings/hooks.js';
 import { useApp } from './shell/AppContext.js';
+import { Ms, TabLevel, ViewSwitch, WfCard, useHeadSlots } from './v36/ui.js';
 
 const FIELD_NAMES: Record<string, string> = {
   registration: 'Registration',
@@ -19,10 +31,6 @@ const fieldName = (path: string) =>
     .replace(/([A-Z])/g, ' $1')
     .replace(/^./, (c) => c.toUpperCase());
 
-/**
- * Plain-English server errors (never echo payloads). The server's own explanation wins; codes are
- * only a fallback, so people see what to do next rather than a generic refusal.
- */
 export function errText(e: unknown): string {
   if (e instanceof ApiError) {
     if (e.errors.length > 0)
@@ -50,7 +58,6 @@ export function errText(e: unknown): string {
   return 'Could not reach the server.';
 }
 
-/** Reasons the server gave (for example the checks still missing), as plain lines. */
 export function errReasons(e: unknown): string[] {
   if (!(e instanceof ApiError)) return [];
   return e.checks
@@ -58,7 +65,6 @@ export function errReasons(e: unknown): string[] {
     .filter((s): s is string => typeof s === 'string' && s.length > 0);
 }
 
-/** Runs a mutation, reports the outcome in a live region and refreshes cached data. */
 export function useRun() {
   const invalidate = useInvalidate();
   const [msg, setMsg] = useState<{ ok: boolean; text: string; reasons?: string[] } | null>(null);
@@ -75,21 +81,21 @@ export function useRun() {
     }
   }
   const node = msg ? (
-    <p
+    <Alert
+      type={msg.ok ? 'success' : 'error'}
+      showIcon
       role={msg.ok ? 'status' : 'alert'}
-      className={`rounded border p-2 text-sm ${msg.ok ? 'border-green-700 bg-green-50 text-green-900' : 'border-red-700 bg-red-50 text-red-900'}`}
-    >
-      {msg.text}
-      {msg.reasons && msg.reasons.length > 0 && (
-        <span className="mt-1 block">
-          <ul className="list-disc pl-5">
+      message={msg.text}
+      description={
+        msg.reasons && msg.reasons.length > 0 ? (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
             {msg.reasons.map((r) => (
               <li key={r}>{r}</li>
             ))}
           </ul>
-        </span>
-      )}
-    </p>
+        ) : undefined
+      }
+    />
   ) : null;
   return { run, msg: node };
 }
@@ -105,7 +111,12 @@ export interface Tab {
   show?: boolean;
 }
 
-/** Accessible tab strip (arrow keys move between tabs). */
+/** Ant-themed tab strip with stable role=tab names for tests and AT. */
+/**
+ * v36 module tabs. The page's top-level tabs render in the shell's white head band (as in the v36
+ * HTML); a tab set inside one of those panels becomes the blue switch at the right of the band, and
+ * deeper ones render in place as v36 view pills.
+ */
 export function Tabs({
   label,
   tabs,
@@ -119,40 +130,76 @@ export function Tabs({
   onChange: (id: string) => void;
   children: ReactNode;
 }) {
+  const level = useContext(TabLevel);
+  const slots = useHeadSlots();
+  const [sub, setSub] = useState<HTMLElement | null>(null);
   const visible = tabs.filter((t) => t.show !== false);
+  const top = level.depth === 0 && !!slots.tabs;
+  if (!top)
+    return (
+      <>
+        <ViewSwitch
+          label={label}
+          options={visible.map((t) => ({ id: t.id, label: t.label }))}
+          current={current}
+          onChange={onChange}
+        />
+        <div
+          role="tabpanel"
+          id="tab-panel"
+          aria-labelledby={`tab-${current}`}
+          className="hh-tabpanel"
+        >
+          <TabLevel.Provider value={{ depth: level.depth + 1, sub: null }}>
+            {children}
+          </TabLevel.Provider>
+        </div>
+      </>
+    );
+  const nav = (
+    <div className="ant-tabs ant-tabs-top pc-tabs">
+      <nav className="ant-tabs-nav mod-tabs" aria-label={label}>
+        <div className="ant-tabs-nav-wrap">
+          <div className="ant-tabs-nav-list" role="tablist" aria-label={label}>
+            {visible.map((t, i) => {
+              const on = current === t.id;
+              return (
+                <div key={t.id} className={`ant-tabs-tab${on ? ' ant-tabs-tab-active' : ''}`}>
+                  <button
+                    type="button"
+                    role="tab"
+                    id={`tab-${t.id}`}
+                    aria-selected={on}
+                    aria-controls="tab-panel"
+                    tabIndex={on ? 0 : -1}
+                    className={`ant-tabs-tab-btn${on ? ' on' : ''}`}
+                    onKeyDown={(e) => {
+                      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+                      if (d) onChange(visible[(i + d + visible.length) % visible.length]!.id);
+                    }}
+                    onClick={() => onChange(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="ant-tabs-extra-content" ref={setSub} />
+      </nav>
+    </div>
+  );
   return (
     <>
-      <div
-        role="tablist"
-        aria-label={label}
-        className="glass flex flex-wrap gap-1 rounded-xl border border-hub-line p-1.5"
-      >
-        {visible.map((t, i) => (
-          <button
-            key={t.id}
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={current === t.id}
-            aria-controls="tab-panel"
-            tabIndex={current === t.id ? 0 : -1}
-            onKeyDown={(e) => {
-              const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-              if (d) onChange(visible[(i + d + visible.length) % visible.length]!.id);
-            }}
-            onClick={() => onChange(t.id)}
-            className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold ${current === t.id ? 'bg-hub-teal' : 'text-hub-ink hover:bg-hub-row hover:text-hub-teal-dark'}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {createPortal(nav, slots.tabs!)}
       <div
         role="tabpanel"
         id="tab-panel"
         aria-labelledby={`tab-${current}`}
-        className="space-y-4 pt-4"
+        className="hh-tabpanel"
       >
-        {children}
+        <TabLevel.Provider value={{ depth: 1, sub }}>{children}</TabLevel.Provider>
       </div>
     </>
   );
@@ -163,11 +210,104 @@ export const button = 'btn-primary';
 export const smallButton = 'btn-ghost';
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
+  // Strip colons from useId so htmlFor/getElementById work under jsdom.
+  const autoId = `f-${useId().replace(/:/g, '')}`;
+  // Label the first form control, even when a hint or status line sits beside it.
+  const items = Children.toArray(children);
+  const isControl = (c: unknown) =>
+    isValidElement(c) &&
+    (typeof c.type !== 'string' || ['input', 'select', 'textarea'].includes(c.type));
+  const at = items.length === 1 && isValidElement(items[0]) ? 0 : items.findIndex(isControl);
+  const child = at >= 0 && isValidElement(items[at]) ? items[at] : null;
+  const controlId = (child?.props as { id?: string } | undefined)?.id ?? autoId;
+  const control = child
+    ? items.map((c, i) =>
+        i === at
+          ? cloneElement(child as ReactElement<{ id?: string }>, {
+              id: (child.props as { id?: string }).id ?? controlId,
+            })
+          : c,
+      )
+    : children;
   return (
-    <label className="flex flex-col text-sm">
-      {label}
-      {children}
+    <label
+      htmlFor={controlId}
+      style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14 }}
+    >
+      <span>{label}</span>
+      {control}
     </label>
+  );
+}
+
+/** v36 page title block (Typography.Title + optional supporting line). */
+/**
+ * The page title as in v36: in the white head band, with a help button that shows what the page
+ * is for, and the page's main buttons on the right. Level 2+ headings render in place.
+ */
+export function PageHeader({
+  title,
+  description,
+  extra,
+  headingLevel = 1,
+}: {
+  title: string;
+  description?: ReactNode;
+  extra?: ReactNode;
+  /** Use 2 for a tab panel section under a module H1. */
+  headingLevel?: 1 | 2 | 3 | 4 | 5;
+}) {
+  const slots = useHeadSlots();
+  const [about, setAbout] = useState(false);
+  if (headingLevel !== 1 || !slots.top)
+    return (
+      <Flex wrap="wrap" align="flex-start" justify="space-between" gap={12}>
+        <div className="min-w-0">
+          <Typography.Title
+            level={headingLevel}
+            className="!mb-1 !text-xl !font-semibold !leading-8"
+          >
+            {title}
+          </Typography.Title>
+          {description ? (
+            <div className="max-w-3xl text-sm text-slate-700">{description}</div>
+          ) : null}
+        </div>
+        {extra ? <div className="shrink-0">{extra}</div> : null}
+      </Flex>
+    );
+  return (
+    <>
+      {createPortal(
+        <>
+          <div className="pc-tr">
+            <div className="pc-tl wf-ht">
+              <h1>{title}</h1>
+              {description ? (
+                <button
+                  type="button"
+                  className="pc-help ant-btn ant-btn-text ant-btn-sm ant-btn-icon-only"
+                  aria-expanded={about}
+                  aria-label="How this page works"
+                  title="How this page works"
+                  onClick={() => setAbout((a) => !a)}
+                >
+                  <Ms i="help" />
+                </button>
+              ) : null}
+            </div>
+            {extra ? <div className="pc-ex wf-a">{extra}</div> : null}
+          </div>
+          {description ? (
+            <div className="pc-desc">
+              <span className="pc-dt">{description}</span>
+            </div>
+          ) : null}
+          {about && description ? <div className="hh-about">{description}</div> : null}
+        </>,
+        slots.top,
+      )}
+    </>
   );
 }
 
@@ -180,17 +320,10 @@ export function Section({
   children: ReactNode;
   actions?: ReactNode;
 }) {
-  const id = `sec-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   return (
-    <section aria-labelledby={id} className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h2 id={id} className="section-title text-lg font-bold">
-          {title}
-        </h2>
-        {actions}
-      </div>
+    <WfCard title={title} extra={actions} className="hh-section">
       {children}
-    </section>
+    </WfCard>
   );
 }
 
@@ -204,7 +337,6 @@ export const words = (code: string | null | undefined) =>
         .replace(/^./, (c) => c.toUpperCase())
     : '';
 
-/** Saves a Blob as a file in the browser. */
 export function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -217,34 +349,24 @@ export function saveBlob(blob: Blob, filename: string) {
 export interface ActionDialogProps {
   open: boolean;
   title: string;
-  /** What will happen, in plain words. */
   children?: ReactNode;
   confirmLabel: string;
-  /** Label for the reason box; omit for no reason box. */
   reasonLabel?: string;
   reasonRequired?: boolean;
-  /** Extra fields rendered above the reason (controlled by the caller). */
   fields?: ReactNode;
-  /** Disable confirm (for example while extra fields are incomplete). */
   confirmDisabled?: boolean;
   danger?: boolean;
   onCancel: () => void;
-  /** Runs the change; resolve to close, throw to show the error inside the dialog. */
   onConfirm: (reason: string) => Promise<unknown>;
   successText?: string;
 }
 
-/**
- * In-app confirm dialog with an optional reason (UI_SPEC interaction rules: destructive and
- * approval actions need a confirm with reason). Replaces browser pop-ups, which cannot be styled,
- * are not accessible and block automation.
- */
 export function ActionDialog(p: ActionDialogProps) {
   const invalidate = useInvalidate();
+  const titleId = useId();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; reasons: string[] } | null>(null);
-  if (!p.open) return null;
   const needReason = p.reasonLabel !== undefined && (p.reasonRequired ?? true);
   const tooShort = needReason && reason.trim().length < 3;
   const close = () => {
@@ -267,75 +389,69 @@ export function ActionDialog(p: ActionDialogProps) {
     }
   };
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') close();
-      }}
+    <Modal
+      open={p.open}
+      title={<span id={titleId}>{p.title}</span>}
+      aria-labelledby={titleId}
+      onCancel={close}
+      destroyOnHidden
+      transitionName=""
+      maskTransitionName=""
+      footer={[
+        <Button key="cancel" onClick={close} disabled={busy}>
+          Cancel
+        </Button>,
+        <Button
+          key="ok"
+          type="primary"
+          danger={p.danger}
+          loading={busy}
+          disabled={tooShort || p.confirmDisabled}
+          onClick={() => void confirm()}
+        >
+          {p.confirmLabel}
+        </Button>,
+      ]}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="action-dialog-title"
-        className="hud w-full max-w-lg rounded-xl border border-hub-line bg-hub-card-2 p-5 shadow-glow rise-in"
-      >
-        <h2 id="action-dialog-title" className="text-lg font-semibold">
-          {p.title}
-        </h2>
-        {p.children && <div className="mt-2 space-y-2 text-sm">{p.children}</div>}
-        {p.fields && <div className="mt-3 space-y-3">{p.fields}</div>}
-        {p.reasonLabel !== undefined && (
-          <label className="mt-3 block text-sm">
-            <span className="mb-1 block font-medium">
-              {p.reasonLabel}
-              {needReason ? ' (required)' : ' (optional)'}
-            </span>
-            <textarea
-              autoFocus
-              className="field w-full p-2"
-              rows={3}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </label>
-        )}
-        {error && (
-          <div
-            role="alert"
-            className="mt-3 rounded border border-red-700 bg-red-50 p-2 text-sm text-red-900"
-          >
-            {error.text}
-            {error.reasons.length > 0 && (
-              <ul className="mt-1 list-disc pl-5">
+      {p.children && <div style={{ marginBottom: 12 }}>{p.children}</div>}
+      {p.fields && <div style={{ marginBottom: 12 }}>{p.fields}</div>}
+      {p.reasonLabel !== undefined && (
+        <label style={{ display: 'block', marginBottom: 12, fontSize: 14 }}>
+          <span style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+            {p.reasonLabel}
+            {needReason ? ' (required)' : ' (optional)'}
+          </span>
+          <Input.TextArea
+            autoFocus
+            rows={3}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+      )}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          role="alert"
+          message={error.text}
+          description={
+            error.reasons.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {error.reasons.map((r) => (
                   <li key={r}>{r}</li>
                 ))}
               </ul>
-            )}
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className={smallButton} onClick={close} disabled={busy}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold disabled:opacity-50 ${p.danger ? 'bg-red-700 text-white shadow-[0_6px_16px_-6px_rgb(220_38_38/0.6)] hover:bg-red-500' : 'bg-hub-teal'}`}
-            disabled={busy || tooShort || p.confirmDisabled}
-            onClick={() => void confirm()}
-          >
-            {busy ? 'Working…' : p.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+            ) : undefined
+          }
+        />
+      )}
+    </Modal>
   );
 }
 
-// ICU versions differ on "Sep" vs "Sept"; screens use the same three-letter months everywhere.
 const sameMonths = (s: string) => s.replace('Sept', 'Sep');
 
-/** UK date for a date-only value ("4 Nov 2026"); empty when missing. */
 export const fmtDate = (d: string | null | undefined) =>
   d
     ? sameMonths(
@@ -348,7 +464,6 @@ export const fmtDate = (d: string | null | undefined) =>
       )
     : '';
 
-/** UK date and time in London time ("4 Nov 2026, 14:05"); empty when missing. */
 export const fmtDateTime = (d: string | null | undefined) =>
   d
     ? sameMonths(
@@ -363,7 +478,6 @@ export const fmtDateTime = (d: string | null | undefined) =>
       )
     : '';
 
-/** Owner picker: active members by name, with their role so the right person is chosen. */
 export function PersonSelect({
   label,
   value,
@@ -380,9 +494,9 @@ export function PersonSelect({
   optional?: boolean;
 }) {
   return (
-    <label className="flex flex-col text-sm">
-      {label}
-      <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14 }}>
+      <span>{label}</span>
+      <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
         {optional && <option value="">Nobody yet</option>}
         {people.length === 0 && <option value={meId}>Me</option>}
         {people.map((p) => (

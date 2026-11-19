@@ -1,17 +1,48 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { Alert, Button, Card, Checkbox, Input, Space, Typography } from 'antd';
 import { AUTH_MESSAGES, passwordProblem } from '@hub/contracts';
 import { LocalAuthError, type LocalAuthClient, type LocalStep } from '../auth.js';
-import { BRAND, BrandMark, HeroArt } from '../brand.js';
+import { BRAND, BrandMark } from '../brand.js';
+
+/** A label above its box and an optional hint below it (no inline labels or colons). */
+function Field({
+  id,
+  label,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm font-semibold text-hub-ink">
+        {label}
+      </label>
+      {children}
+      {hint && (
+        <span id={`${id}-hint`} className="text-xs text-hub-muted">
+          {hint}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const WHAT_IT_COVERS = [
+  'Staff readiness, training and pre-employment checks',
+  'Vehicle checks, defects and safe return to service',
+  'Incidents, safeguarding and complaints',
+  'Evidence and governance, ready for CQC',
+];
 
 type Step =
   | { kind: 'credentials' }
   | { kind: 'mfa'; challengeId: string }
   | { kind: 'mfa-setup'; challengeId: string; secret?: string; otpauthUri?: string }
   | { kind: 'password-change'; challengeId: string };
-
-const input = 'field mt-1 block w-full px-3 py-2 text-base';
-const primary = 'btn-primary w-full py-3 text-base';
-const secondary = 'text-sm font-semibold text-hub-teal-dark underline underline-offset-2';
 
 /**
  * Username + password sign-in run by the Healthcare Hub API (VITE_AUTH_MODE=local, ADR 0006):
@@ -54,7 +85,6 @@ export function LocalSignIn({
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign-in failed. Try again.';
       setError(message);
-      // An expired or used-up challenge cannot be retried: start again from the password.
       if (err instanceof LocalAuthError && message === AUTH_MESSAGES.challengeExpired) {
         setStep({ kind: 'credentials' });
         setPassword('');
@@ -127,23 +157,19 @@ export function LocalSignIn({
   }
 
   const showToggle = (
-    <label className="flex items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        checked={showPassword}
-        onChange={(e) => setShowPassword(e.target.checked)}
-        className="accent-hub-teal"
-      />
+    <Checkbox checked={showPassword} onChange={(e) => setShowPassword(e.target.checked)}>
       Show password
-    </label>
+    </Checkbox>
   );
 
   const codeField = (
-    <div>
-      <label htmlFor={`${ids}-code`} className="block text-sm font-semibold">
-        6-digit code
-      </label>
-      <input
+    <Field
+      id={`${ids}-code`}
+      label="6-digit code"
+      hint="From the authenticator app on your phone. A new code appears every 30 seconds."
+    >
+      <Input
+        size="large"
         id={`${ids}-code`}
         name="code"
         inputMode="numeric"
@@ -151,227 +177,244 @@ export function LocalSignIn({
         maxLength={6}
         value={code}
         onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-        className={input}
         aria-describedby={`${ids}-code-hint`}
       />
-      <p id={`${ids}-code-hint`} className="mt-1 text-xs text-hub-muted">
-        From the authenticator app on your phone. A new code appears every 30 seconds.
-      </p>
-    </div>
+    </Field>
   );
 
   let body: ReactNode;
   if (step.kind === 'credentials') {
     body = (
-      <form onSubmit={submitCredentials} className="space-y-4" noValidate>
-        <div>
-          <label htmlFor={`${ids}-username`} className="block text-sm font-semibold">
-            Username
-          </label>
-          <p id={`${ids}-username-hint`} className="text-xs text-hub-muted">
-            Your work email address.
-          </p>
-          <input
-            id={`${ids}-username`}
-            name="username"
-            type="text"
-            autoComplete="username"
-            autoCapitalize="none"
-            spellCheck={false}
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className={input}
-            aria-describedby={`${ids}-username-hint`}
-          />
-        </div>
-        <div>
-          <label htmlFor={`${ids}-password`} className="block text-sm font-semibold">
-            Password
-          </label>
-          <input
-            id={`${ids}-password`}
-            name="password"
-            type={showPassword ? 'text' : 'password'}
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={input}
-          />
-        </div>
-        {showToggle}
-        <button type="submit" disabled={busy} className={primary}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-        <p className="text-xs text-hub-muted">
-          Forgotten your password? Ask your organisation administrator to reset it.
-        </p>
+      <form onSubmit={submitCredentials} noValidate>
+        <Space direction="vertical" size={20} className="w-full">
+          <Field id={`${ids}-username`} label="Work email">
+            <Input
+              id={`${ids}-username`}
+              name="username"
+              size="large"
+              type="email"
+              autoComplete="username"
+              autoCapitalize="off"
+              spellCheck={false}
+              placeholder="name@organisation.co.uk"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </Field>
+          <Field id={`${ids}-password`} label="Password">
+            <Input
+              id={`${ids}-password`}
+              name="password"
+              size="large"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          {showToggle}
+          <Button type="primary" htmlType="submit" size="large" block disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </Button>
+          <Typography.Text type="secondary" className="block text-xs leading-relaxed">
+            Forgotten your password? Ask your organisation administrator to reset it. Managers and
+            other senior roles may be asked for a code from an authenticator app next.
+          </Typography.Text>
+        </Space>
       </form>
     );
   } else if (step.kind === 'mfa') {
     const { challengeId } = step;
     body = (
-      <form onSubmit={(e) => submitCode(e, challengeId)} className="space-y-4" noValidate>
-        <h2 className="text-lg font-semibold">Enter your authentication code</h2>
-        <p className="text-sm">{AUTH_MESSAGES.mfaNeeded}.</p>
-        {codeField}
-        <button type="submit" disabled={busy} className={primary}>
-          {busy ? 'Checking…' : 'Verify code'}
-        </button>
-        <button type="button" onClick={restart} className={secondary}>
-          Cancel and start again
-        </button>
+      <form onSubmit={(e) => submitCode(e, challengeId)} noValidate>
+        <Space direction="vertical" size="middle" className="w-full">
+          <Typography.Title level={2} className="!text-lg !mb-0">
+            Enter your authentication code
+          </Typography.Title>
+          <Typography.Paragraph className="!mb-0">{AUTH_MESSAGES.mfaNeeded}.</Typography.Paragraph>
+          {codeField}
+          <Button type="primary" htmlType="submit" size="large" block disabled={busy}>
+            {busy ? 'Checking…' : 'Verify code'}
+          </Button>
+          <Button type="link" onClick={restart} className="!px-0">
+            Cancel and start again
+          </Button>
+        </Space>
       </form>
     );
   } else if (step.kind === 'mfa-setup') {
     const { challengeId, secret, otpauthUri } = step;
     body = (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">Set up multi-factor sign-in</h2>
-        <p className="text-sm">
+      <Space direction="vertical" size="middle" className="w-full">
+        <Typography.Title level={2} className="!text-lg !mb-0">
+          Set up multi-factor sign-in
+        </Typography.Title>
+        <Typography.Paragraph className="!mb-0">
           {AUTH_MESSAGES.mfaNeeded}. Add Healthcare Hub to an authenticator app on your phone (for
           example Microsoft Authenticator), then enter the code it shows.
-        </p>
+        </Typography.Paragraph>
         {!secret ? (
-          <button
-            type="button"
+          <Button
+            type="primary"
+            size="large"
+            block
             disabled={busy}
             onClick={() => startEnrolment(challengeId)}
-            className={primary}
           >
             {busy ? 'Preparing…' : 'Show my set-up key'}
-          </button>
+          </Button>
         ) : (
-          <form onSubmit={(e) => submitCode(e, challengeId)} className="space-y-4" noValidate>
-            <div className="space-y-2 rounded-md border border-hub-line bg-hub-row p-3 text-sm">
-              <p>
-                In the app choose “Enter a set-up key” (time-based) and type this key. It is shown
-                only now; do not share it.
-              </p>
-              <p>
-                <span className="font-semibold">Set-up key: </span>
-                <code className="break-all font-mono" aria-label="Set-up key">
-                  {secret}
-                </code>
-              </p>
-              <p>
-                <span className="font-semibold">Or paste this link into the app: </span>
-                <code className="break-all font-mono text-xs" aria-label="Set-up link">
-                  {otpauthUri}
-                </code>
-              </p>
-            </div>
-            {codeField}
-            <button type="submit" disabled={busy} className={primary}>
-              {busy ? 'Checking…' : 'Confirm and sign in'}
-            </button>
+          <form onSubmit={(e) => submitCode(e, challengeId)} noValidate>
+            <Space direction="vertical" size="middle" className="w-full">
+              <Card size="small" className="bg-hub-row">
+                <Typography.Paragraph className="!mb-2 !text-sm">
+                  In the app choose “Enter a set-up key” (time-based) and type this key. It is shown
+                  only now; do not share it.
+                </Typography.Paragraph>
+                <Typography.Paragraph className="!mb-2 !text-sm">
+                  <Typography.Text strong>Set-up key: </Typography.Text>
+                  <Typography.Text code className="break-all" aria-label="Set-up key">
+                    {secret}
+                  </Typography.Text>
+                </Typography.Paragraph>
+                <Typography.Paragraph className="!mb-0 !text-sm">
+                  <Typography.Text strong>Or paste this link into the app: </Typography.Text>
+                  <Typography.Text code className="break-all text-xs" aria-label="Set-up link">
+                    {otpauthUri}
+                  </Typography.Text>
+                </Typography.Paragraph>
+              </Card>
+              {codeField}
+              <Button type="primary" htmlType="submit" size="large" block disabled={busy}>
+                {busy ? 'Checking…' : 'Confirm and sign in'}
+              </Button>
+            </Space>
           </form>
         )}
-        <button type="button" onClick={restart} className={secondary}>
+        <Button type="link" onClick={restart} className="!px-0">
           Cancel and start again
-        </button>
-      </div>
+        </Button>
+      </Space>
     );
   } else {
     const { challengeId } = step;
     body = (
-      <form onSubmit={(e) => submitNewPassword(e, challengeId)} className="space-y-4" noValidate>
-        <h2 className="text-lg font-semibold">Choose a new password</h2>
-        <p id={`${ids}-new-hint`} className="text-sm">
-          You signed in with a temporary password. Choose a new one: at least 12 characters, not
-          your username and not a common password.
-        </p>
-        <div>
-          <label htmlFor={`${ids}-new`} className="block text-sm font-semibold">
-            New password
-          </label>
-          <input
-            id={`${ids}-new`}
-            type={showPassword ? 'text' : 'password'}
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            className={input}
-            aria-describedby={`${ids}-new-hint`}
-          />
-        </div>
-        <div>
-          <label htmlFor={`${ids}-confirm`} className="block text-sm font-semibold">
-            Confirm new password
-          </label>
-          <input
-            id={`${ids}-confirm`}
-            type={showPassword ? 'text' : 'password'}
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            className={input}
-          />
-        </div>
-        {showToggle}
-        <button type="submit" disabled={busy} className={primary}>
-          {busy ? 'Saving…' : 'Save password and sign in'}
-        </button>
-        <button type="button" onClick={restart} className={secondary}>
-          Cancel and start again
-        </button>
+      <form onSubmit={(e) => submitNewPassword(e, challengeId)} noValidate>
+        <Space direction="vertical" size="middle" className="w-full">
+          <Typography.Title level={2} className="!text-lg !mb-0">
+            Choose a new password
+          </Typography.Title>
+          <Typography.Paragraph id={`${ids}-new-hint`} className="!mb-0 text-sm">
+            You signed in with a temporary password. Choose a new one: at least 12 characters, not
+            your username and not a common password.
+          </Typography.Paragraph>
+          <Field id={`${ids}-new`} label="New password">
+            <Input
+              id={`${ids}-new`}
+              size="large"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              aria-describedby={`${ids}-new-hint`}
+            />
+          </Field>
+          <Field id={`${ids}-confirm`} label="Confirm new password">
+            <Input
+              id={`${ids}-confirm`}
+              size="large"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </Field>
+          {showToggle}
+          <Button type="primary" htmlType="submit" size="large" block disabled={busy}>
+            {busy ? 'Saving…' : 'Save password and sign in'}
+          </Button>
+          <Button type="link" onClick={restart} className="!px-0">
+            Cancel and start again
+          </Button>
+        </Space>
       </form>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="flex min-h-screen flex-col bg-hub-row md:flex-row">
       <section
         aria-label={`About ${BRAND.name}`}
-        className={
-          'on-dark relative flex flex-col justify-between overflow-hidden md:sticky md:top-0 md:h-screen border-b border-hub-line bg-hub-navy/90 px-8 py-8 text-white ' +
-          'md:w-[42%] md:border-b-0 md:border-r md:px-12 md:py-12'
-        }
+        className="relative flex flex-col justify-between gap-10 overflow-hidden px-8 py-8 text-white md:sticky md:top-0 md:h-screen md:w-[42%] md:px-14 md:py-12"
+        style={{
+          background:
+            'radial-gradient(900px 500px at 0% 0%, rgba(96,165,250,0.35), transparent 60%), linear-gradient(155deg, #0b2a55 0%, #12407f 55%, #1667d9 100%)',
+        }}
       >
-        <HeroArt />
-        <div className="relative">
+        <div
+          style={
+            { '--side-ink': '#ffffff', '--side-mut': 'rgba(255,255,255,0.75)' } as CSSProperties
+          }
+        >
           <BrandMark />
-          <p className="mb-10 mt-8 max-w-sm font-display text-3xl font-semibold leading-tight tracking-tight text-hub-ink">
-            Operations and compliance, in one place.
-          </p>
         </div>
-        <p className="relative text-xs text-hub-muted">
+        <div className="max-w-md">
+          <h2 className="m-0 font-display text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
+            Operations and compliance, in one place.
+          </h2>
+          <p className="mt-4 hidden text-base leading-relaxed text-white/80 md:block">
+            For independent ambulance, patient transport and care providers in England.
+          </p>
+          <ul className="mt-8 hidden list-none flex-col gap-3 p-0 md:flex">
+            {WHAT_IT_COVERS.map((t) => (
+              <li key={t} className="flex items-start gap-3 text-sm text-white/90">
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-white/15 text-xs"
+                >
+                  ✓
+                </span>
+                {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="m-0 hidden text-xs text-white/70 md:block">
           Internal measures are not CQC ratings. Access is logged.
         </p>
       </section>
 
-      <main id="main" className="flex flex-1 items-center justify-center p-6">
-        <div className="hud glass rise-in w-full max-w-md space-y-6 rounded-2xl border border-hub-line p-8 shadow-panel">
-          <div>
-            <h1 className="font-display text-2xl font-bold">
-              Sign in with your organisation account
-            </h1>
-            <p className="mt-1 text-sm text-hub-muted">
-              Managers, directors, administrators, HR, governance and auditors also need a code from
-              an authenticator app.
-            </p>
-          </div>
+      <main id="main" className="flex flex-1 items-center justify-center px-6 py-10">
+        <Card
+          className="rise-in w-full max-w-[420px] shadow-panel"
+          styles={{ body: { padding: 36 } }}
+        >
+          <Space direction="vertical" size={24} className="w-full">
+            <div>
+              <Typography.Title level={1} className="!mb-1 !font-display !text-2xl !font-bold">
+                Sign in
+              </Typography.Title>
+              <Typography.Text type="secondary" className="text-sm">
+                Use your organisation account.
+              </Typography.Text>
+            </div>
 
-          {notice && (
-            <p role="status" className="rounded-md border border-sky-700 bg-sky-50 p-3 text-sm">
-              {notice}
-            </p>
-          )}
-          <div aria-live="assertive" aria-atomic="true">
-            {error && (
-              <div
-                role="alert"
-                className="rounded-md border-2 border-red-700 bg-red-50 p-3 text-sm text-red-900"
-              >
-                <p className="font-semibold">
-                  <span aria-hidden="true">⚠ </span>There is a problem
-                </p>
-                <p>{error}</p>
-              </div>
-            )}
-          </div>
+            {notice && <Alert type="info" showIcon role="status" message={notice} />}
+            <div aria-live="assertive" aria-atomic="true">
+              {error && (
+                <Alert
+                  type="error"
+                  showIcon
+                  role="alert"
+                  message="There is a problem"
+                  description={error}
+                />
+              )}
+            </div>
 
-          {body}
-        </div>
+            {body}
+          </Space>
+        </Card>
       </main>
     </div>
   );

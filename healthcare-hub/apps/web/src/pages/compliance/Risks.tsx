@@ -1,15 +1,14 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { Link } from '@tanstack/react-router';
+import { Button, Checkbox, DatePicker, Input, Select, Space, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   PersonSelect,
   Section,
-  button,
   fmtDate,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -52,22 +51,21 @@ function ScoreSelect({
   value?: number;
   onChange?: (v: number) => void;
 }) {
+  const options = SCORES.map((s) => ({ value: s, label: `${s} – ${names[s - 1]}` }));
+  const [internal, setInternal] = useState(3);
+  const val = value ?? internal;
   return (
     <Field label={label}>
-      <select
-        name={name}
-        required
-        className={input}
-        {...(onChange
-          ? { value: String(value ?? 3), onChange: (e) => onChange(Number(e.target.value)) }
-          : { defaultValue: '3' })}
-      >
-        {SCORES.map((s) => (
-          <option key={s} value={s}>
-            {s} – {names[s - 1]}
-          </option>
-        ))}
-      </select>
+      {!onChange && <input type="hidden" name={name} value={internal} />}
+      <Select
+        value={val}
+        onChange={(v) => {
+          if (onChange) onChange(v);
+          else setInternal(v);
+        }}
+        options={options}
+        style={{ width: '100%' }}
+      />
     </Field>
   );
 }
@@ -102,10 +100,10 @@ function AddRisk({ onDone }: { onDone: () => void }) {
     <Section title="Add a risk">
       <form onSubmit={submit} aria-label="Add a risk" className="grid gap-3 md:grid-cols-2">
         <Field label="Hazard or risk">
-          <input name="hazard" required minLength={3} maxLength={500} className={input} />
+          <Input name="hazard" required minLength={3} maxLength={500} />
         </Field>
         <Field label="Who could be harmed">
-          <input name="peopleAffected" required minLength={2} maxLength={300} className={input} />
+          <Input name="peopleAffected" required minLength={2} maxLength={300} />
         </Field>
         <ScoreSelect
           label="Likelihood before controls"
@@ -115,7 +113,7 @@ function AddRisk({ onDone }: { onDone: () => void }) {
         <ScoreSelect label="Impact before controls" name="inherentImpact" names={IMPACT} />
         <div className="md:col-span-2">
           <Field label="Controls in place">
-            <textarea name="controls" required minLength={3} maxLength={4000} className={input} />
+            <Input.TextArea name="controls" required minLength={3} maxLength={4000} />
           </Field>
         </div>
         <ScoreSelect
@@ -132,10 +130,12 @@ function AddRisk({ onDone }: { onDone: () => void }) {
           meId={me.user.id}
         />
         <Field label="Review by">
-          <input type="date" name="reviewDate" required className={input} />
+          <Input type="date" name="reviewDate" required />
         </Field>
         <div className="md:col-span-2">
-          <button className={button}>Add risk</button>
+          <Button type="primary" htmlType="submit">
+            Add risk
+          </Button>
         </div>
       </form>
       {msg}
@@ -175,24 +175,19 @@ export function Risks() {
         title="Risks"
         actions={
           manage && (
-            <button className={smallButton} onClick={() => setAdding((x) => !x)}>
+            <Button size="small" onClick={() => setAdding((x) => !x)}>
               {adding ? 'Close the form' : 'Add a risk'}
-            </button>
+            </Button>
           )
         }
       >
-        <p className="text-sm">
+        <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
           Scores are likelihood × impact on a 1–5 scale. The residual rating is the risk with the
           current controls in place.
-        </p>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showClosed}
-            onChange={(e) => setShowClosed(e.target.checked)}
-          />
+        </Typography.Paragraph>
+        <Checkbox checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)}>
           Show closed risks
-        </label>
+        </Checkbox>
       </Section>
       {adding && manage && <AddRisk onDone={() => setAdding(false)} />}
       <DataTable<Row>
@@ -208,16 +203,26 @@ export function Risks() {
             header: 'Risk',
             cell: (r) => (
               <>
-                <span className="font-medium">
+                <Typography.Text strong>
                   {r.code} {r.title ?? r.hazard}
-                </span>
-                {r.title && <span className="block text-xs">{r.hazard}</span>}
-                {r.category && <span className="block text-xs">Category: {words(r.category)}</span>}
-                <span className="block text-xs">Who could be harmed: {r.peopleAffected}</span>
+                </Typography.Text>
+                {r.title && (
+                  <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                    {r.hazard}
+                  </Typography.Text>
+                )}
+                {r.category && (
+                  <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                    Category: {words(r.category)}
+                  </Typography.Text>
+                )}
+                <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                  Who could be harmed: {r.peopleAffected}
+                </Typography.Text>
                 {r.closedReason && (
-                  <span className="block text-xs">
+                  <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
                     {r.status === 'ARCHIVED' ? 'Archived' : 'Closed'}: {r.closedReason}
-                  </span>
+                  </Typography.Text>
                 )}
                 {(r.reviews as Row[] | undefined)?.length ? (
                   <details className="text-xs">
@@ -233,21 +238,17 @@ export function Risks() {
                   </details>
                 ) : null}
                 {r.linkedEvents.length > 0 && (
-                  <span className="block text-xs">
+                  <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
                     Linked events:{' '}
                     {r.linkedEvents.map((e: Row, i: number) => (
                       <span key={e.id}>
                         {i > 0 && ', '}
-                        <Link
-                          to="/compliance/events/$id"
-                          params={{ id: e.id }}
-                          className="text-hub-teal-dark underline"
-                        >
-                          {e.code}
+                        <Link to="/compliance/events/$id" params={{ id: e.id }}>
+                          <Typography.Link>{e.code}</Typography.Link>
                         </Link>
                       </span>
                     ))}
-                  </span>
+                  </Typography.Text>
                 )}
               </>
             ),
@@ -288,12 +289,8 @@ export function Risks() {
             header: 'Open actions',
             cell: (r) =>
               r.openActions > 0 ? (
-                <Link
-                  to="/compliance"
-                  search={{ tab: 'actions' }}
-                  className="text-hub-teal-dark underline"
-                >
-                  {r.openActions} open
+                <Link to="/compliance" search={{ tab: 'actions' }}>
+                  <Typography.Link>{r.openActions} open</Typography.Link>
                 </Link>
               ) : (
                 'None'
@@ -304,9 +301,9 @@ export function Risks() {
             header: 'Manage',
             cell: (r) =>
               manage && r.status === 'OPEN' ? (
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className={smallButton}
+                <Space wrap size="small">
+                  <Button
+                    size="small"
                     aria-label={`Review ${r.code} ${r.hazard}`}
                     onClick={() =>
                       setEditing({
@@ -322,9 +319,9 @@ export function Risks() {
                     }
                   >
                     Review
-                  </button>
-                  <button
-                    className={smallButton}
+                  </Button>
+                  <Button
+                    size="small"
                     aria-label={`Raise an action for ${r.code} ${r.hazard}`}
                     onClick={() => {
                       setAct({ title: '', owner: r.ownerUserId, deadline: '' });
@@ -332,23 +329,23 @@ export function Risks() {
                     }}
                   >
                     Raise an action
-                  </button>
-                  <button
-                    className={smallButton}
+                  </Button>
+                  <Button
+                    size="small"
                     aria-label={`Close ${r.code} ${r.hazard}`}
                     onClick={() => setClosing(r)}
                   >
                     Close
-                  </button>
-                </div>
+                  </Button>
+                </Space>
               ) : manage && r.status !== 'OPEN' ? (
-                <button
-                  className={smallButton}
+                <Button
+                  size="small"
                   aria-label={`Reopen ${r.code} ${r.hazard}`}
                   onClick={() => setClosing(r)}
                 >
                   Reopen
-                </button>
+                </Button>
               ) : null,
           },
         ]}
@@ -373,8 +370,7 @@ export function Risks() {
           editing && (
             <div className="grid gap-3">
               <Field label="Controls in place">
-                <textarea
-                  className={input}
+                <Input.TextArea
                   value={editing.v.controls}
                   maxLength={4000}
                   onChange={(e) =>
@@ -406,13 +402,16 @@ export function Risks() {
                 meId={me.user.id}
               />
               <Field label="Next review by">
-                <input
-                  type="date"
-                  className={input}
-                  value={editing.v.reviewDate}
-                  onChange={(e) =>
-                    setEditing({ ...editing, v: { ...editing.v, reviewDate: e.target.value } })
+                <DatePicker
+                  value={editing.v.reviewDate ? dayjs(editing.v.reviewDate) : null}
+                  onChange={(d) =>
+                    setEditing({
+                      ...editing,
+                      v: { ...editing.v, reviewDate: d ? d.format('YYYY-MM-DD') : '' },
+                    })
                   }
+                  format="YYYY-MM-DD"
+                  style={{ width: '100%' }}
                 />
               </Field>
             </div>
@@ -447,14 +446,15 @@ export function Risks() {
         fields={
           closing?.status === 'OPEN' ? (
             <Field label="Close or archive">
-              <select
-                className={input}
+              <Select
                 value={closeAs}
-                onChange={(e) => setCloseAs(e.target.value as 'CLOSED' | 'ARCHIVED')}
-              >
-                <option value="CLOSED">Close – the risk no longer applies</option>
-                <option value="ARCHIVED">Archive – keep on record, out of the register</option>
-              </select>
+                onChange={(v) => setCloseAs(v)}
+                options={[
+                  { value: 'CLOSED', label: 'Close – the risk no longer applies' },
+                  { value: 'ARCHIVED', label: 'Archive – keep on record, out of the register' },
+                ]}
+                style={{ width: '100%' }}
+              />
             </Field>
           ) : undefined
         }
@@ -484,8 +484,7 @@ export function Risks() {
         fields={
           <div className="grid gap-3">
             <Field label="What needs to be done">
-              <input
-                className={input}
+              <Input
                 value={act.title}
                 maxLength={300}
                 onChange={(e) => setAct({ ...act, title: e.target.value })}
@@ -499,11 +498,11 @@ export function Risks() {
               meId={me.user.id}
             />
             <Field label="Deadline">
-              <input
-                type="date"
-                className={input}
-                value={act.deadline}
-                onChange={(e) => setAct({ ...act, deadline: e.target.value })}
+              <DatePicker
+                value={act.deadline ? dayjs(act.deadline) : null}
+                onChange={(d) => setAct({ ...act, deadline: d ? d.format('YYYY-MM-DD') : '' })}
+                format="YYYY-MM-DD"
+                style={{ width: '100%' }}
               />
             </Field>
           </div>

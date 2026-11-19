@@ -1,21 +1,23 @@
-import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { DataTable } from '@hub/ui';
+import { Alert, Button, Card, Checkbox, Form, Input, Select, Space, Typography } from 'antd';
 import { useState, type FormEvent } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import {
   ActionDialog,
   Field,
+  PageHeader,
   PersonSelect,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
+  Tabs as ModuleTabs,
 } from '../../components.js';
 import { EvidenceDialog, UploadDialog } from '../evidence/Evidence.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useList, useOne, usePeople } from '../settings/hooks.js';
+import { WfTag } from '../../v36/ui.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -84,9 +86,19 @@ export function Premises() {
   const [finding, setFinding] = useState<Row | null>(null);
   const [reviewerId, setReviewerId] = useState('');
   const [reviewOn, setReviewOn] = useState('');
-  if (!orgId) return <p role="status">Select an organisation to continue.</p>;
+  if (!orgId)
+    return (
+      <Alert type="info" showIcon role="status" message="Select an organisation to continue." />
+    );
   if (!can('premises.item.view'))
-    return <p role="alert">You do not have access to premises safety.</p>;
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        role="alert"
+        message="You do not have access to premises safety."
+      />
+    );
   const locs = locations.data?.data ?? [];
   const loc = (id: string) => locs.find((l) => l.id === id)?.name ?? 'Location';
   const named = (id: string | null, name: string | null | undefined) =>
@@ -131,333 +143,369 @@ export function Premises() {
         : 'Premises item added. Link a schedule to it so it is tracked and evidenced.',
     );
   };
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as { tab?: string };
+  const tab = search.tab === 'contractors' ? 'contractors' : 'checks';
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold">Premises safety</h1>
-        {can('premises.item.manage') && (
-          <button className={button} aria-expanded={open} onClick={() => setOpen(!open)}>
-            {open ? 'Cancel' : 'Add premises item'}
-          </button>
-        )}
-      </div>
-      {msg}
-      {open && (
-        <form
-          aria-label="Add premises item"
-          onSubmit={submit}
-          className="grid gap-3 rounded-lg border border-hub-line bg-hub-card p-4 sm:grid-cols-2"
-        >
-          <Field label="Location">
-            <select
-              required
-              className={input}
-              value={f.locationId}
-              onChange={(e) => setF({ ...f, locationId: e.target.value })}
-            >
-              <option value="">Choose a location</option>
-              {locs.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                  {l.type === 'ADMIN_ONLY' ? ' (administration only)' : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Control area">
-            <select
-              className={input}
-              value={f.controlArea}
-              onChange={(e) => setF({ ...f, controlArea: e.target.value })}
-            >
-              {AREAS.map((a) => (
-                <option key={a} value={a}>
-                  {AREA_WORDS[a]}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Item">
-            <input
-              required
-              minLength={3}
-              className={input}
-              value={f.title}
-              onChange={(e) => setF({ ...f, title: e.target.value })}
-            />
-          </Field>
-          <Field label="Area or room (optional)">
-            <input
-              maxLength={120}
-              className={input}
-              value={f.areaName}
-              onChange={(e) => setF({ ...f, areaName: e.target.value })}
-            />
-          </Field>
-          <Field label="Frequency source (competent person, manufacturer or law)">
-            <input
-              required
-              minLength={3}
-              className={input}
-              value={f.frequencySource}
-              onChange={(e) => setF({ ...f, frequencySource: e.target.value })}
-            />
-          </Field>
-          <Field label="Interval in months from that source (optional)">
-            <input
-              type="number"
-              min={1}
-              max={120}
-              className={input}
-              value={f.intervalMonths}
-              onChange={(e) => setF({ ...f, intervalMonths: e.target.value })}
-            />
-          </Field>
-          <PersonSelect
-            label="Responsible person"
-            value={f.responsibleUserId}
-            onChange={(id) => setF({ ...f, responsibleUserId: id })}
-            people={people}
-            meId={me.user.id}
-          />
-          <Field label="Action owner">
-            <select
-              className={input}
-              value={f.actionOwnerUserId}
-              onChange={(e) => setF({ ...f, actionOwnerUserId: e.target.value })}
-            >
-              <option value="">Same as responsible person</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.id === me.user.id ? `Me (${p.displayName})` : p.displayName}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Contractor (optional)">
-            <input
-              className={input}
-              value={f.contractorName}
-              onChange={(e) => setF({ ...f, contractorName: e.target.value })}
-            />
-          </Field>
-          <Field label="Assessment reference (optional)">
-            <input
-              className={input}
-              value={f.assessmentRef}
-              onChange={(e) => setF({ ...f, assessmentRef: e.target.value })}
-            />
-          </Field>
-          <Field label="Assessed on (optional)">
-            <input
-              type="date"
-              className={input}
-              value={f.assessedOn}
-              onChange={(e) => setF({ ...f, assessedOn: e.target.value })}
-            />
-          </Field>
-          {schedules.length > 0 && (
-            <Field label="Schedule (optional)">
-              <select
-                className={input}
-                value={f.templateId}
-                onChange={(e) => setF({ ...f, templateId: e.target.value })}
-              >
-                <option value="">Link a schedule later</option>
-                {schedules.map((t) => (
-                  <option key={t.id as string} value={t.id as string}>
-                    {t.title as string}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-          {needsClinicalConfirm && (
-            <label className="flex items-start gap-2 text-sm sm:col-span-2">
-              <input
-                type="checkbox"
-                checked={f.confirmClinicalControl}
-                onChange={(e) => setF({ ...f, confirmClinicalControl: e.target.checked })}
-              />
-              This location is administration only. I confirm infection-control items apply here.
-            </label>
-          )}
-          <div className="sm:col-span-2">
-            <button
-              className={button}
-              type="submit"
-              disabled={needsClinicalConfirm && !f.confirmClinicalControl}
-            >
-              Save item
-            </button>
-          </div>
-        </form>
-      )}
-      <DataTable<Row>
-        caption="Premises safety register"
-        rows={res.data?.data ?? []}
-        rowKey={(r) => r.id}
-        loading={res.isLoading}
-        error={res.isError ? 'Could not load the register.' : null}
-        emptyMessage="No premises items yet."
-        columns={[
-          { key: 'l', header: 'Location', cell: (r) => loc(r.locationId) },
-          {
-            key: 'a',
-            header: 'Area',
-            cell: (r) => AREA_WORDS[r.controlArea] ?? words(r.controlArea),
-          },
-          {
-            key: 't',
-            header: 'Item',
-            cell: (r) => (
-              <>
-                {r.title}
-                {r.areaName && <span className="block text-xs">{r.areaName}</span>}
-              </>
-            ),
-          },
-          {
-            key: 'rp',
-            header: 'Responsible',
-            cell: (r) => named(r.responsibleUserId, r.responsibleName),
-          },
-          {
-            key: 'ao',
-            header: 'Action owner',
-            cell: (r) =>
-              r.actionOwnerUserId
-                ? named(r.actionOwnerUserId, r.actionOwnerName)
-                : 'Same as responsible person',
-          },
-          { key: 'c', header: 'Contractor', cell: (r) => r.contractorName ?? 'None recorded' },
-          {
-            key: 'as',
-            header: 'Assessment',
-            cell: (r) =>
-              r.assessmentRef
-                ? `${r.assessmentRef}${r.assessedOn ? ` (${fmtDate(r.assessedOn)})` : ''}`
-                : 'None recorded',
-          },
-          {
-            key: 'f',
-            header: 'Frequency source',
-            cell: (r) =>
-              r.intervalMonths
-                ? `${r.frequencySource} (every ${r.intervalMonths} month${
-                    r.intervalMonths === 1 ? '' : 's'
-                  })`
-                : r.frequencySource,
-          },
-          {
-            key: 'sc',
-            header: 'Schedule',
-            cell: (r) => r.scheduleTitle ?? 'No schedule linked',
-          },
-          {
-            key: 'ev',
-            header: 'Evidence',
-            cell: (r) =>
-              r.requirementInstanceId ? (
-                <button
-                  className={smallButton}
-                  aria-label={`Documents for ${r.title}`}
-                  onClick={() => setDocsFor(r)}
-                >
-                  {r.evidenceCount === 1 ? '1 document' : `${r.evidenceCount} documents`}
-                </button>
-              ) : (
-                'Link a schedule first'
-              ),
-          },
-          { key: 'n', header: 'Next due', cell: (r) => fmtDate(r.nextDue) || 'Not set' },
-          {
-            key: 's',
-            header: 'Status',
-            cell: (r) => (
-              <>
-                <StatusBadge status={r.status as StatusKind} reason={r.reasonText} />
-                {r.deploymentCritical && (
-                  <span className="mt-1 block text-xs font-semibold">
-                    Deployment-critical: ambulances at this base depend on it
-                  </span>
-                )}
-                {!r.applicable && r.applicabilityReviewOn && (
-                  <span className="mt-1 block text-xs">
-                    Not applicable; review by {r.applicabilityReviewerName ?? 'the reviewer'} on{' '}
-                    {fmtDate(r.applicabilityReviewOn)}
-                  </span>
-                )}
-              </>
-            ),
-          },
-          {
-            key: 'x',
-            header: 'Action',
-            cell: (r) => (
-              <div className="flex flex-wrap gap-2">
-                {can('premises.item.manage') && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Edit ${r.title}`}
-                    onClick={() => setEditing(r)}
-                  >
-                    Edit
-                  </button>
-                )}
-                {can('premises.item.manage') && !r.requirementInstanceId && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Link a schedule to ${r.title}`}
-                    onClick={() => setLinking(r)}
-                  >
-                    Link a schedule
-                  </button>
-                )}
-                {can('compliance.evidence.upload') && r.requirementInstanceId && r.applicable && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Upload evidence for ${r.title}`}
-                    onClick={() => setUploadFor(r)}
-                  >
-                    Upload evidence
-                  </button>
-                )}
-                {can('premises.item.manage') && (
-                  <button
-                    className={smallButton}
-                    aria-label={`${
-                      r.applicable ? 'Mark not applicable' : 'Mark applicable'
-                    }: ${r.title}`}
-                    onClick={() => setDeciding(r)}
-                  >
-                    {r.applicable ? 'Mark not applicable' : 'Mark applicable'}
-                  </button>
-                )}
-                {can('premises.item.manage') && (
-                  <button
-                    className={smallButton}
-                    aria-label={`Record a finding on ${r.title}`}
-                    onClick={() => setFinding(r)}
-                  >
-                    Record a finding
-                  </button>
-                )}
-                <button
-                  className={smallButton}
-                  aria-label={`History of ${r.title}`}
-                  onClick={() => setHistory(r)}
-                >
-                  History
-                </button>
-              </div>
-            ),
-          },
-        ]}
+    <Space direction="vertical" size="large" className="w-full">
+      <PageHeader
+        title="Premises safety"
+        description="Checks, schedules and evidence for the buildings you run."
+        extra={
+          tab === 'checks' && can('premises.item.manage') ? (
+            <Button type="primary" aria-expanded={open} onClick={() => setOpen(!open)}>
+              {open ? 'Cancel' : 'Add premises item'}
+            </Button>
+          ) : undefined
+        }
       />
-      <p className="text-sm">
-        Uploaded documents are checked by someone else before an item turns green.
-      </p>
+      <ModuleTabs
+        label="Premises safety sections"
+        current={tab}
+        onChange={(k) =>
+          void navigate({ to: '/premises', search: k === 'checks' ? {} : { tab: k } })
+        }
+        tabs={[
+          { id: 'checks', label: 'Premises checks' },
+          { id: 'contractors', label: 'Contractors & visitors' },
+        ]}
+      >
+        {null}
+      </ModuleTabs>
+      {tab === 'contractors' ? (
+        <Card size="small" role="status">
+          <Typography.Title level={4} className="!mb-2 !text-base">
+            Contractors and visitors
+          </Typography.Title>
+          <Typography.Paragraph className="!mb-0 text-slate-700">
+            This register is not in the product yet. Contractor names can still be recorded on each
+            premises safety item when work is carried out by an outside firm.
+          </Typography.Paragraph>
+        </Card>
+      ) : null}
+      {tab === 'checks' ? (
+        <>
+          {msg}
+          {open && (
+            <Card size="small">
+              <form
+                aria-label="Add premises item"
+                onSubmit={submit}
+                style={{
+                  display: 'grid',
+                  gap: 0,
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  columnGap: 16,
+                }}
+              >
+                <Field label="Location">
+                  <Select
+                    value={f.locationId || undefined}
+                    placeholder="Choose a location"
+                    onChange={(v) => setF({ ...f, locationId: v })}
+                    options={locs.map((l) => ({
+                      value: l.id,
+                      label: `${l.name}${l.type === 'ADMIN_ONLY' ? ' (administration only)' : ''}`,
+                    }))}
+                    style={{ width: '100%' }}
+                  />
+                </Field>
+                <Field label="Control area">
+                  <Select
+                    value={f.controlArea}
+                    onChange={(v) => setF({ ...f, controlArea: v })}
+                    options={AREAS.map((a) => ({ value: a, label: AREA_WORDS[a] }))}
+                    style={{ width: '100%' }}
+                  />
+                </Field>
+                <Field label="Item">
+                  <Input
+                    required
+                    minLength={3}
+                    value={f.title}
+                    onChange={(e) => setF({ ...f, title: e.target.value })}
+                  />
+                </Field>
+                <Field label="Area or room (optional)">
+                  <Input
+                    maxLength={120}
+                    value={f.areaName}
+                    onChange={(e) => setF({ ...f, areaName: e.target.value })}
+                  />
+                </Field>
+                <Field label="Frequency source (competent person, manufacturer or law)">
+                  <Input
+                    required
+                    minLength={3}
+                    value={f.frequencySource}
+                    onChange={(e) => setF({ ...f, frequencySource: e.target.value })}
+                  />
+                </Field>
+                <Field label="Interval in months from that source (optional)">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={f.intervalMonths}
+                    onChange={(e) => setF({ ...f, intervalMonths: e.target.value })}
+                  />
+                </Field>
+                <PersonSelect
+                  label="Responsible person"
+                  value={f.responsibleUserId}
+                  onChange={(id) => setF({ ...f, responsibleUserId: id })}
+                  people={people}
+                  meId={me.user.id}
+                />
+                <Field label="Action owner">
+                  <Select
+                    value={f.actionOwnerUserId || undefined}
+                    allowClear
+                    placeholder="Same as responsible person"
+                    onChange={(v) => setF({ ...f, actionOwnerUserId: v ?? '' })}
+                    options={people.map((p) => ({
+                      value: p.id,
+                      label: p.id === me.user.id ? `Me (${p.displayName})` : p.displayName,
+                    }))}
+                    style={{ width: '100%' }}
+                  />
+                </Field>
+                <Field label="Contractor (optional)">
+                  <Input
+                    value={f.contractorName}
+                    onChange={(e) => setF({ ...f, contractorName: e.target.value })}
+                  />
+                </Field>
+                <Field label="Assessment reference (optional)">
+                  <Input
+                    value={f.assessmentRef}
+                    onChange={(e) => setF({ ...f, assessmentRef: e.target.value })}
+                  />
+                </Field>
+                <Field label="Assessed on (optional)">
+                  <Input
+                    type="date"
+                    value={f.assessedOn}
+                    onChange={(e) => setF({ ...f, assessedOn: e.target.value })}
+                  />
+                </Field>
+                {schedules.length > 0 && (
+                  <Field label="Schedule (optional)">
+                    <Select
+                      value={f.templateId || undefined}
+                      allowClear
+                      placeholder="Link a schedule later"
+                      onChange={(v) => setF({ ...f, templateId: v ?? '' })}
+                      options={schedules.map((t) => ({
+                        value: t.id as string,
+                        label: t.title as string,
+                      }))}
+                      style={{ width: '100%' }}
+                    />
+                  </Field>
+                )}
+                {needsClinicalConfirm && (
+                  <Form.Item style={{ gridColumn: '1 / -1', marginBottom: 12 }}>
+                    <Checkbox
+                      checked={f.confirmClinicalControl}
+                      onChange={(e) => setF({ ...f, confirmClinicalControl: e.target.checked })}
+                    >
+                      This location is administration only. I confirm infection-control items apply
+                      here.
+                    </Checkbox>
+                  </Form.Item>
+                )}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    disabled={needsClinicalConfirm && !f.confirmClinicalControl}
+                  >
+                    Save item
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          )}
+          <DataTable<Row>
+            caption="Premises safety register"
+            rows={res.data?.data ?? []}
+            rowKey={(r) => r.id}
+            loading={res.isLoading}
+            error={res.isError ? 'Could not load the register.' : null}
+            emptyMessage="No premises items yet."
+            columns={[
+              ...(new Set((res.data?.data ?? []).map((r) => r.locationId)).size > 1
+                ? [{ key: 'l', header: 'Location', cell: (r: Row) => loc(r.locationId) }]
+                : []),
+              {
+                key: 't',
+                header: 'Item',
+                cell: (r) => {
+                  const code = /\(([A-Z]{2,}-\d+)\)/.exec(String(r.frequencySource ?? ''))?.[1];
+                  return (
+                    <>
+                      <b>{r.title}</b>
+                      <span className="block wf-mut text-xs">
+                        {AREA_WORDS[r.controlArea] ?? words(r.controlArea)}
+                        {r.areaName ? ` · ${r.areaName}` : ''}
+                        {code ? ` · ${code}` : ''}
+                      </span>
+                      {r.deploymentCritical && (
+                        <span className="block text-xs font-semibold">Deployment-critical</span>
+                      )}
+                    </>
+                  );
+                },
+              },
+              {
+                key: 'f',
+                header: 'Frequency',
+                cell: (r) => {
+                  const m = r.intervalMonths as number | null;
+                  const src = String(r.frequencySource ?? '').replace(/\s*\([^)]*\)\s*$/, '');
+                  if (/^every 7 days$/i.test(src)) return 'Every week';
+                  if (m === 12) return 'Every year';
+                  if (m) return `Every ${m === 1 ? 'month' : `${m} months`}`;
+                  return src || '—';
+                },
+              },
+              {
+                key: 'ld',
+                header: 'Last done',
+                cell: (r) =>
+                  r.lastDone ? fmtDate(r.lastDone) : <span className="wf-mut">—</span>,
+              },
+              {
+                key: 'n',
+                header: 'Next due',
+                cell: (r) => {
+                  if (!r.applicable)
+                    return (
+                      <WfTag tone="grey" icon="block">
+                        Not applicable
+                      </WfTag>
+                    );
+                  if (!r.nextDue) return <WfTag tone="grey">Not set</WfTag>;
+                  const days = Math.round(
+                    (new Date(`${String(r.nextDue).slice(0, 10)}T00:00:00Z`).getTime() -
+                      new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`).getTime()) /
+                      86_400_000,
+                  );
+                  const tone =
+                    r.status === 'RED' ? 'red' : r.status === 'AMBER' ? 'amber' : 'green';
+                  return (
+                    <WfTag tone={tone} icon={tone === 'red' ? 'error' : 'schedule'}>
+                      {days < 0
+                        ? `Overdue by ${-days} day${days === -1 ? '' : 's'}`
+                        : days === 0
+                          ? 'Due today'
+                          : days <= 31
+                            ? `Due in ${days} day${days === 1 ? '' : 's'}`
+                            : `Due ${fmtDate(r.nextDue)}`}
+                    </WfTag>
+                  );
+                },
+              },
+              {
+                key: 'ev',
+                header: 'Evidence',
+                cell: (r) =>
+                  r.requirementInstanceId ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      aria-label={`Documents for ${r.title}`}
+                      onClick={() => setDocsFor(r)}
+                    >
+                      {r.evidenceCount === 1 ? '1 document' : `${r.evidenceCount} documents`}
+                    </Button>
+                  ) : (
+                    <span className="wf-mut">Link a schedule first</span>
+                  ),
+              },
+              {
+                key: 'rp',
+                header: 'Responsible',
+                cell: (r) => named(r.responsibleUserId, r.responsibleName),
+              },
+              {
+                key: 'x',
+                header: 'Action',
+                cell: (r) => (
+                  <Space size="small" wrap>
+                    {can('premises.item.manage') && (
+                      <Button
+                        type="link"
+                        size="small"
+                        aria-label={`Edit ${r.title}`}
+                        onClick={() => setEditing(r)}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                    {can('premises.item.manage') && !r.requirementInstanceId && (
+                      <Button
+                        type="link"
+                        size="small"
+                        aria-label={`Link a schedule to ${r.title}`}
+                        onClick={() => setLinking(r)}
+                      >
+                        Link a schedule
+                      </Button>
+                    )}
+                    {can('compliance.evidence.upload') &&
+                      r.requirementInstanceId &&
+                      r.applicable && (
+                        <Button
+                          type="link"
+                          size="small"
+                          aria-label={`Upload evidence for ${r.title}`}
+                          onClick={() => setUploadFor(r)}
+                        >
+                          Upload evidence
+                        </Button>
+                      )}
+                    {can('premises.item.manage') && (
+                      <Button
+                        type="link"
+                        size="small"
+                        aria-label={`${
+                          r.applicable ? 'Mark not applicable' : 'Mark applicable'
+                        }: ${r.title}`}
+                        onClick={() => setDeciding(r)}
+                      >
+                        {r.applicable ? 'Mark not applicable' : 'Mark applicable'}
+                      </Button>
+                    )}
+                    {can('premises.item.manage') && (
+                      <Button
+                        type="link"
+                        size="small"
+                        aria-label={`Record a finding on ${r.title}`}
+                        onClick={() => setFinding(r)}
+                      >
+                        Record a finding
+                      </Button>
+                    )}
+                    <Button
+                      type="link"
+                      size="small"
+                      aria-label={`History of ${r.title}`}
+                      onClick={() => setHistory(r)}
+                    >
+                      History
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+          <Typography.Text type="secondary">
+            Uploaded documents are checked by someone else before an item turns green.
+          </Typography.Text>
+        </>
+      ) : null}
       <EvidenceDialog
         target={
           docsFor
@@ -520,28 +568,19 @@ export function Premises() {
           deciding?.applicable ? (
             <div className="grid gap-3">
               <Field label="Reviewer (optional; defaults to you)">
-                <select
-                  className={input}
-                  value={reviewerId}
-                  onChange={(e) => setReviewerId(e.target.value)}
-                >
-                  <option value="">Me</option>
-                  {people
+                <Select
+                  value={reviewerId || undefined}
+                  allowClear
+                  placeholder="Me"
+                  onChange={(v) => setReviewerId(v ?? '')}
+                  options={people
                     .filter((p) => p.id !== me.user.id)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.displayName}
-                      </option>
-                    ))}
-                </select>
+                    .map((p) => ({ value: p.id, label: p.displayName }))}
+                  style={{ width: '100%' }}
+                />
               </Field>
               <Field label="Review the decision on (optional; defaults to one year)">
-                <input
-                  type="date"
-                  className={input}
-                  value={reviewOn}
-                  onChange={(e) => setReviewOn(e.target.value)}
-                />
+                <Input type="date" value={reviewOn} onChange={(e) => setReviewOn(e.target.value)} />
               </Field>
             </div>
           ) : undefined
@@ -551,7 +590,7 @@ export function Premises() {
       </ActionDialog>
       <PremisesFinding item={finding} onClose={() => setFinding(null)} />
       <PremisesHistory item={history} onClose={() => setHistory(null)} />
-    </div>
+    </Space>
   );
 }
 
@@ -568,16 +607,16 @@ function PremisesHistory({ item, onClose }: { item: Row | null; onClose: () => v
   const res = useOne<{ data: Row[] }>(item ? `/api/v1/premises-items/${item.id}/history` : null);
   if (!item) return null;
   return (
-    <section
+    <Card
+      size="small"
       aria-label={`History of ${item.title}`}
-      className="rounded-lg border border-hub-line bg-hub-card p-4"
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">History of {item.title}</h2>
-        <button className={smallButton} onClick={onClose}>
+      title={`History of ${item.title}`}
+      extra={
+        <Button type="link" size="small" onClick={onClose}>
           Close history
-        </button>
-      </div>
+        </Button>
+      }
+    >
       <DataTable<Row>
         caption={`Changes to ${item.title}`}
         rows={res.data?.data ?? []}
@@ -592,7 +631,7 @@ function PremisesHistory({ item, onClose }: { item: Row | null; onClose: () => v
           { key: 'b', header: 'By', cell: (r) => r.changedByName ?? 'Former member' },
         ]}
       />
-    </section>
+    </Card>
   );
 }
 
@@ -628,42 +667,41 @@ function PremisesFinding({ item, onClose }: { item: Row | null; onClose: () => v
       fields={
         <div className="grid gap-3">
           <Field label="Action owner (optional; defaults to the item's action owner)">
-            <select
-              className={input}
-              value={ownerUserId}
-              onChange={(e) => setOwner(e.target.value)}
-            >
-              <option value="">Item&apos;s action owner</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Deadline">
-            <input
-              type="date"
-              className={input}
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
+            <Select
+              value={ownerUserId || undefined}
+              allowClear
+              placeholder="Item's action owner"
+              onChange={(v) => setOwner(v ?? '')}
+              options={people.map((p) => ({ value: p.id, label: p.displayName }))}
+              style={{ width: '100%' }}
             />
           </Field>
+          <Field label="Deadline">
+            <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+          </Field>
           <Field label="Severity (optional)">
-            <select className={input} value={sev} onChange={(e) => setSev(e.target.value)}>
-              <option value="">
-                {item?.controlArea === 'OXYGEN' ? 'High (oxygen default)' : 'Medium (default)'}
-              </option>
-              <option value="CRITICAL">Critical</option>
-              <option value="HIGH">High</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="LOW">Low</option>
-            </select>
+            <Select
+              value={sev || undefined}
+              allowClear
+              placeholder={
+                item?.controlArea === 'OXYGEN' ? 'High (oxygen default)' : 'Medium (default)'
+              }
+              onChange={(v) => setSev(v ?? '')}
+              options={[
+                { value: 'CRITICAL', label: 'Critical' },
+                { value: 'HIGH', label: 'High' },
+                { value: 'MEDIUM', label: 'Medium' },
+                { value: 'LOW', label: 'Low' },
+              ]}
+              style={{ width: '100%' }}
+            />
           </Field>
         </div>
       }
     >
-      <p>The action is added to the actions register and stays linked to this item.</p>
+      <Typography.Paragraph style={{ marginBottom: 0 }}>
+        The action is added to the actions register and stays linked to this item.
+      </Typography.Paragraph>
     </ActionDialog>
   );
 }
@@ -731,11 +769,7 @@ function EditPremises({ item, onClose }: { item: Row | null; onClose: () => void
       fields={
         <div className="grid gap-3">
           <Field label="Item name">
-            <input
-              className={input}
-              value={e.title}
-              onChange={(x) => setE({ ...e, title: x.target.value })}
-            />
+            <Input value={e.title} onChange={(x) => setE({ ...e, title: x.target.value })} />
           </Field>
           <PersonSelect
             label="Responsible person"
@@ -745,61 +779,48 @@ function EditPremises({ item, onClose }: { item: Row | null; onClose: () => void
             meId={me.user.id}
           />
           <Field label="Action owner">
-            <select
-              className={input}
-              value={e.actionOwnerUserId}
-              onChange={(x) => setE({ ...e, actionOwnerUserId: x.target.value })}
-            >
-              <option value="">Same as responsible person</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Area or room (optional)">
-            <input
-              className={input}
-              value={e.areaName}
-              onChange={(x) => setE({ ...e, areaName: x.target.value })}
+            <Select
+              value={e.actionOwnerUserId || undefined}
+              allowClear
+              placeholder="Same as responsible person"
+              onChange={(v) => setE({ ...e, actionOwnerUserId: v ?? '' })}
+              options={people.map((p) => ({ value: p.id, label: p.displayName }))}
+              style={{ width: '100%' }}
             />
           </Field>
+          <Field label="Area or room (optional)">
+            <Input value={e.areaName} onChange={(x) => setE({ ...e, areaName: x.target.value })} />
+          </Field>
           <Field label="Frequency source">
-            <input
-              className={input}
+            <Input
               value={e.frequencySource}
               onChange={(x) => setE({ ...e, frequencySource: x.target.value })}
             />
           </Field>
           <Field label="Interval in months (optional)">
-            <input
+            <Input
               type="number"
               min={1}
               max={120}
-              className={input}
               value={e.intervalMonths}
               onChange={(x) => setE({ ...e, intervalMonths: x.target.value })}
             />
           </Field>
           <Field label="Contractor (optional)">
-            <input
-              className={input}
+            <Input
               value={e.contractorName}
               onChange={(x) => setE({ ...e, contractorName: x.target.value })}
             />
           </Field>
           <Field label="Assessment reference (optional)">
-            <input
-              className={input}
+            <Input
               value={e.assessmentRef}
               onChange={(x) => setE({ ...e, assessmentRef: x.target.value })}
             />
           </Field>
           <Field label="Assessed on (optional)">
-            <input
+            <Input
               type="date"
-              className={input}
               value={e.assessedOn}
               onChange={(x) => setE({ ...e, assessedOn: x.target.value })}
             />
@@ -807,7 +828,9 @@ function EditPremises({ item, onClose }: { item: Row | null; onClose: () => void
         </div>
       }
     >
-      <p>Your name is recorded with the change. Due dates are moved on the requirement itself.</p>
+      <Typography.Paragraph style={{ marginBottom: 0 }}>
+        Your name is recorded with the change. Due dates are moved on the requirement itself.
+      </Typography.Paragraph>
     </ActionDialog>
   );
 }
@@ -850,39 +873,36 @@ function LinkSchedule({
       fields={
         <div className="grid gap-3">
           <Field label="Schedule">
-            <select
-              className={input}
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              <option value="">Choose a published premises schedule</option>
-              {schedules.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={templateId || undefined}
+              placeholder="Choose a published premises schedule"
+              onChange={(v) => setTemplateId(v)}
+              options={schedules.map((t) => ({ value: t.id, label: t.title }))}
+              style={{ width: '100%' }}
+            />
           </Field>
           <Field label="First due date (optional)">
-            <input
-              type="date"
-              className={input}
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-            />
+            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </Field>
         </div>
       }
     >
       {schedules.length === 0 && (
-        <p role="status">
-          {canSeeSchedules
-            ? 'No premises schedule is published yet. Adopt and publish one in Settings, ' +
-              'Requirement library.'
-            : 'You cannot see the schedule library. Ask a compliance manager to publish one.'}
-        </p>
+        <Alert
+          type="info"
+          showIcon
+          role="status"
+          style={{ marginBottom: 12 }}
+          message={
+            canSeeSchedules
+              ? 'No premises schedule is published yet. Adopt and publish one in Settings, Requirement library.'
+              : 'You cannot see the schedule library. Ask a compliance manager to publish one.'
+          }
+        />
       )}
-      <p>The responsible person owns the schedule and gets its reminders.</p>
+      <Typography.Paragraph style={{ marginBottom: 0 }}>
+        The responsible person owns the schedule and gets its reminders.
+      </Typography.Paragraph>
     </ActionDialog>
   );
 }

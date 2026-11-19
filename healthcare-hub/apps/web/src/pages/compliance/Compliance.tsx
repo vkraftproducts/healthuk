@@ -1,17 +1,29 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  DatePicker,
+  Descriptions,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Typography,
+} from 'antd';
+import dayjs from 'dayjs';
 import { useRef, useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
+  PageHeader,
   PersonSelect,
   Section,
   Tabs,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -23,6 +35,8 @@ import { useOne, usePeople } from '../settings/hooks.js';
 import { Audits } from './Audits.js';
 import { Events } from './Events.js';
 import { Feedback } from './Feedback.js';
+import { SafeguardingRegister } from '../registers/Safeguarding.js';
+import { DsptToolkit, StatementOfPurpose } from '../registers/GovernanceRecords.js';
 import { Policies } from './Policies.js';
 import {
   FitAndProper,
@@ -33,6 +47,12 @@ import {
   RegistrationEditor,
 } from './Regulatory.js';
 import { Risks } from './Risks.js';
+import { SpeakUp } from '../speakup/SpeakUp.js';
+import { ReportIncident } from './ReportIncident.js';
+import { PrivacyPanel } from '../settings/PrivacyPanel.js';
+import { Views } from '../../v36/kit.js';
+import { Deeper } from '../../v36/ui.js';
+import { CqcSelfAudit } from './SelfAudit.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -45,26 +65,37 @@ export const ACTION_STATUS: Record<string, { kind: StatusKind; text: string }> =
 export function Compliance() {
   const can = useCan();
   const { orgId } = useApp();
+  // Tab order follows v36 Compliance groups: audits & risks → incidents & concerns →
+  // policies & governance → notifications & data.
   const tabs = [
-    { id: 'review', label: 'Evidence review', show: can('compliance.evidence.verify') },
+    { id: 'programme', label: 'Programme', show: can('compliance.audit.view') },
     { id: 'audits', label: 'Audits', show: can('compliance.audit.view') },
+    { id: 'templates', label: 'Templates', show: can('compliance.audit.view') },
+    { id: 'selfaudit', label: 'CQC self-audit', show: can('compliance.audit.view') },
     {
       id: 'actions',
       label: 'Actions',
       show: can('compliance.audit.view') || can('compliance.action.manage'),
     },
     {
-      id: 'policies',
-      label: 'Policies',
-      show: can('compliance.policy.manage') || can('compliance.policy.acknowledge'),
-    },
-    {
       id: 'risks',
       label: 'Risk register',
       show: can('compliance.risk.manage') || can('compliance.audit.view'),
     },
-    { id: 'events', label: 'Events', show: can('events.event.view') },
-    { id: 'feedback', label: 'Feedback', show: can('events.event.view') },
+    { id: 'events', label: 'Incidents', show: can('events.event.view') },
+    { id: 'report', label: 'Report an incident', show: can('events.event.report') },
+    { id: 'feedback', label: 'Complaints & feedback', show: can('events.event.view') },
+    { id: 'safeguarding', label: 'Safeguarding referrals', show: can('events.safeguarding.view') },
+    {
+      id: 'speakup',
+      label: 'Speak up',
+      show: can('speakup.raise') || can('speakup.manage') || can('harassment.manage'),
+    },
+    {
+      id: 'policies',
+      label: 'Policies',
+      show: can('compliance.policy.manage') || can('compliance.policy.acknowledge'),
+    },
     {
       id: 'registration',
       label: 'Registration',
@@ -77,14 +108,26 @@ export function Compliance() {
     },
     { id: 'fpp', label: 'Fit and proper', show: can('governance.fit_proper.manage') },
     {
-      id: 'contracts',
-      label: 'NHS contracts',
-      show: can('compliance.registration.manage') || can('compliance.audit.view'),
-    },
-    {
       id: 'notifications',
       label: 'CQC notifications',
       show: can('events.event.manage') || can('compliance.registration.manage'),
+    },
+    { id: 'privacy', label: 'Data protection', show: can('privacy.manage') },
+    {
+      id: 'dspt',
+      label: 'DSP Toolkit',
+      show: can('privacy.manage') || can('compliance.audit.view'),
+    },
+    {
+      id: 'sop',
+      label: 'Statement of purpose',
+      show: can('compliance.registration.manage') || can('compliance.audit.view'),
+    },
+    { id: 'review', label: 'Evidence review', show: can('compliance.evidence.verify') },
+    {
+      id: 'contracts',
+      label: 'NHS contracts',
+      show: can('compliance.registration.manage') || can('compliance.audit.view'),
     },
     {
       id: 'pack',
@@ -92,34 +135,182 @@ export function Compliance() {
       show: can('reports.export') && can('compliance.audit.view'),
     },
   ];
-  // The tab lives in the URL, so links can open one and Back returns to it; one this user cannot
-  // see is ignored.
+  // v36 groups the sections into four tabs with views. The URL keeps the section id (?tab=actions),
+  // so existing links and alerts still open the right place; one this user cannot see is ignored.
+  const groups: {
+    id: string;
+    label: string;
+    subs: { id: string; label: string; views: string[] }[];
+  }[] = [
+    {
+      id: 'g-audits',
+      label: 'Audits & risks',
+      subs: [
+        {
+          id: 's-audits',
+          label: 'Audits & actions',
+          views: ['programme', 'audits', 'actions', 'templates', 'selfaudit', 'review'],
+        },
+        { id: 's-risks', label: 'Risks', views: ['risks'] },
+      ],
+    },
+    {
+      id: 'g-incidents',
+      label: 'Incidents & concerns',
+      subs: [
+        { id: 's-events', label: 'Incidents', views: ['events', 'report'] },
+        { id: 's-feedback', label: 'Complaints', views: ['feedback'] },
+        { id: 's-safeguarding', label: 'Safeguarding', views: ['safeguarding'] },
+        { id: 's-speakup', label: 'Speak up', views: ['speakup'] },
+      ],
+    },
+    {
+      id: 'g-policies',
+      label: 'Policies & governance',
+      subs: [
+        { id: 's-policies', label: 'Policies', views: ['policies'] },
+        {
+          id: 's-governance',
+          label: 'Governance',
+          views: ['meetings', 'fpp', 'registration', 'sop', 'contracts', 'pack'],
+        },
+      ],
+    },
+    {
+      id: 'g-data',
+      label: 'Notifications & data',
+      subs: [
+        { id: 's-notifications', label: 'CQC notifications', views: ['notifications'] },
+        { id: 's-privacy', label: 'Data protection', views: ['privacy', 'dspt'] },
+      ],
+    },
+  ];
+  const VIEW_LABEL: Record<string, string> = {
+    programme: 'Programme',
+    audits: 'Audits',
+    templates: 'Templates',
+    selfaudit: 'CQC self-audit',
+    actions: 'Actions',
+    risks: 'Risks',
+    review: 'Evidence review',
+    events: 'Incidents',
+    report: 'Report',
+    feedback: 'Complaints & feedback',
+    safeguarding: 'Safeguarding referrals',
+    speakup: 'Speak up',
+    policies: 'Policies',
+    meetings: 'Meetings',
+    fpp: 'Fit and proper',
+    registration: 'Registration',
+    contracts: 'NHS contracts',
+    pack: 'Evidence pack',
+    notifications: 'CQC notifications',
+    privacy: 'Data protection',
+    dspt: 'DSP Toolkit',
+    sop: 'Statement of purpose',
+  };
+  const shown = new Set(tabs.filter((t) => t.show).map((t) => t.id));
+  const visibleGroups = groups
+    .map((g) => {
+      const subs = g.subs
+        .map((x) => ({ ...x, views: x.views.filter((v) => shown.has(v) && v !== 'report') }))
+        .filter((x) => x.views.length > 0);
+      return { ...g, subs, views: subs.flatMap((x) => x.views) };
+    })
+    .filter((g) => g.views.length > 0);
   const { tab: linked } = useSearch({ strict: false }) as { tab?: string };
   const tab =
     tabs.find((t) => t.id === linked && t.show)?.id ??
     (tabs.find((t) => t.id === 'audits' && t.show) ?? tabs.find((t) => t.show))?.id;
+  const group = visibleGroups.find(
+    (g) => g.views.includes(tab ?? '') || (tab === 'report' && g.id === 'g-incidents'),
+  );
+  const sub = group?.subs.find((x) => x.views.includes(tab === 'report' ? 'events' : (tab ?? '')));
   const navigate = useNavigate();
   const setTab = (id: string) => void navigate({ to: '/compliance', search: { tab: id } });
-  if (!orgId) return <p role="status">Select an organisation to continue.</p>;
+  const [reporting, setReporting] = useState(false);
+  if (!orgId)
+    return (
+      <Alert type="info" showIcon role="status" message="Select an organisation to continue." />
+    );
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Compliance</h1>
-      <Tabs label="Compliance sections" current={tab ?? ''} onChange={setTab} tabs={tabs}>
-        {!tab && <p role="alert">You do not have access to any compliance section.</p>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
+      <PageHeader
+        title="Compliance"
+        description="Audits, incidents, policies, risks and regulatory governance for your organisation."
+        extra={
+          can('events.event.report') ? (
+            <Button type="primary" onClick={() => setReporting(true)}>
+              Report an incident
+            </Button>
+          ) : undefined
+        }
+      />
+      <Tabs
+        label="Compliance sections"
+        current={group?.id ?? ''}
+        onChange={(g) => setTab(visibleGroups.find((x) => x.id === g)!.views[0]!)}
+        tabs={visibleGroups.map((g) => ({ id: g.id, label: g.label }))}
+      >
+        {!tab && (
+          <Alert
+            type="warning"
+            showIcon
+            role="alert"
+            message="You do not have access to any compliance section."
+          />
+        )}
+        {group && group.subs.length > 1 && (
+          <Views
+            label={`${group.label} sections`}
+            value={sub?.id ?? ''}
+            onChange={(id) => setTab(group.subs.find((x) => x.id === id)!.views[0]!)}
+            options={group.subs.map((x) => ({ value: x.id, label: x.label }))}
+          />
+        )}
+        {sub && sub.views.length > 1 && (
+          <Deeper>
+            <Views
+              label={`${sub.label} view`}
+              value={tab ?? ''}
+              onChange={setTab}
+              options={sub.views.map((v) => ({ value: v, label: VIEW_LABEL[v] ?? v }))}
+            />
+          </Deeper>
+        )}
         {tab === 'review' && <ReviewQueue />}
+        {tab === 'programme' && <Audits part="programme" />}
         {tab === 'audits' && <Audits />}
+        {tab === 'templates' && <Audits part="templates" />}
+        {tab === 'selfaudit' && <CqcSelfAudit />}
         {tab === 'actions' && <Actions />}
         {tab === 'policies' && <Policies />}
         {tab === 'risks' && <Risks />}
         {tab === 'events' && <Events />}
+        {tab === 'report' && <ReportIncident />}
         {tab === 'feedback' && <Feedback />}
+        {tab === 'safeguarding' && <SafeguardingRegister />}
+        {tab === 'speakup' && <SpeakUp />}
         {tab === 'registration' && <Registration />}
         {tab === 'meetings' && <Meetings />}
         {tab === 'fpp' && <FitAndProper />}
         {tab === 'contracts' && <NhsContracts />}
         {tab === 'notifications' && <Notifications />}
+        {tab === 'privacy' && <PrivacyPanel />}
+        {tab === 'dspt' && <DsptToolkit />}
+        {tab === 'sop' && <StatementOfPurpose />}
         {tab === 'pack' && <EvidencePack />}
       </Tabs>
+      <Modal
+        open={reporting}
+        title="Report an incident"
+        onCancel={() => setReporting(false)}
+        footer={null}
+        width={900}
+        destroyOnHidden
+      >
+        <ReportIncident />
+      </Modal>
     </div>
   );
 }
@@ -167,6 +358,11 @@ function actionWork(a: Row): {
   if (a.sourceType === 'MEETING') return inTab('Open the meeting', 'meetings');
   if (a.sourceType === 'PREMISES')
     return { step: 'Open the premises register', link: { to: '/premises' } };
+  if (a.sourceType === 'CONTINUITY')
+    return {
+      step: 'Open the continuity plan',
+      link: { to: '/planner', search: { tab: 'contracts' } },
+    };
   return inTab('Open the registration records', 'registration');
 }
 
@@ -194,8 +390,8 @@ export function ActionsTable({
   const uploadButton = (a: Row) => {
     const label = a.status === 'EVIDENCE_SUBMITTED' ? 'Add evidence' : 'Upload evidence';
     return (
-      <button
-        className={smallButton}
+      <Button
+        size="small"
         aria-label={`${label} for ${a.code}`}
         onClick={() => {
           uploadFor.current = a.id;
@@ -203,7 +399,7 @@ export function ActionsTable({
         }}
       >
         {label}
-      </button>
+      </Button>
     );
   };
   const [verifying, setVerifying] = useState<{ a: Row; d: 'ACCEPTED' | 'REJECTED' } | null>(null);
@@ -226,8 +422,8 @@ export function ActionsTable({
             cell: (r) => {
               const title = `${r.code} ${r.title}${r.kind === 'REAUDIT' ? ' (re-audit)' : ''}`;
               return linked ? (
-                <Link {...actionWork(r).link} className="font-medium text-hub-teal-dark underline">
-                  {title}
+                <Link {...actionWork(r).link}>
+                  <Typography.Link>{title}</Typography.Link>
                 </Link>
               ) : (
                 title
@@ -269,32 +465,32 @@ export function ActionsTable({
               r.status === 'EVIDENCE_SUBMITTED' &&
               can('compliance.action.verify') &&
               r.ownerUserId !== me.user.id ? (
-                <div className="flex gap-2">
-                  <button
-                    className={smallButton}
+                <Space size="small">
+                  <Button
+                    size="small"
                     aria-label={`Verify ${r.code}`}
                     onClick={() => setVerifying({ a: r, d: 'ACCEPTED' })}
                   >
                     Verify
-                  </button>
-                  <button
-                    className={smallButton}
+                  </Button>
+                  <Button
+                    size="small"
                     aria-label={`Reject ${r.code}`}
                     onClick={() => setVerifying({ a: r, d: 'REJECTED' })}
                   >
                     Reject
-                  </button>
-                </div>
+                  </Button>
+                </Space>
               ) : r.status === 'EVIDENCE_SUBMITTED' ? (
-                <div className="flex flex-wrap items-center gap-2">
+                <Space wrap size="small">
                   Awaiting a verifier
                   {canUpload(r) && uploadButton(r)}
-                </div>
+                </Space>
               ) : r.status === 'VERIFIED' ? null : canUpload(r) ? (
                 uploadButton(r)
               ) : linked ? (
-                <Link {...actionWork(r).link} className="font-medium text-hub-teal-dark underline">
-                  {actionWork(r).step}
+                <Link {...actionWork(r).link}>
+                  <Typography.Link>{actionWork(r).step}</Typography.Link>
                 </Link>
               ) : r.kind === 'REAUDIT' ? (
                 'Complete the re-audit'
@@ -309,15 +505,15 @@ export function ActionsTable({
                   header: 'Manage',
                   cell: (r: Row) =>
                     r.status === 'VERIFIED' ? null : (
-                      <button
-                        className={smallButton}
+                      <Button
+                        size="small"
                         aria-label={`Change owner or deadline for ${r.code} ${r.title}`}
                         onClick={() =>
                           setChanging({ a: r, owner: r.ownerUserId, deadline: r.deadline })
                         }
                       >
                         Change owner or deadline
-                      </button>
+                      </Button>
                     ),
                 },
               ]
@@ -363,11 +559,13 @@ export function ActionsTable({
                 meId={me.user.id}
               />
               <Field label="Deadline">
-                <input
-                  type="date"
-                  className={input}
-                  value={changing.deadline}
-                  onChange={(e) => setChanging({ ...changing, deadline: e.target.value })}
+                <DatePicker
+                  value={changing.deadline ? dayjs(changing.deadline) : null}
+                  onChange={(d) =>
+                    setChanging({ ...changing, deadline: d ? d.format('YYYY-MM-DD') : '' })
+                  }
+                  format="YYYY-MM-DD"
+                  style={{ width: '100%' }}
                 />
               </Field>
             </div>
@@ -442,17 +640,13 @@ function RegisteredLocations({ rows }: { rows: Row[] }) {
       title="Registered locations"
       actions={
         can('compliance.registration.manage') ? (
-          <button className={smallButton} onClick={() => setOpen(true)}>
+          <Button size="small" onClick={() => setOpen(true)}>
             Record a location change
-          </button>
+          </Button>
         ) : undefined
       }
     >
-      {notice && (
-        <p role="status" className="text-sm">
-          {notice}
-        </p>
-      )}
+      {notice && <Alert type="success" showIcon role="status" message={notice} />}
       <DataTable<Row>
         caption="Registered locations"
         rows={rows}
@@ -515,18 +709,16 @@ function RegisteredLocations({ rows }: { rows: Row[] }) {
         fields={
           <>
             <Field label="Location">
-              <select
-                className={input}
-                value={v('locationId')}
-                onChange={(e) => set('locationId')(e.target.value)}
-              >
-                <option value="">Choose…</option>
-                {(locations.data?.data ?? []).map((l) => (
-                  <option key={String(l.id)} value={String(l.id)}>
-                    {String(l.name)}
-                  </option>
-                ))}
-              </select>
+              <Select
+                placeholder="Choose…"
+                value={v('locationId') || undefined}
+                onChange={set('locationId')}
+                options={(locations.data?.data ?? []).map((l) => ({
+                  value: String(l.id),
+                  label: String(l.name),
+                }))}
+                style={{ width: '100%' }}
+              />
             </Field>
             <PersonSelect
               label="Registered manager"
@@ -537,33 +729,25 @@ function RegisteredLocations({ rows }: { rows: Row[] }) {
               optional
             />
             <Field label="Manager start date">
-              <input
-                type="date"
-                className={input}
-                value={v('managerStartOn')}
-                onChange={(e) => set('managerStartOn')(e.target.value)}
+              <DatePicker
+                value={v('managerStartOn') ? dayjs(v('managerStartOn')) : null}
+                onChange={(d) => set('managerStartOn')(d ? d.format('YYYY-MM-DD') : '')}
+                format="YYYY-MM-DD"
+                style={{ width: '100%' }}
               />
             </Field>
             <Field label="Regulated activities (comma separated)">
-              <input
-                className={input}
-                value={v('activities')}
-                onChange={(e) => set('activities')(e.target.value)}
-              />
+              <Input value={v('activities')} onChange={(e) => set('activities')(e.target.value)} />
             </Field>
             <Field label="Conditions">
-              <input
-                className={input}
-                value={v('conditions')}
-                onChange={(e) => set('conditions')(e.target.value)}
-              />
+              <Input value={v('conditions')} onChange={(e) => set('conditions')(e.target.value)} />
             </Field>
             <Field label="Effective from">
-              <input
-                type="date"
-                className={input}
-                value={v('effectiveFrom')}
-                onChange={(e) => set('effectiveFrom')(e.target.value)}
+              <DatePicker
+                value={v('effectiveFrom') ? dayjs(v('effectiveFrom')) : null}
+                onChange={(d) => set('effectiveFrom')(d ? d.format('YYYY-MM-DD') : '')}
+                format="YYYY-MM-DD"
+                style={{ width: '100%' }}
               />
             </Field>
           </>
@@ -581,6 +765,7 @@ const SOURCE_LABEL: Record<string, string> = {
   FEEDBACK: 'Feedback',
   MEETING: 'Governance meeting',
   PREMISES: 'Premises item',
+  CONTINUITY: 'Continuity test',
 };
 
 /** Action log with filters (WORKFLOWS G3); only a different person verifies and closes. */
@@ -602,65 +787,67 @@ function Actions() {
   const filtered = !!(owner || source || status || overdue);
   return (
     <>
-      <form
-        aria-label="Action filters"
-        className="flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3 text-sm"
-        onSubmit={(e) => e.preventDefault()}
-      >
-        <Field label="Owner">
-          <select className={input} value={owner} onChange={(e) => setOwner(e.target.value)}>
-            <option value="">Anyone</option>
-            <option value={me.user.id}>Me</option>
-            {people
-              .filter((p) => p.id !== me.user.id)
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                </option>
-              ))}
-          </select>
-        </Field>
-        <Field label="Source">
-          <select className={input} value={source} onChange={(e) => setSource(e.target.value)}>
-            <option value="">Any source</option>
-            {Object.entries(SOURCE_LABEL).map(([k, label]) => (
-              <option key={k} value={k}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="State">
-          <select className={input} value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">Any state</option>
-            {Object.entries(ACTION_STATUS).map(([k, s]) => (
-              <option key={k} value={k}>
-                {s.text}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} />
-          Overdue only
-        </label>
-        {filtered && (
-          <button
-            type="button"
-            className={smallButton}
-            onClick={() => {
-              setOwner('');
-              setSource('');
-              setStatus('');
-              setOverdue(false);
-            }}
-          >
-            Clear filters
-          </button>
-        )}
-      </form>
+      <Card size="small" styles={{ body: { paddingBottom: 8 } }}>
+        <form
+          aria-label="Action filters"
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(e) => e.preventDefault()}
+        >
+          <Field label="Owner">
+            <Select
+              allowClear
+              placeholder="Anyone"
+              value={owner || undefined}
+              onChange={(v) => setOwner(v ?? '')}
+              options={[
+                { value: me.user.id, label: 'Me' },
+                ...people
+                  .filter((p) => p.id !== me.user.id)
+                  .map((p) => ({ value: p.id, label: p.displayName })),
+              ]}
+              style={{ minWidth: 160 }}
+            />
+          </Field>
+          <Field label="Source">
+            <Select
+              allowClear
+              placeholder="Any source"
+              value={source || undefined}
+              onChange={(v) => setSource(v ?? '')}
+              options={Object.entries(SOURCE_LABEL).map(([k, label]) => ({ value: k, label }))}
+              style={{ minWidth: 160 }}
+            />
+          </Field>
+          <Field label="State">
+            <Select
+              allowClear
+              placeholder="Any state"
+              value={status || undefined}
+              onChange={(v) => setStatus(v ?? '')}
+              options={Object.entries(ACTION_STATUS).map(([k, s]) => ({ value: k, label: s.text }))}
+              style={{ minWidth: 160 }}
+            />
+          </Field>
+          <Checkbox checked={overdue} onChange={(e) => setOverdue(e.target.checked)}>
+            Overdue only
+          </Checkbox>
+          {filtered && (
+            <Button
+              size="small"
+              onClick={() => {
+                setOwner('');
+                setSource('');
+                setStatus('');
+                setOverdue(false);
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+        </form>
+      </Card>
       {res.isError ? (
-        <p role="alert">Could not load actions.</p>
+        <Alert type="error" showIcon role="alert" message="Could not load actions." />
       ) : (
         <ActionsTable rows={res.data?.data ?? []} caption="Open actions" linked />
       )}
@@ -676,29 +863,49 @@ function Registration() {
     <>
       <Section title="Registration record">
         {r ? (
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="font-semibold">Provider reference</dt>
-            <dd>{r.providerRef ?? 'Not recorded'}</dd>
-            <dt className="font-semibold">Nominated individual</dt>
-            <dd>{r.nominatedIndividual ?? 'Not recorded'}</dd>
-            <dt className="font-semibold">Conditions</dt>
-            <dd>{r.conditions ?? 'None recorded'}</dd>
-            <dt className="font-semibold">Registered activities</dt>
-            <dd>
-              {r.registeredActivities.length
-                ? r.registeredActivities.map((a: Row) => a.activity).join(', ')
-                : 'None recorded'}
-            </dd>
-            <dt className="font-semibold">Insurance expires</dt>
-            <dd>{r.insuranceExpiresOn ? fmtDate(r.insuranceExpiresOn) : 'Not recorded'}</dd>
-            <dt className="font-semibold">Business continuity plan</dt>
-            <dd>
-              {r.bcpReviewedOn ? `Reviewed ${fmtDate(r.bcpReviewedOn)}` : 'Review not recorded'}
-              {r.bcpNextReviewOn ? `; next review ${fmtDate(r.bcpNextReviewOn)}` : ''}
-            </dd>
-          </dl>
+          <Descriptions
+            size="small"
+            column={1}
+            items={[
+              {
+                key: 'ref',
+                label: 'Provider reference',
+                children: r.providerRef ?? 'Not recorded',
+              },
+              {
+                key: 'nom',
+                label: 'Nominated individual',
+                children: r.nominatedIndividual ?? 'Not recorded',
+              },
+              { key: 'cond', label: 'Conditions', children: r.conditions ?? 'None recorded' },
+              {
+                key: 'act',
+                label: 'Registered activities',
+                children: r.registeredActivities.length
+                  ? r.registeredActivities.map((a: Row) => a.activity).join(', ')
+                  : 'None recorded',
+              },
+              {
+                key: 'ins',
+                label: 'Insurance expires',
+                children: r.insuranceExpiresOn ? fmtDate(r.insuranceExpiresOn) : 'Not recorded',
+              },
+              {
+                key: 'bcp',
+                label: 'Business continuity plan',
+                children: (
+                  <>
+                    {r.bcpReviewedOn
+                      ? `Reviewed ${fmtDate(r.bcpReviewedOn)}`
+                      : 'Review not recorded'}
+                    {r.bcpNextReviewOn ? `; next review ${fmtDate(r.bcpNextReviewOn)}` : ''}
+                  </>
+                ),
+              },
+            ]}
+          />
         ) : (
-          <p role="status">Loading…</p>
+          <Alert type="info" showIcon role="status" message="Loading…" />
         )}
       </Section>
       <RegistrationEditor record={r} />
@@ -780,19 +987,19 @@ function EvidencePack() {
   return (
     <>
       <Section title="Inspection evidence pack">
-        <p className="text-sm">
+        <Typography.Paragraph type="secondary">
           An indexed PDF and ZIP of verified evidence, approvals, audits, open gaps and actions.
           Only what you are allowed to see is included. Internal measure — not a CQC rating.
-        </p>
+        </Typography.Paragraph>
         <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
           <Field label="From">
-            <input type="date" name="from" required className={input} />
+            <Input type="date" name="from" required />
           </Field>
           <Field label="To">
-            <input type="date" name="to" required className={input} />
+            <Input type="date" name="to" required />
           </Field>
           <Field label="Key question">
-            <select name="domain" className={input}>
+            <select name="domain" defaultValue="" style={{ width: '100%', padding: '4px 11px' }}>
               <option value="">All</option>
               {['SAFE', 'EFFECTIVE', 'CARING', 'RESPONSIVE', 'WELL_LED'].map((d) => (
                 <option key={d} value={d}>
@@ -802,31 +1009,43 @@ function EvidencePack() {
             </select>
           </Field>
           <Field label="Who is it for?">
-            <select name="purpose" className={input} defaultValue="INSPECTION">
+            <select
+              name="purpose"
+              defaultValue="INSPECTION"
+              style={{ width: '100%', padding: '4px 11px' }}
+            >
               <option value="INSPECTION">Inspection</option>
               <option value="NHS_CONTRACT">NHS commissioner (NHS contract items only)</option>
               <option value="INTERNAL">Internal review</option>
             </select>
           </Field>
-          <fieldset className="w-full">
-            <legend className="text-sm font-semibold">Include</legend>
+          <Card size="small" title="Include" style={{ width: '100%' }}>
             <div className="grid gap-1 sm:grid-cols-2">
               {PACK_SECTIONS.map(([k, label, on]) => (
-                <label key={k} className="flex items-center gap-2 text-sm">
+                <label key={k} className="flex items-center gap-2">
                   <input type="checkbox" name={`section-${k}`} defaultChecked={on} /> {label}
                 </label>
               ))}
             </div>
-          </fieldset>
-          <label className="flex items-center gap-2 text-sm">
+          </Card>
+          <label className="flex items-center gap-2">
             <input type="checkbox" name="indexOnly" /> Index only (no evidence files)
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2">
             <input type="checkbox" name="gapsOnly" /> Only requirements that are not met
           </label>
-          <button className={button}>Request pack</button>
+          <Button type="primary" htmlType="submit">
+            Request pack
+          </Button>
         </form>
-        {noSections && <p role="alert">Choose at least one section to include.</p>}
+        {noSections && (
+          <Alert
+            type="error"
+            showIcon
+            role="alert"
+            message="Choose at least one section to include."
+          />
+        )}
         {msg}
       </Section>
       <DataTable<Row>
@@ -847,9 +1066,9 @@ function EvidencePack() {
             header: 'Download',
             cell: (r) =>
               r.status === 'DONE' ? (
-                <button className={smallButton} onClick={() => download(r.id)}>
+                <Button size="small" onClick={() => download(r.id)}>
                   Download
-                </button>
+                </Button>
               ) : null,
           },
         ]}

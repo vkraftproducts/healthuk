@@ -293,6 +293,8 @@ export function alertLink(sourceType: string, sourceId: string): string {
       return `/compliance/events/${sourceId}`;
     case 'POLICY':
       return '/compliance?tab=policies';
+    case 'EVIDENCE':
+      return '/me';
     default:
       return '/alerts';
   }

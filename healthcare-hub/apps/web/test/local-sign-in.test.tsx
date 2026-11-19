@@ -38,7 +38,7 @@ function renderLocal() {
 }
 
 async function enterCredentials(username = 'crew@example.test', password = 'Synthetic-pass-1') {
-  await userEvent.type(screen.getByLabelText('Username'), username);
+  await userEvent.type(screen.getByLabelText('Work email'), username);
   await userEvent.type(screen.getByLabelText('Password'), password);
   await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 }
@@ -50,12 +50,12 @@ describe('local sign-in page [ADR 0006]', () => {
   it('shows a labelled username and password form with a show-password toggle', async () => {
     renderLocal();
     expect(
-      screen.getByRole('heading', { name: 'Sign in with your organisation account' }),
+      screen.getByRole('heading', { name: 'Sign in' }),
     ).toBeInTheDocument();
     const password = screen.getByLabelText('Password');
     expect(password).toHaveAttribute('type', 'password');
     expect(password).toHaveAttribute('autocomplete', 'current-password');
-    expect(screen.getByLabelText('Username')).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText('Work email')).toHaveAttribute('autocomplete', 'username');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Show password' }));
     expect(password).toHaveAttribute('type', 'text');
     expect(screen.queryByRole('radio')).toBeNull();

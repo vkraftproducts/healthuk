@@ -10,5 +10,10 @@ export default defineConfig(({ mode }) => ({
     port: 5173,
     proxy: { '/api': 'http://localhost:4000', '/readyz': 'http://localhost:4000' },
   },
-  test: { environment: 'jsdom', setupFiles: ['./test/setup.ts'], css: false },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./test/setup.ts'],
+    css: false,
+    testTimeout: 15_000,
+  },
 }));

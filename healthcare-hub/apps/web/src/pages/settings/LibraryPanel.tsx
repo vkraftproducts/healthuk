@@ -1,6 +1,7 @@
 import { DataTable, StatusBadge } from '@hub/ui';
+import { Alert, Button } from 'antd';
 import { useMemo, useState } from 'react';
-import { ActionDialog, input, smallButton, useCan } from '../../components.js';
+import { ActionDialog, input, useCan } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { ROLE_LABEL } from '../staff/labels.js';
 import { useOne } from './hooks.js';
@@ -95,13 +96,11 @@ export function LibraryPanel() {
 
   return (
     <div className="space-y-6">
-      <p className="rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
-        The requirement library says what has to be checked, why (its legal basis) and how often.
-        Adopt the items that apply to you, have a second person publish them, then map staff items
-        to roles. Each person, vehicle, asset or premises item then gets the requirement as
-        &ldquo;awaiting evidence&rdquo;, and nobody can be approved for a role until its items are
-        verified.
-      </p>
+      <Alert
+        type="info"
+        showIcon
+        message="The requirement library says what has to be checked, why (its legal basis) and how often. Adopt the items that apply to you, have a second person publish them, then map staff items to roles. Each person, vehicle, asset or premises item then gets the requirement as awaiting evidence, and nobody can be approved for a role until its items are verified."
+      />
 
       <section aria-labelledby="ours-h" className="space-y-2">
         <h2 id="ours-h" className="text-lg font-semibold">
@@ -173,15 +172,14 @@ export function LibraryPanel() {
                 if (!draft || !canPublish) return null;
                 const mine = draft.createdBy === me.user.id;
                 return (
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     disabled={mine}
                     title={mine ? 'Another person must publish what you drafted' : undefined}
                     aria-label={`Publish ${t.title}`}
                     onClick={() => setPublishing({ t, v: draft })}
                   >
                     Publish
-                  </button>
+                  </Button>
                 );
               },
             },
@@ -217,13 +215,12 @@ export function LibraryPanel() {
                             m.templateId}
                         </span>
                         {canMap && (
-                          <button
-                            className={smallButton}
+                          <Button                             type="link" size="small"
                             aria-label={`Remove ${m.templateTitle} from ${label}`}
                             onClick={() => setRemoving(m)}
                           >
                             Remove
-                          </button>
+                          </Button>
                         )}
                       </li>
                     ))}
@@ -238,7 +235,7 @@ export function LibraryPanel() {
             <label className="flex flex-col text-sm">
               Role
               <select
-                className={input}
+               
                 value={mapRole}
                 onChange={(e) => setMapRole(e.target.value)}
               >
@@ -252,7 +249,7 @@ export function LibraryPanel() {
             <label className="flex flex-col text-sm">
               Requirement
               <select
-                className={input}
+               
                 value={mapTemplate}
                 onChange={(e) => setMapTemplate(e.target.value)}
               >
@@ -358,13 +355,12 @@ export function LibraryPanel() {
                 adoptedCodes.has(t.code) ? (
                   <span>Adopted</span>
                 ) : canEdit ? (
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Adopt ${t.title}`}
                     onClick={() => setAdopting(t)}
                   >
                     Adopt
-                  </button>
+                  </Button>
                 ) : null,
             },
           ]}
@@ -390,7 +386,7 @@ export function LibraryPanel() {
               <label className="flex flex-col text-sm">
                 Specialist who validated this content (required)
                 <input
-                  className={input}
+                 
                   value={specialist}
                   onChange={(e) => setSpecialist(e.target.value)}
                 />
@@ -398,7 +394,7 @@ export function LibraryPanel() {
               <label className="flex flex-col text-sm">
                 Their organisation (required)
                 <input
-                  className={input}
+                 
                   value={specialistOrg}
                   onChange={(e) => setSpecialistOrg(e.target.value)}
                 />
@@ -479,9 +475,9 @@ function MapButton({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className={smallButton} disabled={!templateId} onClick={() => setOpen(true)}>
+      <Button type="link" size="small" disabled={!templateId} onClick={() => setOpen(true)}>
         Add to role
-      </button>
+      </Button>
       <ActionDialog
         open={open}
         title={`Require this for ${ROLE_LABEL[role] ?? role}`}

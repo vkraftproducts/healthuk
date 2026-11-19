@@ -1,3 +1,7 @@
 services:
   web:
     ports: ['8080:80']
+  # Also loads the v36 prototype's sample records (people, vehicles, checks, audits…) on each start.
+  # The first start loads them; later starts only keep the names in step, so work done in the app stays.
+  setup:
+    command: ['sh', '-c', 'pnpm db:bootstrap && pnpm db:migrate && pnpm db:seed && pnpm db:seed:sectors && pnpm db:seed:v36']

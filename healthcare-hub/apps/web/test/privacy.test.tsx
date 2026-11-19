@@ -132,8 +132,12 @@ async function renderPrivacy(permissions = ['privacy.manage', 'reports.export'])
     get: async (p) => ({ data: data[p] ?? [] }),
     send,
   };
-  render(<App api={api} history={createMemoryHistory({ initialEntries: ['/settings'] })} />);
-  await userEvent.click(await screen.findByRole('tab', { name: 'Data protection' }));
+  render(
+    <App
+      api={api}
+      history={createMemoryHistory({ initialEntries: ['/compliance?tab=privacy'] })}
+    />,
+  );
   return { send };
 }
 beforeEach(() => sessionStorage.clear());

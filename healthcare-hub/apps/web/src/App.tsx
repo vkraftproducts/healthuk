@@ -40,6 +40,7 @@ import { Reports } from './pages/reports/Reports.js';
 import { SpeakUp } from './pages/speakup/SpeakUp.js';
 import { Alerts } from './pages/alerts/Alerts.js';
 import { MyRecord } from './pages/me/MyRecord.js';
+import { AntApp } from './shell/AntApp.js';
 import { AppContext, useApp } from './shell/AppContext.js';
 import { Shell } from './shell/Shell.js';
 import { useLiveUpdates } from './shell/useLiveUpdates.js';
@@ -89,47 +90,12 @@ function Home() {
   const { me, orgId } = useApp();
   const packs = me.memberships.find((m) => m.organisationId === orgId)?.sectorPacks;
   const home = homePathFor(me.permissions, packs);
+  // WORKFLOWS A1: auditors → inspection, dispatchers → planner, crew → my record.
   if (home === '/inspection' || home === '/planner') return <Navigate to={home} replace />;
-  if (me.permissions.includes('dashboard.view')) return <Dashboard />;
-  if (me.permissions.includes('staff.self.view')) return <Navigate to="/me" replace />;
-  const mine = NAV_ITEMS.filter((n) => n.to !== '/' && canSee(n, me.permissions, packs));
-  const crew = me.permissions.includes('crew.today.view');
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Welcome, {me.user.displayName}</h1>
-      {crew && (
-        <section
-          aria-label="Crew app"
-          className="space-y-1 rounded-lg border border-hub-line bg-hub-card p-4"
-        >
-          <h2 className="font-semibold">Your shifts are in the crew app</h2>
-          <p>
-            Today&apos;s jobs, vehicle checks, defects and incident reports are done in the
-            Healthcare Hub crew app on your work phone. Here on the web you can see your own record,
-            upload certificates, acknowledge policies and raise a concern.
-          </p>
-        </section>
-      )}
-      {mine.length === 0 ? (
-        <p role="status">
-          Your role has no pages on the web yet. Use the crew app, or ask your administrator.
-        </p>
-      ) : (
-        <ul aria-label="Your pages" className="grid gap-3 sm:grid-cols-2">
-          {mine.map((n) => (
-            <li key={n.to}>
-              <Link
-                to={n.to}
-                className="block rounded-lg border border-hub-line bg-hub-card p-4 font-semibold text-hub-teal-dark underline"
-              >
-                {n.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+  if (home === '/me' && me.permissions.includes('staff.self.view'))
+    return <Navigate to="/me" replace />;
+  // Managers/leads (and anyone else on `/`): My work + overview.
+  return <Dashboard />;
 }
 
 function buildRouter(history?: RouterHistory) {
@@ -336,7 +302,12 @@ export function App({
   auth?: AuthClient;
   history?: RouterHistory;
 }) {
-  const [client] = useState(() => new QueryClient());
+  const [client] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      }),
+  );
   const [signedIn, setSignedIn] = useState(() => !auth || auth.isSignedIn());
   // Local sign-in: a reload resumes the session from the refresh cookie before asking again.
   const [restoring, setRestoring] = useState(() => !!auth?.restore && !auth.isSignedIn());
@@ -370,26 +341,32 @@ export function App({
   );
   if (auth && !signedIn && restoring)
     return (
-      <p role="status" className="m-6">
-        Checking your sign-in…
-      </p>
+      <AntApp>
+        <p role="status" className="m-6">
+          Checking your sign-in…
+        </p>
+      </AntApp>
     );
   if (auth && !signedIn) {
     return (
-      <SignIn
-        auth={auth}
-        notice={notice}
-        onSignedIn={() => {
-          setNotice(null);
-          setSignedIn(true);
-        }}
-      />
+      <AntApp>
+        <SignIn
+          auth={auth}
+          notice={notice}
+          onSignedIn={() => {
+            setNotice(null);
+            setSignedIn(true);
+          }}
+        />
+      </AntApp>
     );
   }
   return (
-    <QueryClientProvider client={client}>
-      <Authenticated api={api} history={history} signOut={auth ? signOut : undefined} />
-    </QueryClientProvider>
+    <AntApp>
+      <QueryClientProvider client={client}>
+        <Authenticated api={api} history={history} signOut={auth ? signOut : undefined} />
+      </QueryClientProvider>
+    </AntApp>
   );
 }
 

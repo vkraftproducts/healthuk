@@ -1,13 +1,11 @@
 import { DataTable } from '@hub/ui';
 import { londonDate, londonDateTime, londonTime } from '@hub/rules';
+import { Button } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   Section,
-  button,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -89,9 +87,9 @@ export function ShiftActions({
     <Section
       title={`Manage shift ${label}`}
       actions={
-        <button className={smallButton} onClick={onClose}>
+        <Button type="link" size="small" onClick={onClose}>
           Close
-        </button>
+        </Button>
       }
     >
       {msg}
@@ -109,8 +107,7 @@ export function ShiftActions({
             header: 'Action',
             cell: (r) => (
               <span className="flex flex-wrap gap-1">
-                <button
-                  className={smallButton}
+                <Button                   type="link" size="small"
                   aria-label={`Swap ${r.displayName}`}
                   onClick={() => {
                     setSwapTo('');
@@ -118,14 +115,13 @@ export function ShiftActions({
                   }}
                 >
                   Swap
-                </button>
-                <button
-                  className={smallButton}
+                </Button>
+                <Button                   type="link" size="small"
                   aria-label={`Stand down ${r.displayName}`}
                   onClick={() => setStandDown(r)}
                 >
                   Stand down
-                </button>
+                </Button>
               </span>
             ),
           },
@@ -140,7 +136,7 @@ export function ShiftActions({
           <select
             name="staffId"
             required
-            className={input}
+           
             value={addId}
             onChange={(e) => setAddId(e.target.value)}
           >
@@ -155,7 +151,7 @@ export function ShiftActions({
         <Field label="Role on the shift">
           <select
             name="role"
-            className={input}
+           
             value={addRole}
             onChange={(e) => setAddRole(e.target.value)}
           >
@@ -167,12 +163,14 @@ export function ShiftActions({
           </select>
         </Field>
         <Field label="From (optional)">
-          <input name="from" type="time" className={input} />
+          <input name="from" type="time" />
         </Field>
         <Field label="To (optional)">
-          <input name="to" type="time" className={input} />
+          <input name="to" type="time" />
         </Field>
-        <button className={button}>Add to shift</button>
+        <Button type="primary" htmlType="submit">
+          Add to shift
+        </Button>
       </form>
       {addId && (
         <CrewReadiness
@@ -200,8 +198,7 @@ export function ShiftActions({
               NOT_STARTED.includes(r.state) ? (
                 <span className="flex flex-wrap gap-1">
                   {targets.length > 0 && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Move ${r.code} to another shift`}
                       onClick={() => {
                         setToShift('');
@@ -209,22 +206,20 @@ export function ShiftActions({
                       }}
                     >
                       Move to another shift
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Take ${r.code} off this shift`}
                     onClick={() => setJobChange({ job: r, to: 'REASSIGNED' })}
                   >
                     Take off shift
-                  </button>
-                  <button
-                    className={smallButton}
+                  </Button>
+                  <Button                     type="link" size="small"
                     aria-label={`Cancel ${r.code}`}
                     onClick={() => setJobChange({ job: r, to: 'CANCELLED' })}
                   >
                     Cancel job
-                  </button>
+                  </Button>
                 </span>
               ) : (
                 'Under way – change it from the job record'
@@ -234,13 +229,13 @@ export function ShiftActions({
       />
 
       <div className="flex flex-wrap gap-2">
-        <button className={smallButton} onClick={() => setSwapOpen(true)}>
+        <Button type="link" size="small" onClick={() => setSwapOpen(true)}>
           Change vehicle on {shift.vehicleCallsign}
-        </button>
+        </Button>
         {shift.state === 'PLANNED' && (
-          <button className={smallButton} onClick={() => setCancelOpen(true)}>
+          <Button type="link" size="small" onClick={() => setCancelOpen(true)}>
             Cancel shift on {shift.vehicleCallsign}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -274,7 +269,7 @@ export function ShiftActions({
         fields={
           <>
             <Field label="Replacement">
-              <select className={input} value={swapTo} onChange={(e) => setSwapTo(e.target.value)}>
+              <select value={swapTo} onChange={(e) => setSwapTo(e.target.value)}>
                 <option value="">Choose a person</option>
                 {free.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -316,7 +311,7 @@ export function ShiftActions({
         }
         fields={
           <Field label="New shift">
-            <select className={input} value={toShift} onChange={(e) => setToShift(e.target.value)}>
+            <select value={toShift} onChange={(e) => setToShift(e.target.value)}>
               <option value="">Choose a shift</option>
               {targets.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -376,7 +371,7 @@ export function ShiftActions({
             <select
               value={vehicleId}
               onChange={(e) => setVehicleId(e.target.value)}
-              className={input}
+             
             >
               <option value="">Choose a vehicle</option>
               {(vehicles.data?.data ?? [])

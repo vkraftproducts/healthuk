@@ -43,7 +43,7 @@ import {
 } from './requirements.mapper.js';
 import { evidenceForInstance } from '../evidence/evidence.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 
 function versionData(v: ReturnType<typeof TemplateVersionInput.parse>) {
   return {
@@ -487,6 +487,67 @@ export class RequirementsController {
     );
     const more = rows.length > f.limit;
     const data = rows.slice(0, f.limit);
+    // Vehicle documents panel: attach the latest verified evidence file + verifier name.
+    if (f.subjectType === 'VEHICLE' && data.length) {
+      const enriched = await this.db.withTenant(tenantOf(hub), async (tx) => {
+        const ids = data.map((i) => i.id);
+        const links = await tx.evidenceLink.findMany({
+          where: { instanceId: { in: ids } },
+          include: {
+            item: {
+              include: {
+                versions: {
+                  include: { verification: true },
+                  orderBy: { versionNo: 'desc' },
+                },
+              },
+            },
+          },
+        });
+        type Ev = {
+          fileName: string | null;
+          verifiedBy: string | null;
+          verifiedAt: Date | null;
+        };
+        const byInst = new Map<string, Ev>();
+        for (const link of links) {
+          if (byInst.has(link.instanceId)) continue;
+          const ver = link.item.versions.find((v) => v.verification?.decision === 'ACCEPTED');
+          if (!ver?.verification) continue;
+          byInst.set(link.instanceId, {
+            fileName: ver.blobKey ? (ver.blobKey.split('/').pop() ?? null) : null,
+            verifiedBy: ver.verification.reviewerId,
+            verifiedAt: ver.verification.createdAt,
+          });
+        }
+        const verifierIds = [...new Set([...byInst.values()].map((e) => e.verifiedBy).filter(Boolean))];
+        const names = new Map(
+          (
+            await tx.appUser.findMany({
+              where: { id: { in: verifierIds as string[] } },
+              select: { id: true, displayName: true },
+            })
+          ).map((u) => [u.id, u.displayName]),
+        );
+        return data.map((i) => {
+          const base = toInstanceDto(i);
+          const ev = byInst.get(i.id);
+          if (!ev) return { ...base, latestEvidence: null };
+          return {
+            ...base,
+            latestEvidence: {
+              fileName: ev.fileName,
+              verifiedByName: ev.verifiedBy ? (names.get(ev.verifiedBy) ?? null) : null,
+              verifiedAt: ev.verifiedAt?.toISOString() ?? null,
+            },
+          };
+        });
+      });
+      return {
+        data: enriched,
+        nextCursor: more ? (data[data.length - 1]?.id ?? null) : null,
+      };
+    }
     return {
       data: data.map(toInstanceDto),
       nextCursor: more ? (data[data.length - 1]?.id ?? null) : null,

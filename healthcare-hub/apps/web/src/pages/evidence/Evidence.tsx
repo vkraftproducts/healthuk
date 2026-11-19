@@ -1,17 +1,19 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import { Alert, Button, Input, Modal, Space, Spin, Typography } from 'antd';
 import { useState } from 'react';
 import { ApiError, type ApiClient } from '../../api.js';
 import {
   ActionDialog,
+  Field,
+  Section,
   errText,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
+import { Deeper, ViewSwitch } from '../../v36/ui.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -120,35 +122,21 @@ export function UploadDialog({
       onCancel={reset}
       fields={
         <>
-          <label className="flex flex-col text-sm">
-            File (PDF, image, Word, Excel, CSV or text; up to 25 MB)
+          <Field label="File (PDF, image, Word, Excel, CSV or text; up to 25 MB)">
             <input
               type="file"
               accept={ACCEPT}
-              className={input}
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col text-sm">
-              Issued or valid from (optional)
-              <input
-                type="date"
-                className={input}
-                value={validFrom}
-                onChange={(e) => setValidFrom(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col text-sm">
-              {expiry ? 'Expiry date (required)' : 'Valid until (optional)'}
-              <input
-                type="date"
-                className={input}
-                value={validTo}
-                onChange={(e) => setValidTo(e.target.value)}
-              />
-            </label>
-          </div>
+          </Field>
+          <Space wrap>
+            <Field label="Issued or valid from (optional)">
+              <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+            </Field>
+            <Field label={expiry ? 'Expiry date (required)' : 'Valid until (optional)'}>
+              <Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} />
+            </Field>
+          </Space>
         </>
       }
       onConfirm={async () => {
@@ -202,15 +190,11 @@ export function DecisionDialog({
       }}
       fields={
         decision === 'ACCEPTED' ? (
-          <label className="flex flex-col text-sm">
-            {expiry ? 'Confirmed expiry date (required)' : 'Confirmed valid until (optional)'}
-            <input
-              type="date"
-              className={input}
-              value={shown}
-              onChange={(e) => setValidTo(e.target.value)}
-            />
-          </label>
+          <Field
+            label={expiry ? 'Confirmed expiry date (required)' : 'Confirmed valid until (optional)'}
+          >
+            <Input type="date" value={shown} onChange={(e) => setValidTo(e.target.value)} />
+          </Field>
         ) : undefined
       }
       onConfirm={async (reason) => {
@@ -257,11 +241,7 @@ export function EvidenceTable({
   const canVerify = can('compliance.evidence.verify');
   return (
     <>
-      {err && (
-        <p role="alert" className="text-sm text-red-800">
-          {err}
-        </p>
-      )}
+      {err && <Alert type="error" showIcon role="alert" message={err} />}
       <DataTable<Row>
         caption={caption}
         rows={docs}
@@ -329,10 +309,10 @@ export function EvidenceTable({
             key: 'act',
             header: 'Action',
             cell: (d) => (
-              <span className="flex flex-wrap gap-1">
+              <Space wrap size="small">
                 {d.scanStatus === 'CLEAN' && d.uploadedAt && (
-                  <button
-                    className={smallButton}
+                  <Button
+                    size="small"
                     aria-label={`View ${d.title}`}
                     onClick={() => {
                       setErr(null);
@@ -340,18 +320,18 @@ export function EvidenceTable({
                     }}
                   >
                     View
-                  </button>
+                  </Button>
                 )}
                 {canVerify &&
                   d.state === 'PENDING_VERIFICATION' &&
                   (d.uploadedBy === me.user.id ? (
-                    <span className="text-xs text-slate-700">
+                    <Typography.Text type="secondary" className="text-xs">
                       You uploaded this: another person must verify it
-                    </span>
+                    </Typography.Text>
                   ) : (
                     <>
-                      <button
-                        className={smallButton}
+                      <Button
+                        size="small"
                         aria-label={`Verify ${d.title}`}
                         onClick={() =>
                           setDeciding({
@@ -362,9 +342,9 @@ export function EvidenceTable({
                         }
                       >
                         Verify
-                      </button>
-                      <button
-                        className={smallButton}
+                      </Button>
+                      <Button
+                        size="small"
                         aria-label={`Reject ${d.title}`}
                         onClick={() =>
                           setDeciding({
@@ -375,10 +355,10 @@ export function EvidenceTable({
                         }
                       >
                         Reject
-                      </button>
+                      </Button>
                     </>
                   ))}
-              </span>
+              </Space>
             ),
           },
         ]}
@@ -415,43 +395,36 @@ export function EvidenceDialog({
   });
   if (!target) return null;
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 backdrop-blur-sm p-4"
-      onKeyDown={(e) => {
-        if (e.key === 'Escape' && !uploading) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="evidence-dialog-title"
-        className="mt-10 w-full max-w-4xl space-y-3 rounded-lg bg-hub-card p-5 shadow-xl"
+    <>
+      <Modal
+        open
+        title={`Documents for ${target.title}`}
+        onCancel={() => {
+          if (!uploading) onClose();
+        }}
+        footer={null}
+        width={960}
+        destroyOnClose
       >
-        <div className="flex items-start justify-between gap-3">
-          <h2 id="evidence-dialog-title" className="text-lg font-semibold">
-            Documents for {target.title}
-          </h2>
-          <button className={smallButton} onClick={onClose} autoFocus>
-            Close
-          </button>
-        </div>
-        {q.isLoading && <p role="status">Loading documents…</p>}
-        {q.isError && <p role="alert">{errText(q.error)}</p>}
-        {q.data && (
-          <EvidenceTable
-            docs={q.data.data}
-            deadlineKind={target.deadlineKind}
-            caption={`Documents for ${target.title}`}
-          />
-        )}
-        {can('compliance.evidence.upload') && (
-          <button className={smallButton} onClick={() => setUploading(true)}>
-            Upload a document
-          </button>
-        )}
-        <UploadDialog target={uploading ? target : null} onClose={() => setUploading(false)} />
-      </div>
-    </div>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {q.isLoading && <Spin tip="Loading documents…" />}
+          {q.isError && <Alert type="error" showIcon message={errText(q.error)} />}
+          {q.data && (
+            <EvidenceTable
+              docs={q.data.data}
+              deadlineKind={target.deadlineKind}
+              caption={`Documents for ${target.title}`}
+            />
+          )}
+          {can('compliance.evidence.upload') && (
+            <Button size="small" onClick={() => setUploading(true)}>
+              Upload a document
+            </Button>
+          )}
+        </Space>
+      </Modal>
+      <UploadDialog target={uploading ? target : null} onClose={() => setUploading(false)} />
+    </>
   );
 }
 
@@ -486,19 +459,34 @@ export function StaffDocuments({ s }: { s: Row }) {
     String(b.uploadedAt ?? '').localeCompare(String(a.uploadedAt ?? '')),
   );
   return (
-    <section aria-labelledby="docs-h" className="space-y-2">
-      <h2 id="docs-h" className="text-lg font-semibold">
-        Evidence documents ({rows.length})
-      </h2>
-      {results.some((q) => q.isLoading) && <p role="status">Loading documents…</p>}
+    <Section title={`Evidence documents (${rows.length})`}>
+      {results.some((q) => q.isLoading) && <Spin tip="Loading documents…" />}
       <EvidenceTable docs={rows} caption="Evidence documents" showFor />
-    </section>
+    </Section>
   );
 }
 
 /** B4 review queue: every document waiting for a decision, oldest first. */
-export function ReviewQueue() {
+export const QUEUE_FILTERS: { id: string; label: string; test: (types: string[]) => boolean }[] = [
+  { id: 'all', label: 'All', test: () => true },
+  { id: 'staff', label: 'Staff documents', test: (t) => t.includes('STAFF') },
+  {
+    id: 'vehicle',
+    label: 'Vehicle',
+    test: (t) => t.includes('VEHICLE') || t.includes('EQUIPMENT'),
+  },
+  {
+    id: 'other',
+    label: 'Premises & organisation',
+    test: (t) => t.some((x) => x !== 'STAFF' && x !== 'VEHICLE' && x !== 'EQUIPMENT'),
+  },
+];
+
+/** The verification queue. With `filters`, v36's filter pills (All, Staff documents, Vehicle…). */
+export function ReviewQueue({ filters = false, only }: { filters?: boolean; only?: string } = {}) {
   const { api, orgId } = useApp();
+  const [picked, setFilter] = useState('all');
+  const filter = only ?? picked;
   const q = useQuery({
     queryKey: ['one', orgId, '/api/v1/evidence/review-queue'],
     queryFn: async () => (await api.get('/api/v1/evidence/review-queue', orgId)) as { data: Row[] },
@@ -514,20 +502,39 @@ export function ReviewQueue() {
       )
       .join('; '),
   }));
+  const f = QUEUE_FILTERS.find((x) => x.id === filter) ?? QUEUE_FILTERS[0]!;
+  const shown = rows.filter((r) =>
+    f.test((r.requirements as Row[]).map((x) => String(x.subjectType))),
+  );
   const waiting = rows.filter((r) => !r.mine).length;
   return (
-    <section aria-labelledby="queue-h" className="space-y-2">
-      <h2 id="queue-h" className="text-lg font-semibold">
-        Evidence waiting for review ({rows.length})
-      </h2>
-      <p className="text-sm text-slate-700">
+    <Section title={`Waiting for verification (${shown.length})`}>
+      {filters && (
+        <Deeper>
+          <ViewSwitch
+            role="radio"
+            label="Show evidence for"
+            current={filter}
+            onChange={setFilter}
+            options={QUEUE_FILTERS.map((x) => ({
+              id: x.id,
+              label: `${x.label} (${
+                rows.filter((r) =>
+                  x.test((r.requirements as Row[]).map((y) => String(y.subjectType))),
+                ).length
+              })`,
+            }))}
+          />
+        </Deeper>
+      )}
+      <Typography.Paragraph type="secondary" className="text-sm">
         Open each document, check it against the requirement and the person or item it is for, then
         verify or reject it. You cannot verify documents you uploaded yourself
         {rows.length > waiting ? ` (${rows.length - waiting} of these are yours)` : ''}.
-      </p>
-      {q.isLoading && <p role="status">Loading…</p>}
-      {q.isError && <p role="alert">{errText(q.error)}</p>}
-      {q.data && <EvidenceTable docs={rows} caption="Evidence waiting for review" showFor />}
-    </section>
+      </Typography.Paragraph>
+      {q.isLoading && <Spin />}
+      {q.isError && <Alert type="error" showIcon message={errText(q.error)} />}
+      {q.data && <EvidenceTable docs={shown} caption="Evidence waiting for review" showFor />}
+    </Section>
   );
 }

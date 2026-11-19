@@ -1,3 +1,4 @@
+import { selectAntByLabel, typeAntDate } from './ant-testing.js';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -112,9 +113,9 @@ describe('risk register [task 12]', () => {
     const form = screen.getByRole('form', { name: 'Add a risk' });
     await userEvent.type(within(form).getByLabelText('Hazard or risk'), 'Slippery ramps');
     await userEvent.type(within(form).getByLabelText('Who could be harmed'), 'Crew');
-    await userEvent.selectOptions(within(form).getByLabelText('Likelihood before controls'), '4');
+    await selectAntByLabel('Likelihood before controls', '4 – Likely');
     await userEvent.type(within(form).getByLabelText('Controls in place'), 'Grit in winter');
-    await userEvent.selectOptions(within(form).getByLabelText('Impact with controls'), '2');
+    await selectAntByLabel('Impact with controls', '2 – Minor');
     fireEvent.change(within(form).getByLabelText('Review by'), { target: { value: '2027-01-31' } });
     await userEvent.click(within(form).getByRole('button', { name: 'Add risk' }));
     await waitFor(() =>
@@ -140,10 +141,8 @@ describe('risk register [task 12]', () => {
     const dialog = screen.getByRole('dialog', { name: 'Review RSK-1 Manual handling on stairs' });
     const save = within(dialog).getByRole('button', { name: 'Save review' });
     expect(save).toBeDisabled();
-    await userEvent.selectOptions(within(dialog).getByLabelText('Likelihood with controls'), '1');
-    fireEvent.change(within(dialog).getByLabelText('Next review by'), {
-      target: { value: '2027-02-01' },
-    });
+    await selectAntByLabel('Likelihood with controls', '1 – Rare');
+    await typeAntDate(within(dialog).getByLabelText('Next review by'), '2027-02-01');
     await userEvent.click(save);
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(
@@ -171,9 +170,7 @@ describe('risk register [task 12]', () => {
     );
     const dialog = screen.getByRole('dialog');
     await userEvent.type(within(dialog).getByLabelText('What needs to be done'), 'Buy chairs');
-    fireEvent.change(within(dialog).getByLabelText('Deadline'), {
-      target: { value: '2026-12-01' },
-    });
+    await typeAntDate(within(dialog).getByLabelText('Deadline'), '2026-12-01');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Raise action' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith('POST', '/api/v1/risks/r1/actions', ORG, {
@@ -211,7 +208,10 @@ describe('actions table [task 12]', () => {
     const save = within(dialog).getByRole('button', { name: 'Save change' });
     await userEvent.selectOptions(within(dialog).getByLabelText('Owner'), 'u3');
     expect(save).toBeDisabled();
-    await userEvent.type(within(dialog).getByRole('textbox'), 'Sam leads manual handling');
+    await userEvent.type(
+      within(dialog).getByRole('textbox', { name: /Why is it changing/ }),
+      'Sam leads manual handling',
+    );
     await userEvent.click(save);
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(

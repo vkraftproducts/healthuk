@@ -1,13 +1,12 @@
 import { DataTable, StatusBadge } from '@hub/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
+import { Button, Card, Checkbox, Input, Select, Space, Typography } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   Field,
   PersonSelect,
   Section,
-  button,
   fmtDateTime,
-  input,
   useCan,
   useRun,
 } from '../../components.js';
@@ -37,6 +36,10 @@ function ReportEvent() {
   const { run, msg } = useRun();
   const [types, setTypes] = useState<string[]>(['INCIDENT']);
   const [lead, setLead] = useState(me.user.id);
+  const [consentToShare, setConsentToShare] = useState(false);
+  const [severity, setSeverity] = useState('NO_HARM');
+  const [locationId, setLocationId] = useState('');
+  const [complaintChannel, setComplaintChannel] = useState('PHONE');
   const has = (t: string) => types.includes(t);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -50,15 +53,15 @@ function ReportEvent() {
         title: s('title'),
         description: s('description'),
         occurredAt: new Date(s('occurredAt')).toISOString(),
-        severity: s('severity'),
+        severity,
         leadUserId: lead,
-        ...(s('locationId') ? { locationId: s('locationId') } : {}),
+        ...(locationId ? { locationId } : {}),
         ...(has('COMPLAINT')
           ? {
               complaint: {
                 receivedOn: s('receivedOn'),
-                channel: s('channel'),
-                consentToShare: f.get('consentToShare') === 'on',
+                channel: complaintChannel,
+                consentToShare,
                 ...opt('preferences'),
               },
             }
@@ -79,123 +82,118 @@ function ReportEvent() {
   }
   return (
     <Section title="Report an event">
-      <form onSubmit={submit} className="space-y-3" aria-label="Report an event">
-        <fieldset className="rounded border border-hub-line p-2">
-          <legend className="px-1 text-sm font-semibold">
-            What happened (tick all that apply)
-          </legend>
-          <div className="flex flex-wrap gap-3">
-            {Object.entries(EVENT_TYPE).map(([k, label]) => (
-              <label key={k} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+      <form onSubmit={submit} aria-label="Report an event">
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Card size="small" title="What happened (tick all that apply)">
+            <Space wrap>
+              {Object.entries(EVENT_TYPE).map(([k, label]) => (
+                <Checkbox
+                  key={k}
                   checked={has(k)}
                   onChange={(e) =>
                     setTypes((t) => (e.target.checked ? [...t, k] : t.filter((x) => x !== k)))
                   }
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Short title">
-            <input name="title" required minLength={3} maxLength={200} className={input} />
-          </Field>
-          <Field label="When it happened">
-            <input type="datetime-local" name="occurredAt" required className={input} />
-          </Field>
-          <Field label="Harm">
-            <select name="severity" className={input} defaultValue="NO_HARM">
-              {Object.entries(HARM).map(([k, label]) => (
-                <option key={k} value={k}>
+                >
                   {label}
-                </option>
+                </Checkbox>
               ))}
-            </select>
-          </Field>
-          <PersonSelect
-            label="Lead"
-            value={lead}
-            onChange={setLead}
-            people={people}
-            meId={me.user.id}
-          />
-          <Field label="Location (optional)">
-            <select name="locationId" className={input}>
-              <option value="">Not at one location</option>
-              {(locations.data?.data ?? [])
-                .filter((l) => !l.archived)
-                .map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-        </div>
-        <Field label="What happened (no patient names)">
-          <textarea
-            name="description"
-            required
-            minLength={3}
-            maxLength={4000}
-            rows={3}
-            className={input}
-          />
-        </Field>
-        {has('COMPLAINT') && (
-          <fieldset className="grid gap-3 rounded border border-hub-line p-2 sm:grid-cols-2">
-            <legend className="px-1 text-sm font-semibold">Complaint</legend>
-            <Field label="Received on">
-              <input type="date" name="receivedOn" required className={input} />
+            </Space>
+          </Card>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Short title">
+              <Input name="title" required minLength={3} maxLength={200} />
             </Field>
-            <Field label="How it was received">
-              <select name="channel" className={input}>
-                {Object.entries(CHANNEL).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+            <Field label="When it happened">
+              <Input type="datetime-local" name="occurredAt" required />
             </Field>
-            <Field label="Complainant's preferences (optional)">
-              <input name="preferences" maxLength={500} className={input} />
-            </Field>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="consentToShare" />
-              Consent to share details with others involved
-            </label>
-          </fieldset>
-        )}
-        {has('SAFEGUARDING') && (
-          <fieldset className="grid gap-3 rounded border border-hub-line p-2">
-            <legend className="px-1 text-sm font-semibold">
-              Safeguarding (restricted to safeguarding leads)
-            </legend>
-            <Field label="Concern details">
-              <textarea
-                name="details"
-                required
-                minLength={3}
-                maxLength={8000}
-                rows={3}
-                className={input}
+            <Field label="Harm">
+              <Select
+                value={severity}
+                onChange={setSeverity}
+                options={Object.entries(HARM).map(([k, label]) => ({ value: k, label }))}
+                style={{ width: '100%' }}
               />
             </Field>
-            <Field label="Agencies involved (optional)">
-              <input name="agencies" maxLength={1000} className={input} />
+            <PersonSelect
+              label="Lead"
+              value={lead}
+              onChange={setLead}
+              people={people}
+              meId={me.user.id}
+            />
+            <Field label="Location (optional)">
+              <Select
+                allowClear
+                placeholder="Not at one location"
+                value={locationId || undefined}
+                onChange={(v) => setLocationId(v ?? '')}
+                options={(locations.data?.data ?? [])
+                  .filter((l) => !l.archived)
+                  .map((l) => ({ value: l.id, label: l.name }))}
+                style={{ width: '100%' }}
+              />
             </Field>
-            <Field label="Referral reference (optional)">
-              <input name="referralRef" maxLength={120} className={input} />
-            </Field>
-          </fieldset>
-        )}
-        <button className={button} disabled={types.length === 0}>
-          Record event
-        </button>
-        {msg}
+          </div>
+          <Field label="What happened (no patient names)">
+            <Input.TextArea
+              name="description"
+              required
+              minLength={3}
+              maxLength={4000}
+              rows={3}
+            />
+          </Field>
+          {has('COMPLAINT') && (
+            <Card size="small" title="Complaint">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Received on">
+                  <Input type="date" name="receivedOn" required />
+                </Field>
+                <Field label="How it was received">
+                  <Select
+                    value={complaintChannel}
+                    onChange={setComplaintChannel}
+                    options={Object.entries(CHANNEL).map(([k, label]) => ({ value: k, label }))}
+                    style={{ width: '100%' }}
+                  />
+                </Field>
+                <Field label="Complainant's preferences (optional)">
+                  <Input name="preferences" maxLength={500} />
+                </Field>
+                <Field label="Consent">
+                  <Checkbox checked={consentToShare} onChange={(e) => setConsentToShare(e.target.checked)}>
+                    Consent to share details with others involved
+                  </Checkbox>
+                </Field>
+              </div>
+            </Card>
+          )}
+          {has('SAFEGUARDING') && (
+            <Card size="small" title="Safeguarding (restricted to safeguarding leads)">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Field label="Concern details">
+                  <Input.TextArea
+                    name="details"
+                    required
+                    minLength={3}
+                    maxLength={8000}
+                    rows={3}
+                  />
+                </Field>
+                <Field label="Agencies involved (optional)">
+                  <Input name="agencies" maxLength={1000} />
+                </Field>
+                <Field label="Referral reference (optional)">
+                  <Input name="referralRef" maxLength={120} />
+                </Field>
+              </Space>
+            </Card>
+          )}
+          <Button type="primary" htmlType="submit" disabled={types.length === 0}>
+            Record event
+          </Button>
+          {msg}
+        </Space>
       </form>
     </Section>
   );
@@ -211,29 +209,30 @@ export function Events() {
   const res = useOne<{ data: Row[] }>(`/api/v1/events?${params.toString()}`);
   return (
     <>
-      <div className="flex flex-wrap gap-3">
+      <Space wrap>
         <Field label="Show">
-          <select
-            className={input}
+          <Select
             value={show}
-            onChange={(e) => setShow(e.target.value as 'true' | 'false' | 'all')}
-          >
-            <option value="true">Open events</option>
-            <option value="false">Closed events</option>
-            <option value="all">All events</option>
-          </select>
+            onChange={(v) => setShow(v)}
+            options={[
+              { value: 'true', label: 'Open events' },
+              { value: 'false', label: 'Closed events' },
+              { value: 'all', label: 'All events' },
+            ]}
+            style={{ minWidth: 160 }}
+          />
         </Field>
         <Field label="Type">
-          <select className={input} value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="">All types</option>
-            {Object.entries(EVENT_TYPE).map(([k, label]) => (
-              <option key={k} value={k}>
-                {label}
-              </option>
-            ))}
-          </select>
+          <Select
+            allowClear
+            placeholder="All types"
+            value={type || undefined}
+            onChange={(v) => setType(v ?? '')}
+            options={Object.entries(EVENT_TYPE).map(([k, label]) => ({ value: k, label }))}
+            style={{ minWidth: 200 }}
+          />
         </Field>
-      </div>
+      </Space>
       <DataTable<Row>
         caption={show === 'false' ? 'Closed events' : show === 'all' ? 'All events' : 'Open events'}
         rows={res.data?.data ?? []}
@@ -246,11 +245,9 @@ export function Events() {
             key: 'c',
             header: 'Event',
             cell: (r) => (
-              <Link
-                to="/compliance/events/$id"
-                params={{ id: r.id }}
-                className="font-medium text-hub-teal-dark underline"
-              >{`${r.code} ${r.title}`}</Link>
+              <Link to="/compliance/events/$id" params={{ id: r.id }}>
+                <Typography.Link>{`${r.code} ${r.title}`}</Typography.Link>
+              </Link>
             ),
           },
           {
@@ -266,10 +263,14 @@ export function Events() {
             key: 'f',
             header: 'Flags',
             cell: (r) => (
-              <div className="space-y-1">
+              <Space direction="vertical" size="small">
                 <CandourFlag e={r} />
-                {r.restricted && <span className="block text-xs">Restricted details</span>}
-              </div>
+                {r.restricted && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    Restricted details
+                  </Typography.Text>
+                )}
+              </Space>
             ),
           },
         ]}

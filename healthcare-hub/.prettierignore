@@ -3,3 +3,4 @@ dist
 pnpm-lock.yaml
 docs/source
 packages/db/src/generated
+packages/db/src/admin/v36-data.json

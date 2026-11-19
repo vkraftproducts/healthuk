@@ -64,7 +64,7 @@ import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { toActionDto, withActionNames } from './audits.controller.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 const VIEW = 'events.event.view';
@@ -1188,6 +1188,16 @@ async function premisesDto(
     evidenceCount: p.requirementInstanceId
       ? await tx.evidenceLink.count({ where: { instanceId: p.requirementInstanceId } })
       : 0,
+    lastDone: p.requirementInstanceId
+      ? ((
+          await tx.$queryRaw<{ d: string | null }[]>`
+            SELECT max(coalesce(ev.valid_from, ev.captured_at::date, v.created_at::date))::text AS d
+              FROM evidence_link l
+              JOIN evidence_version ev ON ev.item_id = l.item_id
+              JOIN verification v ON v.evidence_version_id = ev.id AND v.decision = 'ACCEPTED'
+             WHERE l.instance_id = ${p.requirementInstanceId}::uuid`
+        )[0]?.d ?? null)
+      : null,
     status,
     reasonText: deploymentCritical && status === 'RED' ? `Deployment-critical: ${reason}` : reason,
     nextDue: i ? iso(i.dueDate ?? i.expiryDate ?? i.reviewDate) : (own?.nextDue ?? null),

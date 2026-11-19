@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { seedLocalCredentials } from './seed-credentials.js';
+import { seedStarter } from './seed-starter.js';
 
 // Synthetic data only (CLAUDE.md #10). Demo organisation "Exora International Ltd" (trading as
 // Exora Medical), a private ambulance service in London, plus a second organisation used by isolation tests. Fixed IDs make the seed idempotent.
@@ -590,6 +591,8 @@ export async function seed(adminUrl: string): Promise<void> {
        VALUES ($1, $2, $3, $4, 'ACTIVE', true) ON CONFLICT (id) DO NOTHING`,
       [SEED_SUPPORT.id, SEED_SUPPORT.subject, SEED_SUPPORT.email, SEED_SUPPORT.name],
     );
+    // Day-one starter configuration: adopted requirements, role maps, courses, stage records.
+    await seedStarter(c);
     // Local username + password sign-in (AUTH_MODE=local); skipped when NODE_ENV=production.
     await seedLocalCredentials(c, Object.values(SEED_USERS));
     await c.query('COMMIT');

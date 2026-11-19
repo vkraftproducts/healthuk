@@ -324,3 +324,23 @@ export async function addVerifiedLicence(app: Injector, org: string, staffId: st
   await uploadAndVerify(app, org, [i.body.id as string], { verifier: 'dev|fleet' });
   return i.body.id as string;
 }
+
+/**
+ * Gives a test vehicle verified roadworthiness documents (MOT, insurance, …): uploads one
+ * synthetic certificate for every vehicle requirement that is not green and has someone else
+ * verify it. Without it a new vehicle cannot be put on a shift (OVERRIDE_NOT_PERMITTED).
+ */
+export async function verifyVehicleDocuments(app: Injector, org: string, vehicleId: string) {
+  const r = await hit(
+    app,
+    org,
+    'dev|fleet',
+    'GET',
+    `/api/v1/requirements/instances?subjectId=${vehicleId}&limit=100`,
+  );
+  if (r.status !== 200) throw new Error(`vehicle documents: ${r.status} ${JSON.stringify(r.body)}`);
+  const open = ((r.body.data as J[] | undefined) ?? [])
+    .filter((i) => i.status !== 'GREEN' && i.status !== 'NOT_APPLICABLE')
+    .map((i) => i.id as string);
+  if (open.length) await uploadAndVerify(app, org, open, { uploader: 'dev|fleet' });
+}

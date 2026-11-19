@@ -98,7 +98,7 @@ describe('rating display evidence [I2]', () => {
       send as never,
     );
     const table = await screen.findByRole('table', { name: 'Published CQC ratings' });
-    const row = within(table).getByRole('row', { name: /Whole provider/ });
+    const row = await within(table).findByRole('row', { name: /Whole provider/ });
     expect(row).toHaveTextContent('No premises photo; no website capture');
     await userEvent.click(
       within(row).getByRole('button', { name: /Record display: Whole provider/ }),

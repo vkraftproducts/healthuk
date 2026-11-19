@@ -5,6 +5,12 @@ import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
+import {
+  openAntSelect,
+  selectAntByLabel,
+  visibleAntOptions,
+  waitForTableReady,
+} from './ant-testing.js';
 import { fieldsOf } from '../src/pages/staff/RecordForm.js';
 import { licenceSummary, readinessBadge } from '../src/pages/staff/StaffProfile.js';
 
@@ -100,10 +106,22 @@ function renderAt(
   get: (p: string) => Promise<unknown>,
   send = vi.fn(async () => ({})),
 ) {
+  const getWithDefaults = async (p: string) => {
+    if (p.includes('/locations')) {
+      const r = (await get(p)) as { data?: unknown } | undefined;
+      return Array.isArray(r?.data) ? r : { data: [] };
+    }
+    if (p.includes('/organisations/') && !p.includes('/locations')) {
+      return { sectorPacks: ['ambulance'] };
+    }
+    if (p.startsWith('/api/v1/alerts/count')) return { open: 0, critical: 0 };
+    if (p === '/api/v1/admin/people') return { data: [] };
+    return get(p);
+  };
   const api: ApiClient = {
     me: async () => me(permissions),
     readyz: async () => ({ status: 'ready' }),
-    get: async (p) => get(p),
+    get: getWithDefaults,
     send,
   };
   render(<App api={api} history={createMemoryHistory({ initialEntries: [path] })} />);
@@ -118,12 +136,18 @@ describe('staff list (/staff)', () => {
       p.startsWith('/api/v1/staff?') ? { data: [listRow], nextCursor: null } : { data: [] },
     );
     const table = await screen.findByRole('table', { name: 'Staff register' });
-    const row = await within(table).findByRole('row', { name: /ST-0042/ });
-    expect(within(row).getByRole('link', { name: 'Synthetic Crew' })).toBeInTheDocument();
+    await waitForTableReady(table);
+    await waitFor(() => expect(screen.getByText('ST-0042')).toBeInTheDocument());
+    // v36: register rows open the person, so they are buttons named by the row.
+    const row = screen.getByRole('button', { name: /ST-0042/ });
+    expect(row).toHaveTextContent('Synthetic Crew');
     expect(row).toHaveTextContent('Driver, Care assistant');
     expect(row).toHaveTextContent('No night shifts');
-    expect(row).toHaveTextContent('Amber – 1 due soon');
-    expect(screen.getByRole('heading', { name: 'Add a staff member' })).toBeInTheDocument();
+    // v36: checks verified as a count, readiness in words with the reason.
+    expect(row).toHaveTextContent('2 of 3');
+    expect(row).toHaveTextContent('Ready');
+    expect(row).toHaveTextContent('1 due soon');
+    expect(screen.getByRole('button', { name: /Add a new starter/ })).toBeInTheDocument();
   });
 
   it('dispatchers get the clearance-only view and the explanatory note', async () => {
@@ -193,7 +217,7 @@ describe('staff profile (/staff/:id)', () => {
     );
     await userEvent.click(await screen.findByRole('button', { name: 'Change lifecycle' }));
     const dialog = await screen.findByRole('dialog', { name: 'Change lifecycle' });
-    await userEvent.selectOptions(within(dialog).getByLabelText('Move to'), 'SUSPENDED');
+    await selectAntByLabel('Move to', 'Suspended');
     const confirm = within(dialog).getByRole('button', { name: 'Move to Suspended' });
     expect(confirm).toBeDisabled(); // reason required
     await userEvent.type(
@@ -352,7 +376,7 @@ describe('Schedule 3 and driver eligibility [task 18]', () => {
     expect(screen.getByText(/1 item\(s\) not complete/)).toBeInTheDocument();
     expect(await screen.findByText(/Not eligible to drive category B/)).toBeInTheDocument();
     expect(screen.getByText(/Photocard: Photocard expired/)).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Vehicle needs licence category'), 'C1');
+    await selectAntByLabel('Vehicle needs licence category', 'C1');
     expect(await screen.findByText(/Not eligible to drive category C1/)).toBeInTheDocument();
   });
 
@@ -390,14 +414,14 @@ describe('training matrix [task 19]', () => {
     columns: [
       {
         templateId: T1,
-        code: 'STF-10',
+        code: 'AMB-STF-05',
         title: 'Manual handling',
         roles: ['DRIVER'],
         summary: { required: 2, met: 1, dueSoon: 0, overdue: 1, missing: 0, percentMet: 50 },
       },
       {
         templateId: T2,
-        code: 'STF-11',
+        code: 'AMB-STF-07',
         title: 'Safeguarding level 2',
         roles: ['CARE_ASSISTANT'],
         summary: { required: 0, met: 0, dueSoon: 0, overdue: 0, missing: 0, percentMet: null },
@@ -435,7 +459,8 @@ describe('training matrix [task 19]', () => {
     truncated: false,
   };
 
-  it('shows totals and each cell in words, and filters to people with gaps', async () => {
+  // v36 matrix: fixed course columns with a chip per cell, filtered by role (no totals row).
+  it('shows each cell in words and filters by role', async () => {
     const get = vi.fn(async (p: string) =>
       p.startsWith('/api/v1/staff/training-matrix')
         ? matrix
@@ -443,27 +468,21 @@ describe('training matrix [task 19]', () => {
           ? { data: [listRow], nextCursor: null }
           : { data: [] },
     );
-    renderAt('/staff', MANAGER, get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Training matrix' }));
-    const table = await screen.findByRole('table', { name: 'Totals by requirement' });
-    const totals = await within(table).findByRole('row', { name: /Manual handling/ });
-    expect(totals).toHaveTextContent('1 of 2 (50%)');
-    expect(within(table).getByRole('row', { name: /Safeguarding level 2/ })).toHaveTextContent(
-      'Nobody needs this',
-    );
-    const person = screen.getByRole('row', { name: /Synthetic Crew/ });
-    expect(person).toHaveTextContent('Red – Overdue (next 1 Oct 2026)');
-    expect(person).toHaveTextContent('N/A – Not required');
-    await userEvent.click(
-      screen.getByRole('checkbox', { name: 'Only people with something overdue or missing' }),
-    );
-    await waitFor(() =>
-      expect(get.mock.calls.some(([p]) => p.includes('gapsOnly=true'))).toBe(true),
-    );
-    await userEvent.selectOptions(screen.getByLabelText('Requirement'), T1);
-    await waitFor(() =>
-      expect(get.mock.calls.some(([p]) => p.includes(`templateId=${T1}`))).toBe(true),
-    );
+    renderAt('/staff?tab=training&view=matrix', MANAGER, get);
+    const table = await screen.findByRole('table', { name: 'Training matrix' });
+    await within(table).findByText('Synthetic Crew');
+    expect(
+      within(table).getByRole('button', {
+        name: 'Manual handling for Synthetic Crew: Overdue (next 1 Oct 2026)',
+      }),
+    ).toHaveTextContent('Expired 1 Oct');
+    expect(
+      within(table).getByRole('button', {
+        name: 'Safeguarding adults & children (level 2) for Synthetic Crew: Not required',
+      }),
+    ).toHaveTextContent('—');
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'CARE_ASSISTANT');
+    await waitFor(() => expect(within(table).queryByText('Synthetic Crew')).toBeNull());
   });
 
   it('dispatchers do not get the matrix tab', async () => {
@@ -472,7 +491,7 @@ describe('training matrix [task 19]', () => {
       nextCursor: null,
     }));
     expect(await screen.findByRole('note')).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Training matrix' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Training/ })).toBeNull();
   });
 });
 
@@ -489,8 +508,8 @@ describe('profile header, requests and licence [task 25, findings 15, 48, 50, 51
   it('shows location, manager, start date, contract and a readiness badge in words', async () => {
     renderAt(`/staff/${STAFF}`, MANAGER, async (p) => at(p));
     const header = (await screen.findByRole('heading', { name: /Synthetic Crew/ })).closest(
-      'header',
-    )!;
+      '.ant-card',
+    ) as HTMLElement;
     expect(header).toHaveTextContent('Watford station');
     expect(header).toHaveTextContent('Sam Manager');
     expect(header).toHaveTextContent('1 Apr 2025');
@@ -504,8 +523,8 @@ describe('profile header, requests and licence [task 25, findings 15, 48, 50, 51
       p === `/api/v1/staff/${STAFF}` ? { ...full, roles: [], checksSetUp: false } : { data: [] },
     );
     const header = (await screen.findByRole('heading', { name: /Synthetic Crew/ })).closest(
-      'header',
-    )!;
+      '.ant-card',
+    ) as HTMLElement;
     expect(header).toHaveTextContent('No approved role yet');
     expect(header).toHaveTextContent(/no approved role yet/);
     expect(header).not.toHaveTextContent('N/A');
@@ -607,17 +626,18 @@ describe('add staff [findings 53, 96]', () => {
       path === '/api/v1/staff' ? { id: 'new-staff' } : {},
     );
     renderAt('/staff', MANAGER, get, send as never);
-    const form = (await screen.findByRole('heading', { name: 'Add a staff member' }))
-      .closest('section')!
-      .querySelector('form')!;
+    await userEvent.click(await screen.findByRole('button', { name: /Add a new starter/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a new starter' });
+    const form = dialog.querySelector('form')!;
     const f = within(form);
+    await waitFor(() => expect(f.getByRole('button', { name: 'Add' })).toBeEnabled());
     await userEvent.type(f.getByLabelText('Staff number'), 'st-0100');
     await userEvent.type(f.getByLabelText('Name'), 'New Synthetic');
     await userEvent.type(f.getByLabelText('Work email'), 'new@example.test');
     fireEvent.change(f.getByLabelText('Start date'), { target: { value: '2026-12-01' } });
-    await userEvent.selectOptions(f.getByLabelText('Contract type'), 'FIXED_TERM');
-    await userEvent.selectOptions(f.getByLabelText('Line manager'), STAFF);
-    await userEvent.selectOptions(f.getByLabelText('Role to check for'), 'CARE_ASSISTANT');
+    await selectAntByLabel('Contract type', 'Fixed term');
+    await selectAntByLabel('Line manager', 'Synthetic Crew');
+    await selectAntByLabel('Role to check for', 'Care assistant');
     fireEvent.submit(form);
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith('POST', '/api/v1/staff', ORG, {
@@ -649,10 +669,9 @@ describe('add staff [findings 53, 96]', () => {
       send: vi.fn(async () => ({})),
     };
     render(<App api={api} history={createMemoryHistory({ initialEntries: ['/staff'] })} />);
-    const select = await screen.findByLabelText('Role to check for');
-    const options = within(select)
-      .getAllByRole('option')
-      .map((o) => o.textContent);
+    await userEvent.click(await screen.findByRole('button', { name: /Add a new starter/ }));
+    await openAntSelect('Role to check for');
+    const options = visibleAntOptions();
     expect(options).toEqual(expect.arrayContaining(['Dentist', 'Dental nurse', 'Receptionist']));
     expect(options).not.toContain('Paramedic');
     expect(options).not.toContain('Driver');

@@ -124,7 +124,9 @@ describe('sign-in page', () => {
     expect(within(nav).getByRole('link', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByText('Hana Rowe')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    // v36 shell: Sign out lives in the account menu.
+    await userEvent.click(screen.getByRole('button', { name: 'Your account' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('You have signed out.');
     expect(sessionStorage.getItem('hub.devUser')).toBeNull();

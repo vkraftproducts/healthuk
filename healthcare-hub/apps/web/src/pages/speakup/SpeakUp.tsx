@@ -1,4 +1,13 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Input,
+  Select,
+  Space,
+  Typography,
+} from 'antd';
 import { londonDate } from '@hub/rules';
 import { useState, type FormEvent } from 'react';
 import {
@@ -7,16 +16,14 @@ import {
   PersonSelect,
   Section,
   Tabs,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useOne, usePeople } from '../settings/hooks.js';
+import { Deeper } from '../../v36/ui.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -66,26 +73,38 @@ export function concernStatus(c: Row): { status: StatusKind; reason: string } {
 /** Task 20: speaking up, and the steps taken to prevent sexual harassment. */
 export function SpeakUp() {
   const can = useCan();
+  // v36: Raise & track · Guardian queue · Insight.
   const tabs = [
-    { id: 'raise', label: 'Raise a concern', show: can('speakup.raise') },
-    { id: 'mine', label: 'My concerns', show: can('speakup.raise') },
-    { id: 'concerns', label: 'Concerns', show: can('speakup.manage') },
-    { id: 'themes', label: 'Themes', show: can('speakup.manage') || can('reports.view') },
-    { id: 'prevention', label: 'Harassment prevention', show: can('harassment.manage') },
+    { id: 'raise', label: 'Raise & track', show: can('speakup.raise') },
+    { id: 'concerns', label: 'Guardian queue', show: can('speakup.manage') },
+    {
+      id: 'insight',
+      label: 'Insight',
+      show: can('speakup.manage') || can('reports.view') || can('harassment.manage'),
+    },
   ];
   const first = tabs.find((t) => t.show)?.id ?? 'raise';
   const [tab, setTab] = useState(first);
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Speak up</h1>
+    <Deeper>
       <Tabs label="Speak up sections" tabs={tabs} current={tab} onChange={setTab}>
-        {tab === 'raise' && <Raise />}
-        {tab === 'mine' && <Mine />}
-        {tab === 'concerns' && <Concerns />}
-        {tab === 'themes' && <Themes />}
-        {tab === 'prevention' && <Prevention />}
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          {tab === 'raise' && (
+            <>
+              <Raise />
+              <Mine />
+            </>
+          )}
+          {tab === 'concerns' && <Concerns />}
+          {tab === 'insight' && (
+            <>
+              {(can('speakup.manage') || can('reports.view')) && <Themes />}
+              {can('harassment.manage') && <Prevention />}
+            </>
+          )}
+        </Space>
       </Tabs>
-    </div>
+    </Deeper>
   );
 }
 
@@ -117,77 +136,75 @@ function Raise() {
   }
   return (
     <Section title="Raise a concern">
-      <p className="text-sm">
+      <Typography.Paragraph type="secondary">
         You can speak up about anything that worries you at work, including harassment by a
         colleague, a patient or a visitor. Please do not include patient names or details.
-      </p>
-      <form className="space-y-3" aria-label="Raise a concern" onSubmit={(e) => void submit(e)}>
-        <Field label="What is it about?">
-          <select
-            className={input}
-            value={category}
-            required
-            onChange={(e) => setCategory(e.target.value)}
+      </Typography.Paragraph>
+      <form aria-label="Raise a concern" onSubmit={(e) => void submit(e)}>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Field label="What is it about?">
+            <Select
+              placeholder="Choose"
+              value={category || undefined}
+              onChange={setCategory}
+              options={Object.entries(CATEGORY).map(([k, v]) => ({ value: k, label: v }))}
+              style={{ width: '100%' }}
+            />
+          </Field>
+          <Field label="What happened, and what worries you?">
+            <Input.TextArea
+              rows={5}
+              value={summary}
+              required
+              minLength={10}
+              maxLength={4000}
+              onChange={(e) => setSummary(e.target.value)}
+            />
+          </Field>
+          <Checkbox checked={thirdParty} onChange={(e) => setThirdParty(e.target.checked)}>
+            It is about a patient, visitor or contractor
+          </Checkbox>
+          <Checkbox checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)}>
+            Raise it anonymously
+          </Checkbox>
+          {anonymous && (
+            <Alert
+              type="info"
+              showIcon
+              role="note"
+              message="Your name is not stored with an anonymous concern, so nobody can see who raised it. It will not appear under My concerns. You will get a progress code instead: keep it to check progress and read any feedback below."
+            />
+          )}
+          <Button
+            type="primary"
+            htmlType="submit"
+            disabled={!category || summary.trim().length < 10}
           >
-            <option value="">Choose</option>
-            {Object.entries(CATEGORY).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="What happened, and what worries you?">
-          <textarea
-            className={input}
-            rows={5}
-            value={summary}
-            required
-            minLength={10}
-            maxLength={4000}
-            onChange={(e) => setSummary(e.target.value)}
-          />
-        </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={thirdParty}
-            onChange={(e) => setThirdParty(e.target.checked)}
-          />
-          It is about a patient, visitor or contractor
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={anonymous}
-            onChange={(e) => setAnonymous(e.target.checked)}
-          />
-          Raise it anonymously
-        </label>
-        {anonymous && (
-          <p role="note" className="rounded border border-sky-700 bg-sky-50 p-2 text-sm">
-            Your name is not stored with an anonymous concern, so nobody can see who raised it. It
-            will not appear under My concerns. You will get a progress code instead: keep it to
-            check progress and read any feedback below.
-          </p>
-        )}
-        <button className={button} disabled={!category || summary.trim().length < 10} type="submit">
-          Send concern
-        </button>
+            Send concern
+          </Button>
+        </Space>
       </form>
       {msg}
       {receipt && (
-        <p role="status" className="rounded border border-green-700 bg-green-50 p-2 text-sm">
-          Your reference is {receipt.code}. It should be acknowledged by{' '}
-          {fmtDate(receipt.acknowledgeDue)}.
-          {receipt.progressCode && (
+        <Alert
+          type="success"
+          showIcon
+          role="status"
+          message={
             <>
-              {' '}
-              Your progress code is <strong>{receipt.progressCode}</strong>. Write it down now: it
-              will not be shown again and nobody else can look it up.
+              Your reference is {receipt.code}. It should be acknowledged by{' '}
+              {fmtDate(receipt.acknowledgeDue)}.
+              {receipt.progressCode && (
+                <>
+                  {' '}
+                  Your progress code is{' '}
+                  <Typography.Text strong>{receipt.progressCode}</Typography.Text>. Write it down
+                  now: it will not be shown again and nobody else can look it up.
+                </>
+              )}
             </>
-          )}
-        </p>
+          }
+        />
       )}
       <Guardian />
       <CheckProgress />
@@ -241,16 +258,15 @@ function CheckProgress() {
     >
       <Field label="Progress code (for anonymous concerns)">
         <input
-          className={input}
           value={code}
           placeholder="ABCD-EFGH-JKLM"
           maxLength={14}
           onChange={(e) => setCode(e.target.value)}
         />
       </Field>
-      <button className={button} type="submit" disabled={code.trim().length < 14}>
+      <Button type="primary" htmlType="submit" disabled={code.trim().length < 14}>
         Check progress
-      </button>
+      </Button>
       {error && (
         <p role="alert" className="w-full text-sm text-red-900">
           {error}
@@ -319,20 +335,22 @@ function Concerns() {
   const [openId, setOpenId] = useState<string | null>(null);
   const res = useOne<{ data: Row[] }>(`/api/v1/speak-up${status ? `?status=${status}` : ''}`);
   return (
-    <div className="space-y-4">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Section title="Concerns">
         <Field label="Show">
-          <select
-            className={`${input} w-56`}
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">All concerns</option>
-            <option value="RECEIVED">Waiting to be acknowledged</option>
-            <option value="ACKNOWLEDGED">Acknowledged</option>
-            <option value="INVESTIGATING">Being looked into</option>
-            <option value="CLOSED">Closed</option>
-          </select>
+          <Select
+            allowClear
+            placeholder="All concerns"
+            value={status || undefined}
+            onChange={(v) => setStatus(v ?? '')}
+            style={{ width: 224 }}
+            options={[
+              { value: 'RECEIVED', label: 'Waiting to be acknowledged' },
+              { value: 'ACKNOWLEDGED', label: 'Acknowledged' },
+              { value: 'INVESTIGATING', label: 'Being looked into' },
+              { value: 'CLOSED', label: 'Closed' },
+            ]}
+          />
         </Field>
         <DataTable<Row>
           caption="Speak-up concerns"
@@ -360,14 +378,13 @@ function Concerns() {
               key: 'a',
               header: 'Open',
               cell: (r) => (
-                <button
-                  type="button"
-                  className={smallButton}
+                <Button
+                  size="small"
                   aria-label={`Open concern ${r.code}`}
                   onClick={() => setOpenId(openId === r.id ? null : r.id)}
                 >
                   {openId === r.id ? 'Hide' : 'Open'}
-                </button>
+                </Button>
               ),
             },
           ]}
@@ -375,7 +392,7 @@ function Concerns() {
       </Section>
       {openId && <ConcernDetail id={openId} />}
       <RecordConcern />
-    </div>
+    </Space>
   );
 }
 
@@ -438,32 +455,30 @@ function ConcernDetail({ id }: { id: string }) {
           </>
         )}
       </dl>
-      <p className="whitespace-pre-wrap rounded border border-hub-line bg-hub-row p-2 text-sm">
-        {c.summary}
-      </p>
+      <p className="whitespace-pre-wrap rounded  p-2 text-sm">{c.summary}</p>
       <div className="flex flex-wrap gap-2">
         {c.status === 'RECEIVED' && (
-          <button type="button" className={smallButton} onClick={() => open('ack')}>
+          <Button size="small" onClick={() => open('ack')}>
             Acknowledge
-          </button>
+          </Button>
         )}
         {c.status === 'ACKNOWLEDGED' && (
-          <button type="button" className={smallButton} onClick={() => open('start')}>
+          <Button size="small" onClick={() => open('start')}>
             Start looking into it
-          </button>
+          </Button>
         )}
-        <button type="button" className={smallButton} onClick={() => open('note')}>
+        <Button size="small" onClick={() => open('note')}>
           Add a note
-        </button>
+        </Button>
         {c.anonymous && (
-          <button type="button" className={smallButton} onClick={() => open('feedback')}>
+          <Button size="small" onClick={() => open('feedback')}>
             Write feedback for the raiser
-          </button>
+          </Button>
         )}
         {(c.status === 'ACKNOWLEDGED' || c.status === 'INVESTIGATING') && (
-          <button type="button" className={smallButton} onClick={() => open('close')}>
+          <Button size="small" onClick={() => open('close')}>
             Close
-          </button>
+          </Button>
         )}
       </div>
       {!c.anonymous && !c.feedbackGivenOn && c.status !== 'RECEIVED' && (
@@ -473,7 +488,7 @@ function ConcernDetail({ id }: { id: string }) {
       )}
       <ol aria-label="History" className="space-y-1 text-sm">
         {((c.notes ?? []) as Row[]).map((n) => (
-          <li key={n.id} className="rounded border border-hub-line p-2">
+          <li key={n.id} className="">
             <span className="font-semibold">{NOTE_KIND[n.kind]}</span> – {fmtDate(n.on)}
             {n.detrimentReported !== null &&
               (n.detrimentReported ? ' (detriment reported)' : ' (no detriment reported)')}
@@ -495,7 +510,7 @@ function ConcernDetail({ id }: { id: string }) {
             <Field label="Acknowledged on">
               <input
                 type="date"
-                className={input}
+
                 value={on}
                 max={today}
                 onChange={(e) => setOn(e.target.value)}
@@ -535,7 +550,7 @@ function ConcernDetail({ id }: { id: string }) {
         fields={
           <>
             <Field label="Kind">
-              <select className={input} value={kind} onChange={(e) => setKind(e.target.value)}>
+              <select value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="NOTE">Note</option>
                 {!c.anonymous && <option value="FEEDBACK">Feedback given to the person</option>}
                 {!c.anonymous && c.status === 'CLOSED' && (
@@ -546,7 +561,7 @@ function ConcernDetail({ id }: { id: string }) {
             <Field label="Date">
               <input
                 type="date"
-                className={input}
+
                 value={on}
                 max={today}
                 onChange={(e) => setOn(e.target.value)}
@@ -554,11 +569,7 @@ function ConcernDetail({ id }: { id: string }) {
             </Field>
             {kind === 'DETRIMENT_CHECK' && (
               <Field label="Did the person report any detriment?">
-                <select
-                  className={input}
-                  value={detriment}
-                  onChange={(e) => setDetriment(e.target.value)}
-                >
+                <select value={detriment} onChange={(e) => setDetriment(e.target.value)}>
                   <option value="">Choose</option>
                   <option value="no">No</option>
                   <option value="yes">Yes</option>
@@ -600,11 +611,7 @@ function ConcernDetail({ id }: { id: string }) {
         fields={
           <>
             <Field label="Outcome">
-              <select
-                className={input}
-                value={outcome}
-                onChange={(e) => setOutcome(e.target.value)}
-              >
+              <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
                 <option value="">Choose</option>
                 {Object.entries(OUTCOME).map(([k, v]) => (
                   <option key={k} value={k}>
@@ -616,19 +623,14 @@ function ConcernDetail({ id }: { id: string }) {
             <Field label="Closed on">
               <input
                 type="date"
-                className={input}
+
                 value={on}
                 max={today}
                 onChange={(e) => setOn(e.target.value)}
               />
             </Field>
             <Field label="Lessons for the organisation (optional)">
-              <textarea
-                className={input}
-                rows={2}
-                value={lessons}
-                onChange={(e) => setLessons(e.target.value)}
-              />
+              <textarea rows={2} value={lessons} onChange={(e) => setLessons(e.target.value)} />
             </Field>
           </>
         }
@@ -680,7 +682,7 @@ function RecordConcern() {
         onSubmit={(e) => void submit(e)}
       >
         <Field label="About">
-          <select className={input} value={category} onChange={(e) => setCategory(e.target.value)}>
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">Choose</option>
             {Object.entries(CATEGORY).map(([k, v]) => (
               <option key={k} value={k}>
@@ -690,7 +692,7 @@ function RecordConcern() {
           </select>
         </Field>
         <Field label="Received by">
-          <select className={input} value={channel} onChange={(e) => setChannel(e.target.value)}>
+          <select value={channel} onChange={(e) => setChannel(e.target.value)}>
             {Object.entries(CHANNEL)
               .filter(([k]) => k !== 'IN_APP')
               .map(([k, v]) => (
@@ -703,7 +705,7 @@ function RecordConcern() {
         <Field label="Date raised">
           <input
             type="date"
-            className={input}
+
             value={raisedOn}
             max={today}
             onChange={(e) => setRaisedOn(e.target.value)}
@@ -729,19 +731,19 @@ function RecordConcern() {
         )}
         <Field label="Summary (no patient names)">
           <textarea
-            className={`${input} w-96`}
+            style={{ width: 384 }}
             rows={3}
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
           />
         </Field>
-        <button
-          className={button}
-          type="submit"
+        <Button
+          type="primary"
+          htmlType="submit"
           disabled={!category || summary.trim().length < 10 || (!anonymous && !raisedBy)}
         >
           Record concern
-        </button>
+        </Button>
       </form>
       {msg}
     </Section>
@@ -775,11 +777,7 @@ function Themes() {
   return (
     <Section title="Themes by quarter">
       <Field label="Quarter">
-        <select
-          className={`${input} w-56`}
-          value={quarter}
-          onChange={(e) => setQuarter(e.target.value)}
-        >
+        <select style={{ width: 224 }} value={quarter} onChange={(e) => setQuarter(e.target.value)}>
           {quarters.map((k) => (
             <option key={k} value={k}>
               {quarterLabel(k)}
@@ -793,7 +791,7 @@ function Themes() {
         </p>
       )}
       {t?.note && (
-        <p role="note" className="rounded border border-sky-700 bg-sky-50 p-2 text-sm">
+        <p role="note" className=" text-sm">
           {t.note}
         </p>
       )}
@@ -833,7 +831,7 @@ function Prevention() {
   const steps = (Array.isArray(duty.data?.steps) ? duty.data!.steps : []) as Row[];
   const counts = Object.entries((duty.data?.concernsLast12Months ?? {}) as Record<string, number>);
   return (
-    <div className="space-y-4">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Section title="Steps to prevent sexual harassment">
         {duty.data?.note && (
           <p role="note" className="text-sm">
@@ -859,9 +857,9 @@ function Prevention() {
         title="Risk assessments"
         actions={
           !hasDraft && (
-            <button type="button" className={smallButton} onClick={() => setEditing('new')}>
+            <Button size="small" onClick={() => setEditing('new')}>
               Start a new assessment
-            </button>
+            </Button>
           )
         }
       >
@@ -903,25 +901,23 @@ function Prevention() {
                   ''
                 ) : (
                   <span className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className={smallButton}
+                    <Button
+                      size="small"
                       aria-label={`Edit: ${r.title}`}
                       onClick={() => setEditing(r)}
                     >
                       Edit
-                    </button>
+                    </Button>
                     {r.preparedBy === me.user.id ? (
                       <span className="text-sm">Someone else must approve this.</span>
                     ) : (
-                      <button
-                        type="button"
-                        className={smallButton}
+                      <Button
+                        size="small"
                         aria-label={`Approve: ${r.title}`}
                         onClick={() => setApproving(r)}
                       >
                         Approve
-                      </button>
+                      </Button>
                     )}
                   </span>
                 ),
@@ -947,7 +943,7 @@ function Prevention() {
       >
         <p>Once approved it cannot be changed. Any earlier approved assessment is replaced.</p>
       </ActionDialog>
-    </div>
+    </Space>
   );
 }
 
@@ -1002,7 +998,7 @@ function AssessmentForm({ existing, onDone }: { existing: Row | null; onDone: ()
         <div className="flex flex-wrap gap-3">
           <Field label="Title">
             <input
-              className={`${input} w-80`}
+              style={{ width: 320 }}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
@@ -1010,7 +1006,7 @@ function AssessmentForm({ existing, onDone }: { existing: Row | null; onDone: ()
           <Field label="Assessed on">
             <input
               type="date"
-              className={input}
+
               value={assessedOn}
               max={today}
               onChange={(e) => setAssessedOn(e.target.value)}
@@ -1019,7 +1015,7 @@ function AssessmentForm({ existing, onDone }: { existing: Row | null; onDone: ()
           <Field label="Review by">
             <input
               type="date"
-              className={input}
+
               value={reviewDue}
               onChange={(e) => setReviewDue(e.target.value)}
             />
@@ -1029,23 +1025,13 @@ function AssessmentForm({ existing, onDone }: { existing: Row | null; onDone: ()
           <fieldset key={i} className="space-y-2 rounded border border-hub-line p-3">
             <legend className="text-sm font-semibold">Risk {i + 1}</legend>
             <Field label="Where or when it could happen">
-              <input
-                className={input}
-                value={r.area}
-                onChange={(e) => set(i, 'area', e.target.value)}
-              />
+              <input value={r.area} onChange={(e) => set(i, 'area', e.target.value)} />
             </Field>
             <Field label="The risk">
-              <textarea
-                className={input}
-                rows={2}
-                value={r.risk}
-                onChange={(e) => set(i, 'risk', e.target.value)}
-              />
+              <textarea rows={2} value={r.risk} onChange={(e) => set(i, 'risk', e.target.value)} />
             </Field>
             <Field label="Controls in place">
               <textarea
-                className={input}
                 rows={2}
                 value={r.controls}
                 onChange={(e) => set(i, 'controls', e.target.value)}
@@ -1053,7 +1039,6 @@ function AssessmentForm({ existing, onDone }: { existing: Row | null; onDone: ()
             </Field>
             <Field label="Further action (optional)">
               <input
-                className={input}
                 value={r.furtherAction ?? ''}
                 onChange={(e) => set(i, 'furtherAction', e.target.value)}
               />
@@ -1067,31 +1052,26 @@ function AssessmentForm({ existing, onDone }: { existing: Row | null; onDone: ()
               Includes harassment by patients, visitors or contractors
             </label>
             {risks.length > 1 && (
-              <button
-                type="button"
-                className={smallButton}
+              <Button
+                size="small"
                 aria-label={`Remove risk ${i + 1}`}
                 onClick={() => setRisks(risks.filter((_, n) => n !== i))}
               >
                 Remove
-              </button>
+              </Button>
             )}
           </fieldset>
         ))}
         <div className="flex gap-2">
-          <button
-            type="button"
-            className={smallButton}
-            onClick={() => setRisks([...risks, emptyRisk()])}
-          >
+          <Button size="small" onClick={() => setRisks([...risks, emptyRisk()])}>
             Add another risk
-          </button>
-          <button type="button" className={smallButton} onClick={onDone}>
+          </Button>
+          <Button size="small" onClick={onDone}>
             Cancel
-          </button>
-          <button type="submit" className={button} disabled={!reviewDue || !title.trim()}>
+          </Button>
+          <Button type="primary" htmlType="submit" disabled={!reviewDue || !title.trim()}>
             Save draft
-          </button>
+          </Button>
         </div>
       </form>
       {msg}

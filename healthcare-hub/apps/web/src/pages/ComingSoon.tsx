@@ -1,8 +1,14 @@
+import { Card, Typography } from 'antd';
+
 export function ComingSoon({ title, milestone }: { title: string; milestone: string }) {
   return (
-    <div className="space-y-2">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <p className="text-slate-700">This module is built in Milestone {milestone}.</p>
-    </div>
+    <Card size="small">
+      <Typography.Title level={2} style={{ marginTop: 0 }}>
+        {title}
+      </Typography.Title>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+        This module is built in Milestone {milestone}.
+      </Typography.Paragraph>
+    </Card>
   );
 }

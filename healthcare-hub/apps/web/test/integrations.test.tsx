@@ -1,4 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
+import { openSettingsView } from './ant-testing.js';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
@@ -23,7 +24,7 @@ const me = (orgId: string | null): MeResponse => ({
     },
   ],
   permissions: ['admin.settings.manage'],
-  activeOrganisationId: orgId,
+  activeOrganisationId: orgId ?? ORG,
   mfa: { required: false, satisfied: true },
 });
 
@@ -87,7 +88,7 @@ function setup() {
 describe('integrations panel (mock)', () => {
   it('says plainly that everything is mock and shows recent runs with their notes', async () => {
     setup();
-    await userEvent.click(await screen.findByRole('tab', { name: 'Integrations' }));
+    await openSettingsView('Integrations');
     expect(await screen.findByRole('note')).toHaveTextContent(/Mock integrations only/);
     expect(await screen.findByText(/ZZ-999: no vehicle/)).toBeInTheDocument();
     expect(screen.getByText(/3 applied, 1 flagged, 1 skipped of 5/)).toBeInTheDocument();
@@ -95,7 +96,7 @@ describe('integrations panel (mock)', () => {
 
   it('connects an adapter and runs a mock sync, asking for faulty records when ticked', async () => {
     const send = setup();
-    await userEvent.click(await screen.findByRole('tab', { name: 'Integrations' }));
+    await openSettingsView('Integrations');
     const payroll = await screen.findByRole('listitem', { name: 'Payroll export' });
     await userEvent.click(within(payroll).getByRole('button', { name: 'Connect (mock)' }));
     await waitFor(() =>

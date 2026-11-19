@@ -166,6 +166,11 @@ export const AdminUserDto = z.object({
   status: z.enum(['INVITED', 'ACTIVE', 'SUSPENDED', 'LEAVER']),
   lastLoginAt: isoDateTime.nullable(),
   memberships: z.array(UserMembershipDto),
+  /** v36 Sign-in: whether their role needs MFA and whether a local account has a code app set up
+   *  (null when they sign in through the organisation's identity provider). */
+  signIn: z
+    .object({ mfaRequired: z.boolean(), mfaEnabled: z.boolean().nullable() })
+    .optional(),
 });
 export type AdminUserDto = z.infer<typeof AdminUserDto>;
 
@@ -279,13 +284,21 @@ export const RECIPIENT_LABELS: Record<(typeof RECIPIENTS)[number], string> = {
 /** Product defaults, not CQC rules (A6). */
 export const DEFAULT_WARNING_DAYS = [90, 60, 30, 14, 7];
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date');
-export const ItemRule = z.strictObject({
-  kind: z.enum(ITEM_KINDS),
-  recipients: z.array(z.enum(RECIPIENTS)).min(1).max(3),
-  /** Optional per-kind override of the org escalation timings. */
-  leadAfterDays: z.number().int().min(0).max(90).optional(),
-  managerAfterDays: z.number().int().min(1).max(180).optional(),
-});
+export const ItemRule = z
+  .strictObject({
+    kind: z.enum(ITEM_KINDS),
+    recipients: z.array(z.enum(RECIPIENTS)).min(1).max(3),
+    /** Optional per-kind escalation (v36 escalation rules); the organisation default otherwise. */
+    leadAfterDays: z.number().int().min(0).max(90).optional(),
+    managerAfterDays: z.number().int().min(1).max(180).optional(),
+  })
+  .refine(
+    (r) =>
+      r.leadAfterDays === undefined ||
+      r.managerAfterDays === undefined ||
+      r.managerAfterDays > r.leadAfterDays,
+    { message: 'The registered manager is told after the lead', path: ['managerAfterDays'] },
+  );
 export const Deputy = z
   .strictObject({
     leadUserId: uuid,

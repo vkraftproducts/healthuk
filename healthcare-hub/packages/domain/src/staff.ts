@@ -253,7 +253,14 @@ export async function staffReadinessFor(
 export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string[], now: Date) {
   const instances = await tx.requirementInstance.findMany({
     where: { subjectType: 'STAFF', subjectId: { in: [...staffIds] } },
-    select: { id: true, subjectId: true, templateId: true, status: true },
+    select: {
+      id: true,
+      subjectId: true,
+      templateId: true,
+      status: true,
+      reasonText: true,
+      template: { select: { title: true } },
+    },
   });
   const approvals = await tx.staffRoleApproval.findMany({
     where: {
@@ -274,6 +281,8 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
       /** False when nothing is required yet: shown as "not set up", never as compliant or N/A. */
       setUp: boolean;
       roles: string[];
+      /** The first thing stopping readiness, in words ("Manual handling: Expired 11 Nov"). */
+      issue?: string;
     }
   >();
   for (const id of staffIds) {
@@ -282,12 +291,21 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
     ];
     const required = new Set(map.filter((m) => roles.includes(m.role)).map((m) => m.templateId));
     const counts = { red: 0, amber: 0, grey: 0, green: 0 };
+    let red: string | undefined;
+    let grey: string | undefined;
     for (const i of instances) {
       if (i.subjectId !== id) continue;
-      if (!(required.has(i.templateId) || !mapped.has(i.templateId))) continue;
-      if (i.status === 'RED') counts.red += 1;
-      else if (i.status === 'AMBER') counts.amber += 1;
-      else if (i.status === 'GREY') counts.grey += 1;
+      // A starter has no approved role yet: every check set up for them counts (v36 pipeline).
+      if (roles.length && !(required.has(i.templateId) || !mapped.has(i.templateId))) continue;
+      const words = `${i.template.title}: ${i.reasonText}`;
+      if (i.status === 'RED') {
+        counts.red += 1;
+        red ??= words;
+      } else if (i.status === 'AMBER') counts.amber += 1;
+      else if (i.status === 'GREY') {
+        counts.grey += 1;
+        grey ??= words;
+      }
       else if (i.status === 'GREEN') counts.green += 1;
     }
     const overall = counts.red
@@ -300,7 +318,8 @@ export async function staffStatusSummary(tx: TenantTx, staffIds: readonly string
             ? 'GREEN'
             : 'GREY';
     const setUp = counts.red + counts.amber + counts.grey + counts.green > 0;
-    out.set(id, { counts, overall, setUp, roles });
+    const issue = red ?? grey;
+    out.set(id, { counts, overall, setUp, roles, ...(issue ? { issue } : {}) });
   }
   return out;
 }

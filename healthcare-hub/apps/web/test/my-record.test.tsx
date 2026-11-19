@@ -155,11 +155,13 @@ describe('My record [task 25]', () => {
 
   it('asks for a date change through a dialog with a reason', async () => {
     const { send } = renderMe(SELF);
-    await userEvent.click(
-      await screen.findByRole('button', {
-        name: 'Ask to change the date for Manual handling training',
-      }),
+    const ask = { name: 'Ask to change the date for Manual handling training' };
+    await screen.findByRole('button', ask);
+    // The table re-renders as the rest of the record arrives: click the button as it is now.
+    await waitFor(() =>
+      expect(screen.getByRole('table', { name: /My correction requests/ })).toBeInTheDocument(),
     );
+    await userEvent.click(screen.getByRole('button', ask));
     const dialog = await screen.findByRole('dialog');
     const confirm = within(dialog).getByRole('button', { name: 'Send request' });
     expect(confirm).toBeDisabled();
@@ -232,7 +234,11 @@ describe('My record [task 25]', () => {
 
   it('lets crew upload a certificate, which still needs someone else to verify it [82]', async () => {
     renderMe([...SELF, 'compliance.evidence.upload']);
-    const table = await screen.findByRole('table', { name: 'My requirements' });
+    await screen.findByRole('table', { name: 'My requirements' });
+    await waitFor(() =>
+      expect(screen.getByRole('table', { name: /My correction requests/ })).toBeInTheDocument(),
+    );
+    const table = screen.getByRole('table', { name: 'My requirements' });
     await userEvent.click(
       within(table).getByRole('button', {
         name: 'Upload a certificate for Manual handling training',

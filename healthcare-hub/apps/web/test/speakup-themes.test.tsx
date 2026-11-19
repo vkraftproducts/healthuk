@@ -89,7 +89,7 @@ describe('speak-up themes and feedback to anonymous raisers [H6]', () => {
           }
         : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Themes' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Insight' }));
     const select = await screen.findByLabelText('Quarter');
     const q3 = recentQuarters(new Date().toISOString().slice(0, 10))[1]!;
     await userEvent.selectOptions(select, q3);
@@ -108,8 +108,8 @@ describe('speak-up themes and feedback to anonymous raisers [H6]', () => {
 
   it('is not offered to someone who can only raise concerns', async () => {
     renderAt(['speakup.raise'], () => ({ data: [] }));
-    expect(await screen.findByRole('tab', { name: 'Raise a concern' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Themes' })).toBeNull();
+    expect(await screen.findByRole('tab', { name: 'Raise & track' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Insight' })).toBeNull();
   });
 
   it('a handler writes feedback for an anonymous raiser in a dialog', async () => {

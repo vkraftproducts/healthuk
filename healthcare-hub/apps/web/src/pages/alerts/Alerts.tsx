@@ -1,15 +1,15 @@
 import { Link } from '@tanstack/react-router';
 import { addDays, londonDate } from '@hub/rules';
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Alert, Button, Checkbox, Flex, Select, Space, Typography } from 'antd';
 import { useState } from 'react';
 import {
   ActionDialog,
   Field,
+  PageHeader,
   Section,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
@@ -70,6 +70,16 @@ const SEVERITY_STATUS: Record<Item['severity'], StatusKind> = {
 };
 const SNOOZE_DAYS = [1, 3, 7, 14, 30];
 
+const eventOptions = [
+  { value: '', label: 'Everything' },
+  ...Object.entries(EVENT_TEXT).map(([k, v]) => ({ value: k, label: v })),
+];
+
+const snoozeOptions = SNOOZE_DAYS.map((d) => ({
+  value: d,
+  label: d === 1 ? '1 day' : `${d} days`,
+}));
+
 function OpenLink({ item }: { item: Item }) {
   const [to, qs] = item.link.split('?');
   const tab = new URLSearchParams(qs ?? '').get('tab');
@@ -78,9 +88,10 @@ function OpenLink({ item }: { item: Item }) {
       to={to as string}
       {...(tab ? { search: { tab } } : {})}
       aria-label={`Open ${item.title}`}
-      className="font-medium text-hub-teal-dark underline"
     >
-      Open
+      <Button type="link" size="small" className="!h-auto !p-0">
+        Open
+      </Button>
     </Link>
   );
 }
@@ -104,47 +115,54 @@ export function Alerts() {
   const rows = (centre.data?.items ?? []).filter((i) => !onlyMine || i.why !== 'ROLE');
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Alerts</h1>
-      <p className="text-sm">
-        Things that need your attention. Acknowledging or snoozing an alert only pauses reminders:
-        the record keeps its real status until the work is done.
-      </p>
-      <div className="flex flex-wrap items-end gap-4">
+    <Space direction="vertical" size="large" className="w-full">
+      <PageHeader
+        title="Alerts"
+        description="Things that need your attention. Acknowledging or snoozing an alert only pauses reminders: the record keeps its real status until the work is done."
+      />
+      <Flex wrap="wrap" gap="middle" align="flex-end" className="w-full">
         <Field label="Show">
-          <select className={input} value={event} onChange={(e) => setEvent(e.target.value)}>
-            <option value="">Everything</option>
-            {Object.entries(EVENT_TEXT).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
+          <select
+            aria-label="Show"
+            value={event}
+            onChange={(e) => setEvent(e.target.value)}
+            className="field"
+            style={{ minWidth: 260 }}
+          >
+            {eventOptions.map((o) => (
+              <option key={o.value || 'all'} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>
         </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={onlyMine}
-            onChange={(e) => setOnlyMine(e.target.checked)}
-          />
+        <Checkbox
+          checked={onlyMine}
+          onChange={(e) => setOnlyMine(e.target.checked)}
+        >
           Only things I own or was told about
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={withAcknowledged}
-            onChange={(e) => setWithAcknowledged(e.target.checked)}
-          />
+        </Checkbox>
+        <Checkbox
+          checked={withAcknowledged}
+          onChange={(e) => setWithAcknowledged(e.target.checked)}
+        >
           Include acknowledged alerts
-        </label>
-      </div>
+        </Checkbox>
+      </Flex>
       {centre.isError && (
-        <p role="alert">Source unavailable. Could not load your alerts. Try again shortly.</p>
+        <Alert
+          type="error"
+          role="alert"
+          showIcon
+          message="Source unavailable. Could not load your alerts. Try again shortly."
+        />
       )}
       <DataTable<Item>
         caption="Your alerts"
         rows={rows}
         rowKey={(r) => r.key}
+        rowName={(r) => r.title}
+        loading={centre.isLoading}
         emptyMessage={centre.isLoading ? 'Loading…' : 'Nothing needs your attention.'}
         columns={[
           {
@@ -174,29 +192,29 @@ export function Alerts() {
             key: 'a',
             header: 'Actions',
             cell: (r) => (
-              <div className="flex flex-wrap gap-2">
+              <Flex wrap="wrap" gap="small">
                 <OpenLink item={r} />
                 {canHandle && r.alertId && r.state === 'OPEN' && (
-                  <button
-                    type="button"
-                    className={smallButton}
+                  <Button
+                    type="default"
+                    size="small"
                     aria-label={`Acknowledge ${r.title}`}
                     onClick={() => setAcknowledging(r)}
                   >
                     Acknowledge
-                  </button>
+                  </Button>
                 )}
                 {canHandle && r.alertId && (
-                  <button
-                    type="button"
-                    className={smallButton}
+                  <Button
+                    type="default"
+                    size="small"
                     aria-label={`Snooze reminders for ${r.title}`}
                     onClick={() => setSnoozing(r)}
                   >
                     Snooze
-                  </button>
+                  </Button>
                 )}
-              </div>
+              </Flex>
             ),
           },
         ]}
@@ -204,10 +222,10 @@ export function Alerts() {
 
       <Section title="Who is told about what">
         {centre.data && centre.data.rules.length === 0 ? (
-          <p className="text-sm">
+          <Typography.Paragraph className="!mb-0 text-sm">
             No notification rules name your role. You see the records you own, anything you were
             notified about, and the areas your role covers.
-          </p>
+          </Typography.Paragraph>
         ) : (
           <ul aria-label="Notification rules that include your role" className="list-disc pl-5">
             {(centre.data?.rules ?? []).map((r, i) => (
@@ -222,9 +240,9 @@ export function Alerts() {
             ))}
           </ul>
         )}
-        <p className="text-sm">
+        <Typography.Paragraph className="!mb-0 text-sm">
           Notification rules are set by an administrator in Settings, Notifications.
-        </p>
+        </Typography.Paragraph>
       </Section>
 
       <ActionDialog
@@ -237,10 +255,10 @@ export function Alerts() {
           api.send('POST', `/api/v1/alerts/${acknowledging?.alertId}/acknowledge`, orgId, {})
         }
       >
-        <p>
+        <Typography.Paragraph className="!mb-0">
           Reminders stop until the situation changes. The record keeps its status until the work is
           done.
-        </p>
+        </Typography.Paragraph>
       </ActionDialog>
       <ActionDialog
         open={!!snoozing}
@@ -251,17 +269,7 @@ export function Alerts() {
         reasonLabel="Why are you snoozing it?"
         fields={
           <Field label="Pause reminders for">
-            <select
-              className={input}
-              value={snoozeDays}
-              onChange={(e) => setSnoozeDays(Number(e.target.value))}
-            >
-              {SNOOZE_DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {d === 1 ? '1 day' : `${d} days`}
-                </option>
-              ))}
-            </select>
+            <Select value={snoozeDays} onChange={setSnoozeDays} options={snoozeOptions} />
           </Field>
         }
         onConfirm={(reason) =>
@@ -271,11 +279,11 @@ export function Alerts() {
           })
         }
       >
-        <p>
+        <Typography.Paragraph className="!mb-0">
           Only reminders pause, until the end of that day (UK time). The status and due date do not
           change.
-        </p>
+        </Typography.Paragraph>
       </ActionDialog>
-    </div>
+    </Space>
   );
 }

@@ -290,7 +290,9 @@ describe('registration, ratings and governance records [task 21]', () => {
 
   it('the fit and proper tab is only offered with its own permission', async () => {
     renderAt('/compliance?tab=fpp', ['compliance.audit.view'], () => ({ data: [] }));
-    expect(await screen.findByRole('tab', { name: 'Governance meetings' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Fit and proper' })).toBeNull();
+    expect(await screen.findByRole('tab', { name: 'Policies & governance' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Policies & governance' }));
+    expect(await screen.findByRole('radio', { name: 'Meetings' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Fit and proper' })).toBeNull();
   });
 });

@@ -1,8 +1,9 @@
 import { RecordPayloads, type RecordKind } from '@hub/contracts';
 import { useParams } from '@tanstack/react-router';
+import { Alert, Button, Card, Input, Select, Space } from 'antd';
 import { useState, type FormEvent } from 'react';
 import type { z } from 'zod';
-import { useCan } from '../../components.js';
+import { Field, useCan } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { UploadDialog } from '../evidence/Evidence.js';
 import { useList, useOne, usePeople } from '../settings/hooks.js';
@@ -165,8 +166,6 @@ const optionText = (o: string) =>
     .replace(/_/g, ' ')
     .toLowerCase()
     .replace(/^./, (c) => c.toUpperCase());
-const box = 'rounded-md border border-slate-500 bg-hub-card px-2.5 py-1.5';
-
 export function RecordForm({
   kind,
   onSubmit,
@@ -241,7 +240,11 @@ export function RecordForm({
   const control = (fd: Field) => {
     if (fd.kind === 'enum')
       return (
-        <select name={fd.name} className={box} defaultValue={fd.required ? undefined : ''}>
+        <select
+          name={fd.name}
+          style={{ width: '100%' }}
+          defaultValue={fd.required ? undefined : ''}
+        >
           {!fd.required && <option value="">Not set</option>}
           {fd.options.map((o) => (
             <option key={o} value={o}>
@@ -252,7 +255,11 @@ export function RecordForm({
       );
     if (fd.name.endsWith('UserId'))
       return (
-        <select name={fd.name} className={box} defaultValue={fd.required ? me.user.id : ''}>
+        <select
+          name={fd.name}
+          style={{ width: '100%' }}
+          defaultValue={fd.required ? me.user.id : ''}
+        >
           {!fd.required && <option value="">Not recorded</option>}
           {people.length === 0 && <option value={me.user.id}>Me</option>}
           {people.map((p) => (
@@ -264,27 +271,24 @@ export function RecordForm({
       );
     if (kind === 'TRAINING' && fd.name === 'courseCode')
       return (
-        <input
+        <Input
           name="courseCode"
-          className={box}
           value={course.code}
           onChange={(e) => setCourse({ ...course, code: e.target.value })}
         />
       );
     if (kind === 'TRAINING' && fd.name === 'title')
       return (
-        <input
+        <Input
           name="title"
-          className={box}
           value={course.title}
           onChange={(e) => setCourse({ ...course, title: e.target.value })}
         />
       );
     return (
-      <input
+      <Input
         name={fd.name}
         type={fd.kind === 'date' ? 'date' : fd.kind === 'number' ? 'number' : 'text'}
-        className={box}
       />
     );
   };
@@ -299,21 +303,17 @@ export function RecordForm({
         {kind === 'TRAINING' && courses.length > 0 && (
           <label className="flex flex-col text-sm sm:col-span-2">
             <span>Course from your training catalogue</span>
-            <select
-              className={box}
-              value={String(courses.find((c) => c.code === course.code)?.id ?? '')}
-              onChange={(e) => {
-                const c = courses.find((x) => x.id === e.target.value);
+            <Select
+              style={{ width: '100%' }}
+              value={String(courses.find((c) => c.code === course.code)?.id ?? '') || undefined}
+              onChange={(id) => {
+                const c = courses.find((x) => x.id === id);
                 setCourse(c ? { code: String(c.code), title: String(c.title) } : course);
               }}
-            >
-              <option value="">Not in the catalogue (type the course below)</option>
-              {courses.map((c) => (
-                <option key={c.id as string} value={c.id as string}>
-                  {c.title as string}
-                </option>
-              ))}
-            </select>
+              allowClear
+              placeholder="Not in the catalogue (type the course below)"
+              options={courses.map((c) => ({ value: c.id as string, label: c.title as string }))}
+            />
           </label>
         )}
         {fields.map((fd) =>
@@ -350,20 +350,12 @@ export function RecordForm({
           ),
         )}
         {problem && (
-          <p
-            role="alert"
-            className="rounded border border-red-700 bg-red-50 p-2 text-sm text-red-900 sm:col-span-2"
-          >
-            {problem}
-          </p>
+          <Alert type="error" showIcon role="alert" message={problem} className="sm:col-span-2" />
         )}
         <div className="sm:col-span-2">
-          <button
-            disabled={busy}
-            className="rounded-md bg-hub-teal px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
+          <Button type="primary" htmlType="submit" loading={busy} disabled={busy}>
             Save record
-          </button>
+          </Button>
         </div>
       </form>
       {staffId && can('compliance.evidence.upload') && can('compliance.requirement.view') && (
@@ -388,28 +380,28 @@ function CertificateUpload({ staffId, courseCode }: { staffId: string; courseCod
   const match = reqs.find((r) => courseCode && r.templateCode === courseCode.toUpperCase());
   const pick = reqs.find((r) => r.id === (chosen || match?.id)) ?? null;
   return (
-    <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg border border-hub-line bg-hub-card p-3">
-      <label className="flex flex-col text-sm">
-        Upload a certificate for
-        <select className={box} value={pick?.id ?? ''} onChange={(e) => setChosen(e.target.value)}>
-          <option value="">Choose the requirement it proves</option>
-          {reqs.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.templateTitle}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        disabled={!pick}
-        className="rounded-md border border-slate-500 bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink hover:bg-hub-row disabled:opacity-50"
-        aria-label={pick ? `Upload certificate for ${pick.templateTitle}` : 'Upload certificate'}
-        onClick={() => setTarget(pick)}
-      >
-        Upload certificate
-      </button>
-      <p className="w-full text-xs">Someone else verifies the certificate before it counts.</p>
+    <Card size="small" className="mt-3">
+      <Space wrap align="end">
+        <Field label="Upload a certificate for">
+          <Select
+            style={{ width: 280 }}
+            value={pick?.id ?? undefined}
+            onChange={setChosen}
+            allowClear
+            placeholder="Choose the requirement it proves"
+            options={reqs.map((r) => ({ value: r.id as string, label: r.templateTitle as string }))}
+          />
+        </Field>
+        <Button
+          size="small"
+          disabled={!pick}
+          aria-label={pick ? `Upload certificate for ${pick.templateTitle}` : 'Upload certificate'}
+          onClick={() => setTarget(pick)}
+        >
+          Upload certificate
+        </Button>
+      </Space>
+      <p className="mt-2 text-xs">Someone else verifies the certificate before it counts.</p>
       <UploadDialog
         target={
           target
@@ -422,6 +414,6 @@ function CertificateUpload({ staffId, courseCode }: { staffId: string; courseCod
         }
         onClose={() => setTarget(null)}
       />
-    </div>
+    </Card>
   );
 }

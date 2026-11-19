@@ -260,6 +260,8 @@ export const ShiftDto = z.object({
   vehicleId: uuid,
   vehicleCallsign: z.string(),
   vehicleStatus: z.string(),
+  /** Non-overridable readiness fail (expired docs / overdue service), shown as blocked on the planner. */
+  vehicleBlockReason: z.string().nullable().optional(),
   startsAt: isoDateTime,
   endsAt: isoDateTime,
   state: z.enum(['PLANNED', 'STARTED', 'ENDED', 'CANCELLED']),

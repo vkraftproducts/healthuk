@@ -418,6 +418,14 @@ describe('evidence lifecycle and status (upload never makes anything green) [UAT
       body: { decision: 'REJECTED', reason: 'Photo is unreadable' },
     });
     expect(await getInstance(inst.id)).toMatchObject({ status: 'GREEN', reasonCode: 'VALID' });
+    const crewAlerts = (
+      await call('GET', '/api/v1/alerts/centre', { sub: 'dev|crew' })
+    ).body.items as J[];
+    expect(
+      crewAlerts.some(
+        (a) => a.reasonText.includes('Photo is unreadable') && a.sourceType === 'EVIDENCE',
+      ),
+    ).toBe(true);
     const versions = (await call('GET', `/api/v1/requirements/instances/${inst.id}/evidence`)).body
       .data as J[];
     expect(versions.map((v) => v.state).sort()).toEqual(['REJECTED', 'VERIFIED']);

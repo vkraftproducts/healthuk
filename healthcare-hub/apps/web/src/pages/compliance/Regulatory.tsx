@@ -1,4 +1,5 @@
 import { londonDate } from '@hub/rules';
+import { Button } from 'antd';
 import { DataTable, StatusBadge } from '@hub/ui';
 import { useState, type FormEvent } from 'react';
 import {
@@ -6,12 +7,9 @@ import {
   Field,
   PersonSelect,
   Section,
-  button,
   errText,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -77,7 +75,7 @@ export function RegistrationEditor({ record }: { record: Row | undefined }) {
             <Field label="Provider reference">
               <input
                 name="providerRef"
-                className={input}
+               
                 defaultValue={record.providerRef ?? ''}
                 maxLength={40}
               />
@@ -85,7 +83,7 @@ export function RegistrationEditor({ record }: { record: Row | undefined }) {
             <Field label="Nominated individual">
               <input
                 name="nominatedIndividual"
-                className={input}
+               
                 defaultValue={record.nominatedIndividual ?? ''}
                 maxLength={120}
               />
@@ -101,16 +99,16 @@ export function RegistrationEditor({ record }: { record: Row | undefined }) {
             <Field label="Conditions of registration">
               <textarea
                 name="conditions"
-                className={input}
+               
                 rows={2}
                 defaultValue={record.conditions ?? ''}
               />
             </Field>
             <Field label="Why is it changing?">
-              <input name="reason" className={input} maxLength={500} />
+              <input name="reason" maxLength={500} />
             </Field>
             <div className="flex items-end">
-              <button className={button}>Save registration record</button>
+              <Button htmlType="submit" type="primary">Save registration record</Button>
             </div>
           </form>
           {msg}
@@ -250,8 +248,7 @@ export function RatingDisplay() {
             header: 'Record display',
             cell: (r) =>
               can(REG) && r.current ? (
-                <button
-                  className={smallButton}
+                <Button size="small"
                   aria-label={`Record display: ${where(r)}, published ${fmtDate(r.publishedOn)}`}
                   onClick={() => {
                     setPremises(r.displayedPremisesOn ?? '');
@@ -263,7 +260,7 @@ export function RatingDisplay() {
                   }}
                 >
                   Record display
-                </button>
+                </Button>
               ) : null,
           },
         ]}
@@ -275,7 +272,7 @@ export function RatingDisplay() {
           className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-3"
         >
           <Field label="Location">
-            <select name="locationId" className={input}>
+            <select name="locationId">
               <option value="">Whole provider</option>
               {(locations.data?.data ?? []).map((l) => (
                 <option key={l.id} value={l.id}>
@@ -285,7 +282,7 @@ export function RatingDisplay() {
             </select>
           </Field>
           <Field label="Overall rating">
-            <select name="overall" className={input} required>
+            <select name="overall" required>
               {RATINGS.map((x) => (
                 <option key={x} value={x}>
                   {words(x)}
@@ -294,11 +291,11 @@ export function RatingDisplay() {
             </select>
           </Field>
           <Field label="Published by CQC on">
-            <input type="date" name="publishedOn" required max={today()} className={input} />
+            <input type="date" name="publishedOn" required max={today()} />
           </Field>
           {KEY_QUESTIONS.map((k) => (
             <Field key={k} label={`${words(k)} (optional)`}>
-              <select name={`kq-${k}`} className={input}>
+              <select name={`kq-${k}`}>
                 <option value="">Not recorded</option>
                 {RATINGS.map((x) => (
                   <option key={x} value={x}>
@@ -309,13 +306,13 @@ export function RatingDisplay() {
             </Field>
           ))}
           <Field label="Link to the CQC report (https)">
-            <input type="url" name="reportUrl" className={input} placeholder="https://" />
+            <input type="url" name="reportUrl" placeholder="https://" />
           </Field>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="noWebsite" /> We have no website
           </label>
           <div className="flex items-end">
-            <button className={button}>Record rating</button>
+            <Button htmlType="submit" type="primary">Record rating</Button>
           </div>
         </form>
       )}
@@ -357,7 +354,7 @@ export function RatingDisplay() {
             <Field label="Displayed at the premises on">
               <input
                 type="date"
-                className={input}
+               
                 value={premises}
                 max={today()}
                 onChange={(e) => setPremises(e.target.value)}
@@ -366,7 +363,7 @@ export function RatingDisplay() {
             <Field label="Displayed on the website on">
               <input
                 type="date"
-                className={input}
+               
                 value={website}
                 max={today()}
                 disabled={noWebsite}
@@ -385,7 +382,7 @@ export function RatingDisplay() {
               <input
                 type="file"
                 accept=".png,.jpg,.jpeg,.webp,.pdf"
-                className={input}
+               
                 onChange={(e) => setPremisesFile(e.target.files?.[0] ?? null)}
               />
             </Field>
@@ -393,7 +390,7 @@ export function RatingDisplay() {
               <input
                 type="file"
                 accept=".png,.jpg,.jpeg,.webp,.pdf"
-                className={input}
+               
                 disabled={noWebsite}
                 onChange={(e) => setWebsiteFile(e.target.files?.[0] ?? null)}
               />
@@ -482,13 +479,12 @@ export function FitAndProper() {
               key: 'a',
               header: 'New check',
               cell: (r) => (
-                <button
-                  className={smallButton}
+                <Button size="small"
                   aria-label={`Record a new check for ${r.directorName}`}
                   onClick={() => setDirector({ name: r.directorName, role: r.directorRole })}
                 >
                   New check
-                </button>
+                </Button>
               ),
             },
           ]}
@@ -502,7 +498,7 @@ export function FitAndProper() {
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Director's name">
             <input
-              className={input}
+             
               required
               minLength={2}
               value={director.name}
@@ -511,7 +507,7 @@ export function FitAndProper() {
           </Field>
           <Field label="Role (for example, chair)">
             <input
-              className={input}
+             
               required
               minLength={2}
               value={director.role}
@@ -519,7 +515,7 @@ export function FitAndProper() {
             />
           </Field>
           <Field label="Checked on">
-            <input type="date" name="checkedOn" required max={today()} className={input} />
+            <input type="date" name="checkedOn" required max={today()} />
           </Field>
         </div>
         <fieldset className="grid gap-1 sm:grid-cols-2">
@@ -532,10 +528,10 @@ export function FitAndProper() {
         </fieldset>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Self-declaration signed on">
-            <input type="date" name="declarationOn" max={today()} className={input} />
+            <input type="date" name="declarationOn" max={today()} />
           </Field>
           <Field label="Outcome">
-            <select name="outcome" className={input} required>
+            <select name="outcome" required>
               {Object.entries(FPP_OUTCOME).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
@@ -544,10 +540,10 @@ export function FitAndProper() {
             </select>
           </Field>
           <Field label="Notes (no health details)">
-            <input name="notes" className={input} maxLength={2000} />
+            <input name="notes" maxLength={2000} />
           </Field>
         </div>
-        <button className={button}>Record check</button>
+        <Button htmlType="submit" type="primary">Record check</Button>
         {msg}
       </form>
       <DataTable<Row>
@@ -663,13 +659,12 @@ export function Meetings() {
             key: 'o',
             header: 'Open',
             cell: (r) => (
-              <button
-                className={smallButton}
+              <Button size="small"
                 aria-label={`Open meeting ${r.code} ${r.title}`}
                 onClick={() => setOpen(r.id)}
               >
                 Open
-              </button>
+              </Button>
             ),
           },
         ]}
@@ -678,9 +673,9 @@ export function Meetings() {
         <Section
           title={`${current.code}: ${current.title}`}
           actions={
-            <button className={smallButton} onClick={() => setOpen(null)}>
+            <Button size="small" onClick={() => setOpen(null)}>
               Close meeting
-            </button>
+            </Button>
           }
         >
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -726,30 +721,28 @@ export function Meetings() {
           />
           {manage && (
             <div className="flex flex-wrap gap-2">
-              <button
-                className={smallButton}
+              <Button size="small"
                 onClick={() => {
                   setAction({ title: '', owner: me.user.id, deadline: '' });
                   setActing(current);
                 }}
               >
                 Raise an action from {current.code}
-              </button>
+              </Button>
               {current.status === 'DRAFT' &&
                 (current.recordedBy === me.user.id ? (
                   <p className="text-sm">
                     You wrote these minutes, so someone else must approve them.
                   </p>
                 ) : (
-                  <button
-                    className={smallButton}
+                  <Button size="small"
                     onClick={() => {
                       setApprovedAt('');
                       setApproving(current);
                     }}
                   >
                     Approve minutes of {current.code}
-                  </button>
+                  </Button>
                 ))}
             </div>
           )}
@@ -762,7 +755,7 @@ export function Meetings() {
           className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-2"
         >
           <Field label="Type of meeting">
-            <select name="kind" className={input} required>
+            <select name="kind" required>
               {MEETING_KINDS.map((k) => (
                 <option key={k} value={k}>
                   {words(k)}
@@ -771,31 +764,31 @@ export function Meetings() {
             </select>
           </Field>
           <Field label="Title">
-            <input name="title" className={input} required minLength={3} maxLength={200} />
+            <input name="title" required minLength={3} maxLength={200} />
           </Field>
           <Field label="Held on">
-            <input type="date" name="heldOn" required max={today()} className={input} />
+            <input type="date" name="heldOn" required max={today()} />
           </Field>
           <Field label="Chair">
-            <input name="chair" className={input} required minLength={2} maxLength={120} />
+            <input name="chair" required minLength={2} maxLength={120} />
           </Field>
           <Field label="Attended (one name per line)">
-            <textarea name="attendees" className={input} rows={3} />
+            <textarea name="attendees" rows={3} />
           </Field>
           <Field label="Apologies (one name per line)">
-            <textarea name="apologies" className={input} rows={3} />
+            <textarea name="apologies" rows={3} />
           </Field>
           <Field label="Minutes">
-            <textarea name="minutes" className={input} rows={5} required minLength={3} />
+            <textarea name="minutes" rows={5} required minLength={3} />
           </Field>
           <Field label="Decisions">
-            <textarea name="decisions" className={input} rows={5} />
+            <textarea name="decisions" rows={5} />
           </Field>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="quorate" /> The meeting was quorate
           </label>
           <div className="flex items-end">
-            <button className={button}>Record meeting</button>
+            <Button htmlType="submit" type="primary">Record meeting</Button>
           </div>
         </form>
       )}
@@ -818,7 +811,7 @@ export function Meetings() {
           laterMeetings.length > 0 ? (
             <Field label="Agreed at which meeting?">
               <select
-                className={input}
+               
                 value={approvedAt}
                 onChange={(e) => setApprovedAt(e.target.value)}
               >
@@ -857,7 +850,7 @@ export function Meetings() {
           <div className="grid gap-3">
             <Field label="What needs doing?">
               <input
-                className={input}
+               
                 value={action.title}
                 onChange={(e) => setAction({ ...action, title: e.target.value })}
               />
@@ -872,7 +865,7 @@ export function Meetings() {
             <Field label="Deadline">
               <input
                 type="date"
-                className={input}
+               
                 min={today()}
                 value={action.deadline}
                 onChange={(e) => setAction({ ...action, deadline: e.target.value })}
@@ -957,9 +950,9 @@ function MeetingPack({ onOpen }: { onOpen: (id: string) => void }) {
     <Section
       title="Meeting pack"
       actions={
-        <button className={smallButton} disabled={busy} onClick={() => void build()}>
+        <Button size="small" disabled={busy} onClick={() => void build()}>
           {busy ? 'Building…' : pack ? 'Rebuild the meeting pack' : 'Build the meeting pack'}
-        </button>
+        </Button>
       }
     >
       <p className="text-sm">
@@ -998,13 +991,12 @@ function MeetingPack({ onOpen }: { onOpen: (id: string) => void }) {
                 key: 'o',
                 header: 'Open',
                 cell: (m) => (
-                  <button
-                    className={smallButton}
+                  <Button size="small"
                     aria-label={`Open minutes of ${m.code}`}
                     onClick={() => onOpen(m.id)}
                   >
                     Open
-                  </button>
+                  </Button>
                 ),
               },
             ]}
@@ -1117,8 +1109,7 @@ export function NhsContracts() {
               header: 'Change',
               cell: (r) =>
                 manage ? (
-                  <button
-                    className={smallButton}
+                  <Button size="small"
                     aria-label={`Change contract ${r.reference}`}
                     onClick={() => {
                       setEndOn(r.endOn);
@@ -1127,7 +1118,7 @@ export function NhsContracts() {
                     }}
                   >
                     Change
-                  </button>
+                  </Button>
                 ) : null,
             },
           ]}
@@ -1166,16 +1157,16 @@ export function NhsContracts() {
           className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-3"
         >
           <Field label="Commissioner">
-            <input name="commissioner" className={input} required minLength={2} maxLength={200} />
+            <input name="commissioner" required minLength={2} maxLength={200} />
           </Field>
           <Field label="Contract reference">
-            <input name="reference" className={input} required minLength={2} maxLength={60} />
+            <input name="reference" required minLength={2} maxLength={60} />
           </Field>
           <Field label="Service">
-            <input name="service" className={input} required minLength={2} maxLength={200} />
+            <input name="service" required minLength={2} maxLength={200} />
           </Field>
           <Field label="Contract type">
-            <select name="contractType" className={input}>
+            <select name="contractType">
               {Object.entries(CONTRACT_TYPE).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
@@ -1184,10 +1175,10 @@ export function NhsContracts() {
             </select>
           </Field>
           <Field label="Starts on">
-            <input type="date" name="startOn" required className={input} />
+            <input type="date" name="startOn" required />
           </Field>
           <Field label="Ends on">
-            <input type="date" name="endOn" required className={input} />
+            <input type="date" name="endOn" required />
           </Field>
           <Field label="Notice period (months)">
             <input
@@ -1196,11 +1187,11 @@ export function NhsContracts() {
               min={0}
               max={24}
               defaultValue={6}
-              className={input}
+             
             />
           </Field>
           <Field label="Reporting to the commissioner">
-            <select name="reporting" className={input}>
+            <select name="reporting">
               {Object.entries(REPORTING).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
@@ -1209,7 +1200,7 @@ export function NhsContracts() {
             </select>
           </Field>
           <Field label="Next contract review meeting">
-            <input type="date" name="reviewMeetingOn" className={input} />
+            <input type="date" name="reviewMeetingOn" />
           </Field>
           <PersonSelect
             label="Contract manager"
@@ -1219,7 +1210,7 @@ export function NhsContracts() {
             meId={me.user.id}
           />
           <div className="flex items-end">
-            <button className={button}>Record contract</button>
+            <Button htmlType="submit" type="primary">Record contract</Button>
           </div>
         </form>
       )}
@@ -1244,7 +1235,7 @@ export function NhsContracts() {
             <Field label="Ends on">
               <input
                 type="date"
-                className={input}
+               
                 value={endOn}
                 onChange={(e) => setEndOn(e.target.value)}
               />
@@ -1254,7 +1245,7 @@ export function NhsContracts() {
                 type="number"
                 min={0}
                 max={24}
-                className={input}
+               
                 value={notice}
                 onChange={(e) => setNotice(e.target.value)}
               />
@@ -1339,8 +1330,9 @@ export function Notifications() {
                 {s.eventCode}: {s.title} ({fmtDate(s.occurredOn)}) –{' '}
                 {NOTIFICATION_KIND[s.kind] ?? words(s.kind)}
                 {manage && (
-                  <button
-                    className={`${smallButton} ml-2`}
+                  <Button
+                    size="small"
+                    style={{ marginLeft: 8 }}
                     aria-label={`Draft a notification for ${s.eventCode}`}
                     onClick={() => {
                       setKind(s.kind);
@@ -1349,7 +1341,7 @@ export function Notifications() {
                     }}
                   >
                     Draft
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}
@@ -1389,30 +1381,27 @@ export function Notifications() {
               !manage ? null : (
                 <div className="flex flex-wrap gap-1">
                   {r.status === 'DRAFT' && r.preparedBy !== me.user.id && (
-                    <button
-                      className={smallButton}
+                    <Button size="small"
                       aria-label={`Review ${r.code}`}
                       onClick={() => setMoving({ n: r, to: 'READY' })}
                     >
                       Review
-                    </button>
+                    </Button>
                   )}
                   {r.status === 'DRAFT' && r.preparedBy === me.user.id && (
                     <span className="text-sm">Someone else must review this.</span>
                   )}
                   {r.status === 'DRAFT' && (
-                    <button
-                      className={smallButton}
+                    <Button size="small"
                       aria-label={`Mark ${r.code} not required`}
                       onClick={() => setMoving({ n: r, to: 'NOT_REQUIRED' })}
                     >
                       Not required
-                    </button>
+                    </Button>
                   )}
                   {r.status === 'READY' && (
                     <>
-                      <button
-                        className={smallButton}
+                      <Button size="small"
                         aria-label={`Record submission of ${r.code}`}
                         onClick={() => {
                           setSubmittedOn(today());
@@ -1421,14 +1410,13 @@ export function Notifications() {
                         }}
                       >
                         Record submission
-                      </button>
-                      <button
-                        className={smallButton}
+                      </Button>
+                      <Button size="small"
                         aria-label={`Return ${r.code} to draft`}
                         onClick={() => setMoving({ n: r, to: 'DRAFT' })}
                       >
                         Return to draft
-                      </button>
+                      </Button>
                     </>
                   )}
                 </div>
@@ -1443,7 +1431,7 @@ export function Notifications() {
           className="grid gap-3 rounded border border-hub-line bg-hub-card p-3 sm:grid-cols-2"
         >
           <Field label="Type of notification">
-            <select className={input} value={kind} onChange={(e) => setKind(e.target.value)}>
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
               {Object.entries(NOTIFICATION_KIND).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
@@ -1455,7 +1443,7 @@ export function Notifications() {
             <input
               type="date"
               required
-              className={input}
+             
               value={occurredOn}
               onChange={(e) => setOccurredOn(e.target.value)}
             />
@@ -1467,13 +1455,13 @@ export function Notifications() {
           )}
           {eventId && <p className="text-sm">Linked to the event you chose.</p>}
           <Field label="What happened (no names or NHS numbers)">
-            <textarea name="summary" className={input} rows={4} required minLength={10} />
+            <textarea name="summary" rows={4} required minLength={10} />
           </Field>
           <Field label="What has been done">
-            <textarea name="actionsTaken" className={input} rows={4} />
+            <textarea name="actionsTaken" rows={4} />
           </Field>
           <div className="flex items-end">
-            <button className={button}>Save draft</button>
+            <Button htmlType="submit" type="primary">Save draft</Button>
           </div>
         </form>
       )}
@@ -1507,7 +1495,7 @@ export function Notifications() {
               <Field label="Submitted on">
                 <input
                   type="date"
-                  className={input}
+                 
                   max={today()}
                   value={submittedOn}
                   onChange={(e) => setSubmittedOn(e.target.value)}
@@ -1515,7 +1503,7 @@ export function Notifications() {
               </Field>
               <Field label="CQC reference">
                 <input
-                  className={input}
+                 
                   value={reference}
                   onChange={(e) => setReference(e.target.value)}
                 />

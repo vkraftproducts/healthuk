@@ -1,13 +1,12 @@
 import { DataTable } from '@hub/ui';
+import { Alert, Button, DatePicker, Input, Select, Space, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   PersonSelect,
   Section,
-  button,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -63,12 +62,13 @@ export function Feedback() {
     }, 'Feedback recorded.');
   };
   const t = themes.data;
+  const maxReceived = dayjs(today());
   return (
-    <div className="space-y-6">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       {msg}
       <Section title="Themes">
         {themes.isError ? (
-          <p role="alert">Themes could not be loaded.</p>
+          <Alert type="error" showIcon role="alert" message="Themes could not be loaded." />
         ) : (
           <>
             <DataTable<Row>
@@ -89,92 +89,77 @@ export function Feedback() {
               ]}
             />
             {t && (
-              <p className="text-sm text-slate-700">
+              <Typography.Text type="secondary">
                 {t.from} to {t.to}: {t.totals.feedback} feedback items and {t.totals.complaints}{' '}
                 complaints; {t.totals.untagged} have no theme yet. Counts show what people raised;
                 they are not a measure of quality on their own.
-              </p>
+              </Typography.Text>
             )}
           </>
         )}
       </Section>
       {manage && (
         <Section title="Record feedback">
-          <form
-            onSubmit={submit}
-            aria-label="Record feedback"
-            className="grid gap-3 sm:grid-cols-2"
-          >
-            <Field label="Type">
-              <select
-                className={input}
-                value={f.kind}
-                onChange={(e) => setF({ ...f, kind: e.target.value })}
-              >
-                {KINDS.map((k) => (
-                  <option key={k.value} value={k.value}>
-                    {k.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Received on">
-              <input
-                type="date"
-                required
-                max={today()}
-                className={input}
-                value={f.receivedOn}
-                onChange={(e) => setF({ ...f, receivedOn: e.target.value })}
-              />
-            </Field>
-            <Field label="Source (for example: post-journey survey, October)">
-              <input
-                required
-                minLength={2}
-                className={input}
-                value={f.source}
-                onChange={(e) => setF({ ...f, source: e.target.value })}
-              />
-            </Field>
-            <Field label="Rating 1 to 5 (optional)">
-              <select
-                className={input}
-                value={f.rating}
-                onChange={(e) => setF({ ...f, rating: e.target.value })}
-              >
-                <option value="">No rating</option>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="sm:col-span-2">
-              <Field label="Summary (no names or patient details)">
-                <textarea
+          <form onSubmit={submit} aria-label="Record feedback">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Type">
+                <Select
+                  value={f.kind}
+                  onChange={(kind) => setF({ ...f, kind })}
+                  options={KINDS}
+                  style={{ width: '100%' }}
+                />
+              </Field>
+              <Field label="Received on">
+                <DatePicker
+                  value={dayjs(f.receivedOn)}
+                  onChange={(d) => d && setF({ ...f, receivedOn: d.format('YYYY-MM-DD') })}
+                  disabledDate={(d) => d.isAfter(maxReceived, 'day')}
+                  format="YYYY-MM-DD"
+                  style={{ width: '100%' }}
+                />
+              </Field>
+              <Field label="Source (for example: post-journey survey, October)">
+                <Input
                   required
-                  minLength={3}
-                  className={input}
-                  value={f.summary}
-                  onChange={(e) => setF({ ...f, summary: e.target.value })}
+                  minLength={2}
+                  value={f.source}
+                  onChange={(e) => setF({ ...f, source: e.target.value })}
                 />
               </Field>
-            </div>
-            <div className="sm:col-span-2">
-              <Field label="Themes, separated by commas (for example: punctuality, communication)">
-                <input
-                  className={input}
-                  value={f.themes}
-                  onChange={(e) => setF({ ...f, themes: e.target.value })}
+              <Field label="Rating 1 to 5 (optional)">
+                <Select
+                  allowClear
+                  placeholder="No rating"
+                  value={f.rating || undefined}
+                  onChange={(rating) => setF({ ...f, rating: rating ?? '' })}
+                  options={[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: String(n) }))}
+                  style={{ width: '100%' }}
                 />
               </Field>
-            </div>
-            <div className="sm:col-span-2">
-              <button className={button} type="submit">
-                Save feedback
-              </button>
+              <div className="sm:col-span-2">
+                <Field label="Summary (no names or patient details)">
+                  <Input.TextArea
+                    required
+                    minLength={3}
+                    value={f.summary}
+                    onChange={(e) => setF({ ...f, summary: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <div className="sm:col-span-2">
+                <Field label="Themes, separated by commas (for example: punctuality, communication)">
+                  <Input
+                    value={f.themes}
+                    onChange={(e) => setF({ ...f, themes: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <div className="sm:col-span-2">
+                <Button type="primary" htmlType="submit">
+                  Save feedback
+                </Button>
+              </div>
             </div>
           </form>
         </Section>
@@ -200,15 +185,15 @@ export function Feedback() {
               header: 'Action',
               cell: (r) =>
                 manage ? (
-                  <button
-                    className={smallButton}
+                  <Button
+                    size="small"
                     onClick={() => {
                       setAct({ title: '', deadline: '', owner: me.user.id });
                       setAssigning(r);
                     }}
                   >
                     Assign action
-                  </button>
+                  </Button>
                 ) : null,
             },
           ]}
@@ -222,24 +207,21 @@ export function Feedback() {
         onCancel={() => setAssigning(null)}
         fields={
           <>
-            <label className="flex flex-col text-sm">
-              What needs to happen? (at least 3 characters)
-              <input
-                className={input}
+            <Field label="What needs to happen? (at least 3 characters)">
+              <Input
                 value={act.title}
                 onChange={(e) => setAct({ ...act, title: e.target.value })}
               />
-            </label>
-            <label className="flex flex-col text-sm">
-              Deadline
-              <input
-                type="date"
-                className={input}
-                min={today()}
-                value={act.deadline}
-                onChange={(e) => setAct({ ...act, deadline: e.target.value })}
+            </Field>
+            <Field label="Deadline">
+              <DatePicker
+                value={act.deadline ? dayjs(act.deadline) : null}
+                onChange={(d) => setAct({ ...act, deadline: d ? d.format('YYYY-MM-DD') : '' })}
+                disabledDate={(d) => d.isBefore(dayjs(today()), 'day')}
+                format="YYYY-MM-DD"
+                style={{ width: '100%' }}
               />
-            </label>
+            </Field>
             <PersonSelect
               label="Owner"
               value={act.owner}
@@ -259,6 +241,6 @@ export function Feedback() {
       >
         <p>The owner sees the action in their list and on the dashboard until it is closed.</p>
       </ActionDialog>
-    </div>
+    </Space>
   );
 }

@@ -1,4 +1,5 @@
 import { AUTH_MESSAGES } from '@hub/contracts';
+import { Alert, Button, Card, Radio, Space, Typography } from 'antd';
 import { useState, type FormEvent } from 'react';
 import { DEV_USERS, DEV_USER_GROUPS, LocalAuthClient, type AuthClient } from '../auth.js';
 import { BRAND, BrandMark, HeroArt } from '../brand.js';
@@ -19,6 +20,17 @@ export function SignIn(props: SignInProps) {
   if (props.auth instanceof LocalAuthClient)
     return <LocalSignIn auth={props.auth} onSignedIn={props.onSignedIn} notice={props.notice} />;
   return <IdpSignIn {...props} />;
+}
+
+function MicrosoftIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect width="8" height="8" fill="currentColor" />
+      <rect x="10" width="8" height="8" fill="currentColor" />
+      <rect y="10" width="8" height="8" fill="currentColor" />
+      <rect x="10" y="10" width="8" height="8" fill="currentColor" />
+    </svg>
+  );
 }
 
 /**
@@ -58,108 +70,96 @@ function IdpSignIn({ auth, onSignedIn, notice }: SignInProps) {
         <div className="relative">
           <BrandMark />
           <div className="mb-10 mt-8 max-w-sm space-y-4">
-            <p className="font-display text-3xl font-semibold leading-tight tracking-tight text-hub-ink">
+            <Typography.Title level={2} className="!text-hub-ink !mb-0 font-display">
               Operations and compliance, in one place.
-            </p>
-            <p className="text-slate-200">
+            </Typography.Title>
+            <Typography.Paragraph className="!text-slate-200 !mb-0">
               Staff readiness, vehicles, audits, premises safety and the work planner for your
               service. Evidence counts only once it is verified.
-            </p>
+            </Typography.Paragraph>
           </div>
         </div>
-        <p className="relative text-xs text-hub-muted">
+        <Typography.Text className="relative !text-xs !text-hub-muted">
           Internal measures are not CQC ratings. Access is logged.
-        </p>
+        </Typography.Text>
       </section>
 
       <main id="main" className="flex flex-1 items-center justify-center p-6">
-        <div className="hud glass rise-in w-full max-w-md space-y-6 rounded-2xl border border-hub-line p-8 shadow-panel">
-          <div>
-            <h1 className="font-display text-2xl font-bold">Sign in</h1>
-            <p className="mt-1 text-sm text-hub-muted">
-              Use your organisation account. Multi-factor authentication is required.
-            </p>
-          </div>
+        <Card className="rise-in w-full max-w-md shadow-panel" styles={{ body: { padding: 32 } }}>
+          <Space direction="vertical" size="large" className="w-full">
+            <div>
+              <Typography.Title level={1} className="!text-2xl !mb-1">
+                Sign in
+              </Typography.Title>
+              <Typography.Text type="secondary" className="text-sm">
+                Use your organisation account. Multi-factor authentication is required.
+              </Typography.Text>
+            </div>
 
-          {notice && (
-            <p role="status" className="rounded-md border border-sky-700 bg-sky-50 p-3 text-sm">
-              {notice}
-            </p>
-          )}
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-red-700 bg-red-50 p-3 text-sm text-red-900"
-            >
-              {error}
-            </p>
-          )}
+            {notice && <Alert type="info" showIcon role="status" message={notice} />}
+            {error && <Alert type="error" showIcon role="alert" message={error} />}
 
-          {auth.kind === 'entra' ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void go()}
-              className="flex w-full items-center justify-center gap-3 rounded-lg bg-hub-teal px-4 py-3 font-semibold text-white disabled:opacity-50"
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-                <rect width="8" height="8" fill="currentColor" />
-                <rect x="10" width="8" height="8" fill="currentColor" />
-                <rect y="10" width="8" height="8" fill="currentColor" />
-                <rect x="10" y="10" width="8" height="8" fill="currentColor" />
-              </svg>
-              Sign in with Microsoft
-            </button>
-          ) : (
-            <form onSubmit={(e) => void go(e)} className="space-y-4">
-              <fieldset className="space-y-2">
-                <legend className="mb-2 text-sm font-semibold text-hub-ink">
-                  Development sign-in: choose a synthetic user
-                </legend>
-                {Object.entries(DEV_USER_GROUPS).map(([org, heading]) => (
-                  <div key={org} role="group" aria-label={heading} className="space-y-1.5">
-                    <p className="pt-2 text-xs font-semibold uppercase text-hub-muted">{heading}</p>
-                    {DEV_USERS.filter((u) => u.org === org).map((u) => (
-                      <label
-                        key={u.key}
-                        className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-1.5 text-sm ${
-                          user === u.key
-                            ? 'border-hub-teal bg-teal-50 ring-1 ring-hub-teal'
-                            : 'border-hub-line hover:bg-hub-row'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="dev-user"
-                          value={u.key}
-                          checked={user === u.key}
-                          onChange={() => setUser(u.key)}
-                          className="accent-hub-teal"
-                        />
-                        <span className="flex flex-1 flex-wrap justify-between gap-x-3">
-                          <span className="font-semibold text-hub-ink">{u.name}</span>
-                          <span className="text-hub-muted">{u.role}</span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                ))}
-              </fieldset>
-              <button
-                type="submit"
+            {auth.kind === 'entra' ? (
+              <Button
+                type="primary"
+                size="large"
+                block
                 disabled={busy}
-                className="w-full rounded-lg bg-hub-teal px-4 py-3 font-semibold text-white disabled:opacity-50"
+                onClick={() => void go()}
+                icon={<MicrosoftIcon />}
               >
-                {busy ? 'Signing in…' : 'Sign in'}
-              </button>
-              <p className="text-xs text-hub-muted">
-                Development only. Production uses Microsoft sign-in; these synthetic accounts come
-                from <code>pnpm db:seed</code> (dental and care home users from{' '}
-                <code>pnpm db:seed:sectors</code>).
-              </p>
-            </form>
-          )}
-        </div>
+                Sign in with Microsoft
+              </Button>
+            ) : (
+              <form onSubmit={(e) => void go(e)} noValidate>
+                <Space direction="vertical" size="middle" className="w-full">
+                  <fieldset className="m-0 border-0 p-0">
+                    <Typography.Text className="mb-2 block text-sm font-semibold text-hub-ink">
+                      Development sign-in: choose a synthetic user
+                    </Typography.Text>
+                    {Object.entries(DEV_USER_GROUPS).map(([org, heading]) => (
+                      <div key={org} role="group" aria-label={heading}>
+                        <Typography.Text
+                          type="secondary"
+                          className="block pt-2 text-xs font-semibold uppercase"
+                        >
+                          {heading}
+                        </Typography.Text>
+                        <Radio.Group
+                          className="mt-1.5 flex w-full flex-col gap-1.5"
+                          value={user}
+                          onChange={(e) => setUser(e.target.value)}
+                          name="dev-user"
+                        >
+                          {DEV_USERS.filter((u) => u.org === org).map((u) => (
+                            <Radio
+                              key={u.key}
+                              value={u.key}
+                              className="!m-0 rounded-md border border-hub-line px-3 py-1.5 [&>.ant-radio]:self-center"
+                            >
+                              <span className="flex flex-1 flex-wrap justify-between gap-x-3">
+                                <span className="font-semibold text-hub-ink">{u.name}</span>
+                                <span className="text-hub-muted">{u.role}</span>
+                              </span>
+                            </Radio>
+                          ))}
+                        </Radio.Group>
+                      </div>
+                    ))}
+                  </fieldset>
+                  <Button type="primary" htmlType="submit" size="large" block disabled={busy}>
+                    {busy ? 'Signing in…' : 'Sign in'}
+                  </Button>
+                  <Typography.Text type="secondary" className="text-xs">
+                    Development only. Production uses Microsoft sign-in; these synthetic accounts
+                    come from <code>pnpm db:seed</code> (dental and care home users from{' '}
+                    <code>pnpm db:seed:sectors</code>).
+                  </Typography.Text>
+                </Space>
+              </form>
+            )}
+          </Space>
+        </Card>
       </main>
     </div>
   );

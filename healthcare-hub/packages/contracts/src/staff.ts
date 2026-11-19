@@ -276,6 +276,12 @@ export const RecordCreate = z.strictObject({
   requirementInstanceId: uuid.optional(),
 });
 
+export const StaffRecordVerificationDto = z.object({
+  verifiedBy: uuid,
+  verifiedAt: isoDateTime,
+  registerRef: z.string().nullable(),
+});
+
 export const StaffRecordDto = z.object({
   id: uuid,
   staffId: uuid,
@@ -289,6 +295,7 @@ export const StaffRecordDto = z.object({
   current: z.boolean(),
   createdAt: isoDateTime,
   createdBy: uuid,
+  verification: StaffRecordVerificationDto.nullable().optional(),
 });
 export type StaffRecordDto = z.infer<typeof StaffRecordDto>;
 
@@ -350,6 +357,12 @@ export const StaffDto = z.object({
   /** False when no requirement applies yet: shown as "not set up", never compliant or N/A. */
   checksSetUp: z.boolean(),
   counts: z.object({ red: z.number(), amber: z.number(), grey: z.number(), green: z.number() }),
+  /** The first thing stopping readiness, in words. */
+  issue: z.string().optional(),
+  /** When the person entered their current stage (list only). */
+  stageSince: z.string().optional(),
+  /** Chases (references, DBS…) not answered a week after the last request (list only). */
+  followUpsOverdue: z.number().optional(),
   version,
 });
 export type StaffDto = z.infer<typeof StaffDto>;
@@ -486,6 +499,51 @@ export const BulkTrainingInput = z.strictObject({
   sessionRef: z.string().trim().min(1).max(60),
   staffIds: z.array(uuid).min(1).max(100),
 });
+export const TrainingRecordVerifyInput = z.strictObject({
+  /** Optional confirmation of the register reference checked against the record. */
+  registerRef: z.string().trim().min(1).max(60).optional(),
+});
+export const TrainingRecordQueueItem = z.object({
+  id: uuid,
+  staffId: uuid,
+  staffName: z.string(),
+  courseCode: z.string(),
+  title: z.string(),
+  completedOn: isoDate,
+  sessionRef: z.string().nullable(),
+  /** Who delivered it ("In-house – Samira Patel"), when recorded. */
+  provider: z.string().nullable().optional(),
+  recordedBy: uuid,
+  recordedByName: z.string(),
+  createdAt: isoDateTime,
+});
+export type TrainingRecordQueueItem = z.infer<typeof TrainingRecordQueueItem>;
+/** Chase log for references / DBS (requested → chased → received). */
+export const ChaseLogInput = z.strictObject({
+  kind: z.enum(['REFERENCE', 'DBS', 'RIGHT_TO_WORK', 'OTHER']),
+  subject: z.string().trim().min(1).max(200),
+  requestedOn: isoDate.optional(),
+  chasedOn: isoDate.optional(),
+  receivedOn: isoDate.optional(),
+  note: z.string().trim().max(1000).optional(),
+});
+export const ChaseLogPatch = ChaseLogInput.partial().refine(
+  (o) => Object.keys(o).length > 0,
+  'Nothing to change',
+);
+export const ChaseLogDto = z.object({
+  id: uuid,
+  staffId: uuid,
+  kind: z.string(),
+  subject: z.string(),
+  requestedOn: isoDate.nullable(),
+  chasedOn: isoDate.nullable(),
+  receivedOn: isoDate.nullable(),
+  note: z.string().nullable(),
+  createdAt: isoDateTime,
+});
+export type ChaseLogDto = z.infer<typeof ChaseLogDto>;
+
 export const SUPERVISION_TYPES = ['ONE_TO_ONE', 'CLINICAL', 'RETURN_TO_WORK', 'PROBATION_REVIEW'];
 export const SupervisionBookingInput = z.strictObject({
   supervisorUserId: uuid,
@@ -512,20 +570,32 @@ export const SupervisionCloseInput = z.discriminatedUnion('status', [
 ]);
 export const SupervisionBookingDto = z.object({
   id: uuid,
+  code: z.string().nullable().optional(),
   staffId: uuid,
   staffName: z.string(),
-  supervisorUserId: uuid,
-  supervisorName: z.string(),
+  supervisorUserId: uuid.nullable(),
+  supervisorName: z.string().nullable(),
   scheduledAt: isoDateTime,
   kind: z.string(),
   topics: z.string().nullable(),
-  status: z.enum(['BOOKED', 'HELD', 'CANCELLED', 'MISSED']),
+  status: z.enum(['REQUESTED', 'BOOKED', 'HELD', 'CANCELLED', 'MISSED']),
   statusReason: z.string().nullable(),
   recordId: uuid.nullable(),
   rebookedAs: uuid.nullable(),
+  /** Set when the booking was requested by the member of staff (status REQUESTED). */
+  requestedByName: z.string().nullable().optional(),
   version,
 });
 export type SupervisionBookingDto = z.infer<typeof SupervisionBookingDto>;
+export const SupervisionRequestInput = z.strictObject({
+  kind: z.enum(['ONE_TO_ONE', 'CLINICAL', 'RETURN_TO_WORK', 'PROBATION_REVIEW']),
+  scheduledAt: isoDateTime,
+  topics: z.string().trim().min(3).max(1000).optional(),
+});
+export const SupervisionConfirmInput = z.strictObject({
+  supervisorUserId: uuid,
+  scheduledAt: isoDateTime,
+});
 export const RecordAckInput = z
   .strictObject({ agreed: z.boolean(), comment: z.string().trim().min(3).max(2000).optional() })
   .refine((a) => a.agreed || a.comment !== undefined, {

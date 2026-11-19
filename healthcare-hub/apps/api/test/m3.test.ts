@@ -289,8 +289,9 @@ describe('lifecycle [HR-01]', () => {
     await recordSchedule3(app, ORG, s.id);
     expect((await approve(s.id, 'CARE_ASSISTANT')).status).toBe(201);
     expect((await approve(s.id, 'CARE_ASSISTANT')).status).toBe(409);
-    // A role with nothing set up can never be approved (nothing could be checked).
-    const unset = await approve(s.id, 'PARAMEDIC');
+    // A role with nothing set up can never be approved (nothing could be checked). The starter
+    // configuration maps every ambulance role, so use one this organisation has not set up.
+    const unset = await approve(s.id, 'ACTIVITIES_COORDINATOR');
     expect([unset.status, unset.body.detail]).toEqual([
       422,
       expect.stringMatching(/no requirements set up/),
@@ -509,7 +510,15 @@ describe('readiness for a job window [RULES_ENGINE §3]', () => {
       ).result,
     ).toBe('FAIL');
 
-    // A typed licence record alone is not proof (finding 66): blocked until verified.
+    // No licence details on record: blocked, whatever requirements are verified (finding 66).
+    const none = (await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body;
+    expect(none.state).toBe('BLOCKED');
+    expect(none.checks.find((c: J) => c.code === 'LICENCE_RECORD')).toMatchObject({
+      result: 'FAIL',
+      overridable: false,
+    });
+    // The starter configuration maps the driving licence check (AMB-DRV-01) to Driver and the
+    // approval verified it, so the typed record now completes the picture.
     await call('POST', `/api/v1/staff/${s.id}/licences`, {
       body: {
         data: {
@@ -520,20 +529,6 @@ describe('readiness for a job window [RULES_ENGINE §3]', () => {
         },
       },
     });
-    const unverified = (await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body;
-    expect(unverified.state).toBe('BLOCKED');
-    expect(unverified.checks.find((c: J) => c.code === 'LICENCE_NOT_VERIFIED')).toMatchObject({
-      result: 'FAIL',
-      overridable: false,
-    });
-    const lic = await call('POST', '/api/v1/requirements/instances', {
-      body: {
-        templateId: await staffTemplate('DRIVING-LICENCE'),
-        subjectType: 'STAFF',
-        subjectId: s.id,
-      },
-    });
-    await uploadAndVerify(app, ORG, [lic.body.id]);
     expect((await call('GET', `${base}&role=DRIVER&licenceCategory=B`)).body.state).toBe('READY');
     const c1 = (await call('GET', `${base}&role=DRIVER&licenceCategory=C1`)).body;
     expect(c1.state).toBe('BLOCKED');
@@ -801,5 +796,46 @@ describe('self-service [PRD §4.3]', () => {
         })
       ).status,
     ).toBe(404);
+  });
+
+  it('training records are verified by a second person (UK-36)', async () => {
+    const s = await activeStaff(['DRIVER']);
+    const course = await call('POST', '/api/v1/training-courses', {
+      sub: 'dev|hr',
+      body: {
+        code: 'TST-VRF',
+        title: 'Synthetic verify course',
+        intervalMonths: 12,
+        basis: 'ORG_POLICY',
+      },
+    });
+    expect(course.status).toBe(201);
+    const bulk = await call('POST', '/api/v1/training-records/bulk', {
+      sub: 'dev|hr',
+      body: {
+        courseId: course.body.id,
+        completedOn: '2026-06-01',
+        sessionRef: 'REG-001',
+        staffIds: [s.id],
+      },
+    });
+    expect(bulk.status).toBe(201);
+    const rid = bulk.body.recordIds[0] as string;
+    expect(
+      (
+        await call('POST', `/api/v1/training-records/${rid}/verify`, {
+          sub: 'dev|hr',
+          body: { registerRef: 'REG-001' },
+        })
+      ).status,
+    ).toBe(422);
+    const ok = await call('POST', `/api/v1/training-records/${rid}/verify`, {
+      sub: 'dev|manager',
+      body: { registerRef: 'REG-001' },
+    });
+    expect(ok.status).toBe(201);
+    expect(ok.body.verification?.verifiedBy).toBeTruthy();
+    const q = await call('GET', '/api/v1/training-records/awaiting-verification', { sub: 'dev|hr' });
+    expect((q.body.data as J[]).some((x) => x.id === rid)).toBe(false);
   });
 });

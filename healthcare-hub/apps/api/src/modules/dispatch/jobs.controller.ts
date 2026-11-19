@@ -72,7 +72,7 @@ import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const MAX_OFFLINE_MS = 7 * 86_400_000;
 const NOT_STARTED = ['ALLOCATED', 'OFFERED', 'ACKNOWLEDGED'];
 const ts = (d: Date | null) => (d ? d.toISOString() : null);
@@ -1789,19 +1789,35 @@ export class ShiftsController {
       select: { callsign: true, status: true, statusReason: true, expectedReturnOn: true },
     });
     if (!v) throw notFound();
-    if (v.status === 'AVAILABLE') return;
-    const state =
-      v.status === 'OFF_ROAD' ? 'off road' : v.status === 'QUARANTINED' ? 'quarantined' : 'blocked';
-    // E2: the dialog says why, and when the vehicle is due back if fleet gave a date.
-    const back = v.expectedReturnOn
-      ? `; expected back ${formatDate(v.expectedReturnOn.toISOString().slice(0, 10))}`
-      : '';
-    throw new HubError(
-      'OVERRIDE_NOT_PERMITTED',
-      422,
-      `${v.callsign} is ${state}${v.statusReason ? ` (${v.statusReason}${back})` : back} ` +
-        'and cannot be put on a shift until it is returned to service',
-    );
+    if (v.status !== 'AVAILABLE') {
+      const state =
+        v.status === 'OFF_ROAD' ? 'off road' : v.status === 'QUARANTINED' ? 'quarantined' : 'blocked';
+      // E2: the dialog says why, and when the vehicle is due back if fleet gave a date.
+      const back = v.expectedReturnOn
+        ? `; expected back ${formatDate(v.expectedReturnOn.toISOString().slice(0, 10))}`
+        : '';
+      throw new HubError(
+        'OVERRIDE_NOT_PERMITTED',
+        422,
+        `${v.callsign} is ${state}${v.statusReason ? ` (${v.statusReason}${back})` : back} ` +
+          'and cannot be put on a shift until it is returned to service',
+      );
+    }
+    // Expired statutory documents and overdue servicing also block putting a vehicle on a shift.
+    const { vehicleReadinessFor } = await import('@hub/domain');
+    const now = new Date();
+    const ready = await vehicleReadinessFor(tx, {
+      vehicleId,
+      window: { start: now, end: new Date(now.getTime() + 3_600_000) },
+      now,
+    });
+    const hard = ready.checks.find((c) => c.result === 'FAIL' && !c.overridable);
+    if (hard)
+      throw new HubError(
+        'OVERRIDE_NOT_PERMITTED',
+        422,
+        `${v.callsign} cannot be put on a shift: ${hard.reasonText}`,
+      );
   }
 
   private async openShift(tx: TenantTx, id: string) {
@@ -1901,12 +1917,25 @@ export class ShiftsController {
       where: { id: { in: s.crew.map((c) => c.staffId) } },
       select: { id: true, staffNo: true, displayName: true },
     });
+    let vehicleBlockReason: string | null = null;
+    if (v.status === 'AVAILABLE') {
+      const { vehicleReadinessFor } = await import('@hub/domain');
+      const now = new Date();
+      const ready = await vehicleReadinessFor(tx, {
+        vehicleId: s.vehicleId,
+        window: { start: s.startsAt, end: s.endsAt },
+        now,
+      });
+      const hard = ready.checks.find((c) => c.result === 'FAIL' && !c.overridable);
+      if (hard) vehicleBlockReason = hard.reasonText;
+    }
     return {
       id: s.id,
       locationId: s.locationId,
       vehicleId: s.vehicleId,
       vehicleCallsign: v.callsign,
       vehicleStatus: v.status,
+      vehicleBlockReason,
       startsAt: s.startsAt.toISOString(),
       endsAt: s.endsAt.toISOString(),
       state: s.state,

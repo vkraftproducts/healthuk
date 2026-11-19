@@ -1,15 +1,13 @@
 import { DataTable } from '@hub/ui';
 import { londonDate } from '@hub/rules';
+import { Button } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   Section,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useRun,
   words,
 } from '../../components.js';
@@ -110,11 +108,11 @@ export function DisclosureLog() {
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className={input}
+           
           />
         </Field>
         <Field label="Shared until">
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={input} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
         <Field label="Search (who, why, whose data)">
           <input
@@ -122,7 +120,7 @@ export function DisclosureLog() {
             value={search}
             maxLength={100}
             onChange={(e) => setSearch(e.target.value)}
-            className={input}
+           
           />
         </Field>
       </div>
@@ -186,7 +184,7 @@ export function DisclosureLog() {
         className="grid gap-3 rounded border border-hub-line p-3 md:grid-cols-2"
       >
         <Field label="Shared with (organisation or role)">
-          <input name="disclosedTo" required minLength={2} maxLength={200} className={input} />
+          <input name="disclosedTo" required minLength={2} maxLength={200} />
         </Field>
         <Field label="Date shared">
           <input
@@ -195,11 +193,11 @@ export function DisclosureLog() {
             required
             max={today}
             defaultValue={today}
-            className={input}
+           
           />
         </Field>
         <Field label="Purpose">
-          <input name="purpose" required minLength={3} maxLength={500} className={input} />
+          <input name="purpose" required minLength={3} maxLength={500} />
         </Field>
         <Field label="Lawful basis">
           <input
@@ -208,7 +206,7 @@ export function DisclosureLog() {
             minLength={3}
             maxLength={300}
             list="lawful-bases"
-            className={input}
+           
           />
         </Field>
         <datalist id="lawful-bases">
@@ -222,11 +220,11 @@ export function DisclosureLog() {
             required
             minLength={3}
             maxLength={1000}
-            className={input}
+           
           />
         </Field>
         <Field label="Linked subject request (optional)">
-          <select name="subjectRequestId" className={input}>
+          <select name="subjectRequestId">
             <option value="">None</option>
             {(requests.data?.data ?? []).map((r) => (
               <option key={r.id} value={r.id}>
@@ -236,13 +234,13 @@ export function DisclosureLog() {
           </select>
         </Field>
         <Field label="Whose data (describe them, no names) (optional)">
-          <input name="subjectDescription" minLength={2} maxLength={200} className={input} />
+          <input name="subjectDescription" minLength={2} maxLength={200} />
         </Field>
         <Field label="Who asked for it (optional)">
-          <input name="requestedBy" minLength={2} maxLength={200} className={input} />
+          <input name="requestedBy" minLength={2} maxLength={200} />
         </Field>
         <Field label="How it was sent (optional)">
-          <select name="method" className={input} defaultValue="">
+          <select name="method" defaultValue="">
             <option value="">Not recorded</option>
             {Object.entries(METHOD).map(([k, v]) => (
               <option key={k} value={k}>
@@ -252,7 +250,7 @@ export function DisclosureLog() {
           </select>
         </Field>
         <Field label="Approved by (someone other than you) (optional)">
-          <select className={input} value={approver} onChange={(e) => setApprover(e.target.value)}>
+          <select value={approver} onChange={(e) => setApprover(e.target.value)}>
             <option value="">Not recorded</option>
             {people
               .filter((p) => p.id !== me.user.id)
@@ -264,7 +262,7 @@ export function DisclosureLog() {
           </select>
         </Field>
         <div>
-          <button className={button}>Record disclosure</button>
+          <Button htmlType="submit" type="primary">Record disclosure</Button>
         </div>
       </form>
     </Section>
@@ -292,9 +290,8 @@ export function RetentionReviews() {
       <div className="flex flex-wrap gap-2" role="group" aria-label="Open a review">
         {approved.length === 0 && <p className="text-sm">No approved retention rules yet.</p>}
         {approved.map((r) => (
-          <button
-            key={r.id}
-            className={smallButton}
+          <Button             key={r.id}
+            type="link" size="small"
             aria-label={`Open this month's review: ${words(r.category)}`}
             onClick={() =>
               void run(
@@ -304,7 +301,7 @@ export function RetentionReviews() {
             }
           >
             Review {words(r.category)}
-          </button>
+          </Button>
         ))}
       </div>
       {msg}
@@ -347,8 +344,7 @@ export function RetentionReviews() {
                 <div className="flex flex-wrap gap-2">
                   {(r.decisions as Row[]).length === 0 && (
                     <>
-                      <button
-                        className={smallButton}
+                      <Button                         type="link" size="small"
                         aria-label={`Keep records: ${label(r)}`}
                         onClick={() => {
                           setKeepUntil('');
@@ -356,23 +352,21 @@ export function RetentionReviews() {
                         }}
                       >
                         Keep
-                      </button>
-                      <button
-                        className={smallButton}
+                      </Button>
+                      <Button                         type="link" size="small"
                         aria-label={`Let the rule act: ${label(r)}`}
                         onClick={() => setDeciding({ r, decision: 'ACT' })}
                       >
                         Act
-                      </button>
+                      </Button>
                     </>
                   )}
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Close review: ${label(r)}`}
                     onClick={() => setClosing(r)}
                   >
                     Close
-                  </button>
+                  </Button>
                 </div>
               ),
           },
@@ -400,7 +394,7 @@ export function RetentionReviews() {
             <Field label="Look again on">
               <input
                 type="date"
-                className={input}
+               
                 min={londonDate(new Date())}
                 value={keepUntil}
                 onChange={(e) => setKeepUntil(e.target.value)}
@@ -451,7 +445,7 @@ export function RetentionLog() {
         aria-label="Filter the retention log"
       >
         <Field label="Records">
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className={input}>
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">All records</option>
             {CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -465,11 +459,11 @@ export function RetentionLog() {
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className={input}
+           
           />
         </Field>
         <Field label="Run to">
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={input} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
       </div>
       {badRange && (

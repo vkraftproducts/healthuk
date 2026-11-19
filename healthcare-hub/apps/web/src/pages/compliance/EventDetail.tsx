@@ -1,4 +1,5 @@
 import { DataTable, StatusBadge } from '@hub/ui';
+import { Button, Space } from 'antd';
 import { Link, useParams } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import {
@@ -8,8 +9,6 @@ import {
   Section,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
@@ -154,7 +153,7 @@ export function EventDetail() {
         <>
           <Field label="Is this a notifiable safety incident?">
             <select
-              className={input}
+             
               value={v('notifiable')}
               onChange={(x) => set('notifiable')(x.target.value)}
             >
@@ -165,7 +164,7 @@ export function EventDetail() {
           </Field>
           <Field label="Reason (at least 10 characters)">
             <textarea
-              className={input}
+             
               rows={3}
               maxLength={2000}
               value={v('reason')}
@@ -189,7 +188,7 @@ export function EventDetail() {
         <>
           <Field label="Who it may need reporting to">
             <select
-              className={input}
+             
               value={v('body') || 'CQC'}
               onChange={(x) => set('body')(x.target.value)}
             >
@@ -202,7 +201,7 @@ export function EventDetail() {
           </Field>
           <Field label="What may trigger it">
             <input
-              className={input}
+             
               maxLength={500}
               value={v('trigger')}
               onChange={(x) => set('trigger')(x.target.value)}
@@ -210,7 +209,7 @@ export function EventDetail() {
           </Field>
           <Field label="Legal or contract basis">
             <input
-              className={input}
+             
               maxLength={500}
               value={v('basis')}
               onChange={(x) => set('basis')(x.target.value)}
@@ -219,7 +218,7 @@ export function EventDetail() {
           <Field label="Deadline (optional)">
             <input
               type="datetime-local"
-              className={input}
+             
               value={v('deadline')}
               onChange={(x) => set('deadline')(x.target.value)}
             />
@@ -242,7 +241,7 @@ export function EventDetail() {
       fields: (
         <Field label="Decision">
           <select
-            className={input}
+           
             value={v('decision') || 'REQUIRED'}
             onChange={(x) => set('decision')(x.target.value)}
           >
@@ -270,14 +269,14 @@ export function EventDetail() {
           <Field label="Sent at">
             <input
               type="datetime-local"
-              className={input}
+             
               value={v('submittedAt')}
               onChange={(x) => set('submittedAt')(x.target.value)}
             />
           </Field>
           <Field label="Reference (optional)">
             <input
-              className={input}
+             
               maxLength={120}
               value={v('reference')}
               onChange={(x) => set('reference')(x.target.value)}
@@ -306,7 +305,7 @@ export function EventDetail() {
         <Field label="Acknowledged on">
           <input
             type="date"
-            className={input}
+           
             max={today}
             value={v('date')}
             onChange={(x) => set('date')(x.target.value)}
@@ -332,7 +331,7 @@ export function EventDetail() {
           <Field label="Responded on">
             <input
               type="date"
-              className={input}
+             
               max={today}
               value={v('date')}
               onChange={(x) => set('date')(x.target.value)}
@@ -340,7 +339,7 @@ export function EventDetail() {
           </Field>
           <Field label="Outcome">
             <select
-              className={input}
+             
               value={v('outcome')}
               onChange={(x) => set('outcome')(x.target.value)}
             >
@@ -384,7 +383,7 @@ export function EventDetail() {
         <>
           <Field label="What needs to happen">
             <input
-              className={input}
+             
               maxLength={300}
               value={v('title')}
               onChange={(x) => set('title')(x.target.value)}
@@ -400,7 +399,7 @@ export function EventDetail() {
           <Field label="Deadline">
             <input
               type="date"
-              className={input}
+             
               min={today}
               value={v('deadline')}
               onChange={(x) => set('deadline')(x.target.value)}
@@ -424,7 +423,7 @@ export function EventDetail() {
         <>
           <Field label="Priority">
             <select
-              className={input}
+             
               value={v('priority')}
               onChange={(x) => set('priority')(x.target.value)}
             >
@@ -438,7 +437,7 @@ export function EventDetail() {
           </Field>
           <Field label="Harm">
             <select
-              className={input}
+             
               value={v('harm')}
               onChange={(x) => set('harm')(x.target.value)}
             >
@@ -452,7 +451,7 @@ export function EventDetail() {
           </Field>
           <Field label="Category">
             <select
-              className={input}
+             
               value={v('category')}
               onChange={(x) => set('category')(x.target.value)}
             >
@@ -473,7 +472,7 @@ export function EventDetail() {
           />
           <Field label="Protection steps taken">
             <textarea
-              className={input}
+             
               rows={3}
               maxLength={2000}
               value={v('steps')}
@@ -520,7 +519,7 @@ export function EventDetail() {
         <>
           <Field label="Step">
             <select
-              className={input}
+             
               value={v('step')}
               onChange={(x) => set('step')(x.target.value)}
             >
@@ -535,7 +534,7 @@ export function EventDetail() {
           <Field label="Done on">
             <input
               type="date"
-              className={input}
+             
               max={today}
               value={v('doneOn')}
               onChange={(x) => set('doneOn')(x.target.value)}
@@ -543,7 +542,7 @@ export function EventDetail() {
           </Field>
           <Field label="Note (optional)">
             <input
-              className={input}
+             
               maxLength={1000}
               value={v('note')}
               onChange={(x) => set('note')(x.target.value)}
@@ -567,7 +566,7 @@ export function EventDetail() {
         <>
           <Field label="Learning response">
             <select
-              className={input}
+             
               value={v('response')}
               onChange={(x) => set('response')(x.target.value)}
             >
@@ -581,7 +580,7 @@ export function EventDetail() {
           </Field>
           <Field label="What was learned">
             <textarea
-              className={input}
+             
               rows={3}
               maxLength={4000}
               value={v('notes')}
@@ -590,7 +589,7 @@ export function EventDetail() {
           </Field>
           <Field label="Contributory factors (optional)">
             <textarea
-              className={input}
+             
               rows={2}
               maxLength={4000}
               value={v('factors')}
@@ -627,18 +626,18 @@ export function EventDetail() {
   const d = dialog ? spec[dialog.kind] : null;
 
   return (
-    <div className="space-y-4">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <nav aria-label="Breadcrumb" className="text-sm">
         <Link
           to="/compliance"
           search={{ tab: 'events' }}
-          className="font-medium text-hub-teal-dark underline"
+          className="font-medium "
         >
           Events
         </Link>{' '}
         / {e.code}
       </nav>
-      <header className="rounded-lg border border-hub-line bg-hub-card p-4">
+      <header className=" p-4">
         <h1 className="text-2xl font-bold">
           {e.code} {e.title}
         </h1>
@@ -693,9 +692,9 @@ export function EventDetail() {
           title="Triage"
           actions={
             manage && untriaged && e.status === 'TRIAGE' ? (
-              <button className={smallButton} onClick={() => begin('triage')}>
+              <Button size="small" onClick={() => begin('triage')}>
                 Triage this report
-              </button>
+              </Button>
             ) : undefined
           }
         >
@@ -753,14 +752,14 @@ export function EventDetail() {
         {manage && (
           <div className="flex flex-wrap gap-2">
             {next && (
-              <button className={smallButton} disabled={!!blocker} onClick={() => begin('forward')}>
+              <Button size="small" disabled={!!blocker} onClick={() => begin('forward')}>
                 Move to {EVENT_STAGE[next]}
-              </button>
+              </Button>
             )}
             {prev && e.status !== 'TRIAGE' && (
-              <button className={smallButton} onClick={() => begin('back')}>
+              <Button size="small" onClick={() => begin('back')}>
                 Reopen: back to {EVENT_STAGE[prev]}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -771,9 +770,9 @@ export function EventDetail() {
           title="Duty of candour"
           actions={
             can('events.candour.decide') ? (
-              <button className={smallButton} onClick={() => begin('candour')}>
+              <Button size="small" onClick={() => begin('candour')}>
                 Record decision
-              </button>
+              </Button>
             ) : undefined
           }
         >
@@ -812,9 +811,9 @@ export function EventDetail() {
                 ))}
               </ul>
               {manage && (
-                <button className={smallButton} onClick={() => begin('candourStep')}>
+                <Button size="small" onClick={() => begin('candourStep')}>
                   Record a candour step
-                </button>
+                </Button>
               )}
             </>
           )}
@@ -826,9 +825,9 @@ export function EventDetail() {
           title="Learning response (PSIRF)"
           actions={
             manage && !e.learningResponse ? (
-              <button className={smallButton} onClick={() => begin('learning')}>
+              <Button size="small" onClick={() => begin('learning')}>
                 Record learning response
-              </button>
+              </Button>
             ) : undefined
           }
         >
@@ -849,13 +848,13 @@ export function EventDetail() {
           manage ? (
             <div className="flex gap-2">
               {((suggestions.data as Row[] | undefined) ?? []).some((s) => !s.recorded) && (
-                <button className={smallButton} onClick={() => begin('suggested')}>
+                <Button size="small" onClick={() => begin('suggested')}>
                   Add suggested duties
-                </button>
+                </Button>
               )}
-              <button className={smallButton} onClick={() => begin('addDuty')}>
+              <Button size="small" onClick={() => begin('addDuty')}>
                 Add a reporting duty
-              </button>
+              </Button>
             </div>
           ) : undefined
         }
@@ -915,21 +914,19 @@ export function EventDetail() {
               header: 'Action',
               cell: (x) =>
                 !manage ? null : x.decision === 'PENDING' ? (
-                  <button
-                    className={smallButton}
+                  <Button size="small"
                     aria-label={`Decide: ${DUTY_BODY[x.body] ?? x.body}`}
                     onClick={() => begin('decide', x)}
                   >
                     Decide
-                  </button>
+                  </Button>
                 ) : x.decision === 'REQUIRED' && !x.submittedAt ? (
-                  <button
-                    className={smallButton}
+                  <Button size="small"
                     aria-label={`Record submission: ${DUTY_BODY[x.body] ?? x.body}`}
                     onClick={() => begin('submitted', x)}
                   >
                     Record submission
-                  </button>
+                  </Button>
                 ) : null,
             },
           ]}
@@ -982,19 +979,19 @@ export function EventDetail() {
           {manage && (
             <div className="flex gap-2">
               {!e.complaint.acknowledgedOn && (
-                <button className={smallButton} onClick={() => begin('ack')}>
+                <Button size="small" onClick={() => begin('ack')}>
                   Record acknowledgement
-                </button>
+                </Button>
               )}
               {!e.complaint.respondedOn && (
-                <button className={smallButton} onClick={() => begin('respond')}>
+                <Button size="small" onClick={() => begin('respond')}>
                   Record response
-                </button>
+                </Button>
               )}
               {e.complaint.respondedOn && (
-                <button className={smallButton} onClick={() => begin('reopenComplaint')}>
+                <Button size="small" onClick={() => begin('reopenComplaint')}>
                   Reopen complaint
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -1018,9 +1015,9 @@ export function EventDetail() {
         title="Actions"
         actions={
           manage || can('compliance.action.manage') ? (
-            <button className={smallButton} onClick={() => begin('action')}>
+            <Button size="small" onClick={() => begin('action')}>
               Raise an action
-            </button>
+            </Button>
           ) : undefined
         }
       >
@@ -1051,6 +1048,6 @@ export function EventDetail() {
       >
         <p>{d?.text}</p>
       </ActionDialog>
-    </div>
+    </Space>
   );
 }

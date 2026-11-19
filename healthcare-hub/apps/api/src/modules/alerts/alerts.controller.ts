@@ -36,7 +36,7 @@ import { audit, body } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const MAX_SNOOZE_MS = 30 * 86_400_000;
 const ListQuery = z.object({
   state: z.enum(['OPEN', 'ACKNOWLEDGED', 'RESOLVED']).optional(),
@@ -193,7 +193,16 @@ export class AlertsController {
           'OWNER',
           'LEAD',
         ]) as Recipient[];
-        const stage = escalationStage(a.raisedAt, now, esc, a.state === 'ACKNOWLEDGED');
+        const rule = itemRules.find((r) => r.kind === kind);
+        const stage = escalationStage(
+          a.raisedAt,
+          now,
+          {
+            leadAfterDays: rule?.leadAfterDays ?? esc.leadAfterDays,
+            managerAfterDays: rule?.managerAfterDays ?? esc.managerAfterDays,
+          },
+          a.state === 'ACKNOWLEDGED',
+        );
         const byRecipients = recipientReason({ kind, recipients, stage, roleKeys: hub.roleKeys });
         const reason: AlertCentreReason | null =
           a.ownerUserId === me

@@ -5,6 +5,7 @@ import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
+import { selectAntByLabel } from './ant-testing.js';
 
 const ORG = '01900000-0000-7000-8000-000000000001';
 const ME = '01900000-0000-7000-8000-000000000101';
@@ -149,7 +150,7 @@ describe('events list and reporting [task 11]', () => {
     fireEvent.change(within(form).getByLabelText('Received on'), {
       target: { value: '2026-11-02' },
     });
-    await userEvent.selectOptions(within(form).getByLabelText('How it was received'), 'EMAIL');
+    await selectAntByLabel('How it was received', 'Email');
     await userEvent.click(within(form).getByRole('button', { name: 'Record event' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(

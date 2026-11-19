@@ -1,4 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
+import { openSettingsView } from './ant-testing.js';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
@@ -94,7 +95,7 @@ beforeEach(() => sessionStorage.clear());
 describe('requirement library (Settings)', () => {
   it('adopts an ambulance item as a draft with an in-app dialog', async () => {
     const { send } = renderLib(ALL);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Requirement library' }));
+    await openSettingsView('Requirement library');
     const lib = await screen.findByRole('table', { name: 'Library items' });
     expect(within(lib).getByRole('row', { name: /Enhanced DBS/ })).toHaveTextContent(
       'Every 3 years',
@@ -107,7 +108,7 @@ describe('requirement library (Settings)', () => {
 
   it('a sector pack needs the validating specialist named', async () => {
     const { send } = renderLib(ALL);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Requirement library' }));
+    await openSettingsView('Requirement library');
     await userEvent.selectOptions(await screen.findByLabelText('Pack'), 'DENTAL_V1');
     expect(screen.getByRole('note')).toHaveTextContent('has not been validated');
     await userEvent.click(screen.getByRole('button', { name: 'Adopt GDC registration' }));
@@ -126,7 +127,7 @@ describe('requirement library (Settings)', () => {
 
   it('publish is offered to a second person only, and unmapped roles are flagged', async () => {
     renderLib(ALL);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Requirement library' }));
+    await openSettingsView('Requirement library');
     const ours = await screen.findByRole('table', {
       name: 'Requirements adopted by this organisation',
     });

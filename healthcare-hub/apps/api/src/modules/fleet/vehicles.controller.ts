@@ -64,7 +64,7 @@ const OFF_ROAD_WORDS: Record<string, string> = {
   SOLD: 'Sold',
   OTHER: 'Other',
 };
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const VIEW = 'fleet.vehicle.view';
 const MANAGE = 'fleet.vehicle.manage';
 const ListQuery = z.object({
@@ -1043,6 +1043,6 @@ export class EquipmentController {
 function instancesFor(tx: TenantTx, ids: string[]) {
   return tx.requirementInstance.findMany({
     where: { id: { in: ids } },
-    select: { id: true, status: true, reasonText: true },
+    select: { id: true, status: true, reasonText: true, expiryDate: true, dueDate: true },
   });
 }

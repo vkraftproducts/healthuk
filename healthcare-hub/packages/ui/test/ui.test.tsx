@@ -45,6 +45,20 @@ describe('DataTable', () => {
     expect(within(table).getByRole('columnheader', { name: 'Item' })).toBeInTheDocument();
     expect(within(table).getByRole('cell', { name: 'x' })).toBeInTheDocument();
   });
+  it('names each data row for keyboard and screen-reader users', () => {
+    render(
+      <DataTable
+        caption="Items"
+        columns={cols}
+        rows={[{ a: 'Alpha' }, { a: 'Beta' }]}
+        rowKey={(r) => r.a}
+        rowName={(r) => `Item ${r.a}`}
+      />,
+    );
+    const table = screen.getByRole('table', { name: 'Items' });
+    expect(within(table).getByRole('row', { name: 'Item Alpha' })).toBeInTheDocument();
+    expect(within(table).getByRole('row', { name: 'Item Beta' })).toBeInTheDocument();
+  });
   it('shows an explicit source-unavailable alert instead of stale rows', () => {
     render(
       <DataTable

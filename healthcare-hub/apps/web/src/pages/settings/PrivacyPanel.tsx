@@ -1,15 +1,13 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Button } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
-  button,
   Field,
   fmtDate,
   fmtDateTime,
-  input,
   PersonSelect,
   Section,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -105,7 +103,7 @@ export function PrivacyPanel() {
 
 // ---- retention ------------------------------------------------------------------------------------
 type RuleEdit = { r: Row; months: string; basis: string; action: string };
-function Retention() {
+export function Retention() {
   const { api, orgId, me } = useApp();
   const rules = useOne<{ data: Row[] }>('/api/v1/retention-rules');
   const [editing, setEditing] = useState<RuleEdit | null>(null);
@@ -118,7 +116,7 @@ function Retention() {
     months <= 1200 &&
     editing.basis.trim().length >= 3;
   return (
-    <Section title="Retention schedule">
+    <Section title="Retention rules">
       <p className="text-sm">
         Nothing is acted on until a rule is approved, and the person who changed a rule cannot
         approve it. Only patient contact details can be anonymised automatically; everything else is
@@ -173,8 +171,7 @@ function Retention() {
             header: 'Action',
             cell: (r) => (
               <div className="flex flex-wrap gap-2">
-                <button
-                  className={smallButton}
+                <Button                   type="link" size="small"
                   aria-label={`Change rule: ${words(r.category)}`}
                   onClick={() =>
                     setEditing({
@@ -186,19 +183,18 @@ function Retention() {
                   }
                 >
                   Change
-                </button>
+                </Button>
                 {r.status !== 'APPROVED' &&
                   !r.basis.startsWith('Placeholder') &&
                   (r.changedBy === me.user.id ? (
                     <span className="text-xs">Someone else must approve your change.</span>
                   ) : (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Approve rule: ${words(r.category)}`}
                       onClick={() => setApproving(r)}
                     >
                       Approve
-                    </button>
+                    </Button>
                   ))}
               </div>
             ),
@@ -227,14 +223,14 @@ function Retention() {
                   type="number"
                   min={1}
                   max={1200}
-                  className={input}
+                 
                   value={editing.months}
                   onChange={(e) => setEditing({ ...editing, months: e.target.value })}
                 />
               </Field>
               <Field label="Basis (your approved schedule or legal source)">
                 <input
-                  className={input}
+                 
                   maxLength={500}
                   value={editing.basis}
                   onChange={(e) => setEditing({ ...editing, basis: e.target.value })}
@@ -243,7 +239,7 @@ function Retention() {
               {editing.r.category === 'PATIENT_CONTACT' && (
                 <Field label="Then">
                   <select
-                    className={input}
+                   
                     value={editing.action}
                     onChange={(e) => setEditing({ ...editing, action: e.target.value })}
                   >
@@ -323,14 +319,14 @@ function LegalHolds() {
         className="flex flex-wrap items-end gap-3"
       >
         <Field label="Hold">
-          <select className={input} value={scope} onChange={(e) => setScope(e.target.value)}>
+          <select value={scope} onChange={(e) => setScope(e.target.value)}>
             <option value="ORGANISATION">{HOLD_SCOPE.ORGANISATION}</option>
             <option value="STAFF">{HOLD_SCOPE.STAFF}</option>
           </select>
         </Field>
         {scope === 'STAFF' && (
           <Field label="Staff member">
-            <select name="scopeId" required className={input}>
+            <select name="scopeId" required>
               {(staff.data?.data ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.displayName}
@@ -342,17 +338,17 @@ function LegalHolds() {
         {scope === 'ORGANISATION' && (
           <>
             <Field label="Records from (optional)">
-              <input type="date" name="rangeFrom" className={input} />
+              <input type="date" name="rangeFrom" />
             </Field>
             <Field label="Records to (optional)">
-              <input type="date" name="rangeTo" className={input} />
+              <input type="date" name="rangeTo" />
             </Field>
           </>
         )}
         <Field label="Reason (at least 10 characters)">
-          <input name="reason" required minLength={10} maxLength={500} className={input} />
+          <input name="reason" required minLength={10} maxLength={500} />
         </Field>
-        <button className={button}>Place hold</button>
+        <Button htmlType="submit" type="primary">Place hold</Button>
       </form>
       {msg}
       <DataTable<Row>
@@ -380,13 +376,12 @@ function LegalHolds() {
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status="AMBER" reason="Active" />
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Release hold: ${scopeText(h)}`}
                     onClick={() => setReleasing(h)}
                   >
                     Release
-                  </button>
+                  </Button>
                 </div>
               ),
           },
@@ -453,7 +448,7 @@ function SubjectRequests() {
     <Section title="Data subject requests">
       <form onSubmit={newDsr} aria-label="Log a request" className="flex flex-wrap items-end gap-3">
         <Field label="Request type">
-          <select name="type" className={input}>
+          <select name="type">
             {Object.entries(DSR_TYPE).map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
@@ -462,7 +457,7 @@ function SubjectRequests() {
           </select>
         </Field>
         <Field label="About">
-          <select className={input} value={about} onChange={(e) => setAbout(e.target.value)}>
+          <select value={about} onChange={(e) => setAbout(e.target.value)}>
             <option value="STAFF">A staff member</option>
             <option value="PATIENT">A patient</option>
             <option value="OTHER">Someone else</option>
@@ -470,7 +465,7 @@ function SubjectRequests() {
         </Field>
         {about === 'STAFF' && (
           <Field label="Staff member">
-            <select name="staffId" required className={input}>
+            <select name="staffId" required>
               {(staff.data?.data ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.displayName}
@@ -481,11 +476,11 @@ function SubjectRequests() {
         )}
         {about === 'PATIENT' && (
           <Field label="Patient reference">
-            <input name="patientRef" required pattern="[A-Za-z0-9\-]{2,30}" className={input} />
+            <input name="patientRef" required pattern="[A-Za-z0-9\-]{2,30}" />
           </Field>
         )}
         <Field label="What is asked for (no names)">
-          <input name="description" required minLength={3} maxLength={1000} className={input} />
+          <input name="description" required minLength={3} maxLength={1000} />
         </Field>
         <Field label="Received on">
           <input
@@ -494,10 +489,10 @@ function SubjectRequests() {
             required
             max={londonToday()}
             defaultValue={londonToday()}
-            className={input}
+           
           />
         </Field>
-        <button className={button}>Log request</button>
+        <Button htmlType="submit" type="primary">Log request</Button>
       </form>
       {msg}
       <DataTable<Row>
@@ -558,47 +553,42 @@ function SubjectRequests() {
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {r.status === 'RECEIVED' && !r.identityRequestedOn && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Asked for identity: ${name(r)}`}
                       onClick={() => setStep({ r, kind: 'askId' })}
                     >
                       Asked for identity
-                    </button>
+                    </Button>
                   )}
                   {r.status === 'RECEIVED' && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Identity verified: ${name(r)}`}
                       onClick={() => setStep({ r, kind: 'verify' })}
                     >
                       Identity verified
-                    </button>
+                    </Button>
                   )}
                   {r.status === 'IDENTITY_VERIFIED' && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Start work: ${name(r)}`}
                       onClick={() => setStep({ r, kind: 'start' })}
                     >
                       Start work
-                    </button>
+                    </Button>
                   )}
                   {r.type === 'ACCESS' &&
                     r.status !== 'RECEIVED' &&
                     r.subjectType !== 'OTHER' &&
                     can('reports.export') && (
-                      <button
-                        className={smallButton}
+                      <Button                         type="link" size="small"
                         aria-label={`Build export: ${name(r)}`}
                         onClick={() => exportFor(r)}
                       >
                         {r.exportJobId ? 'Rebuild export' : 'Build export'}
-                      </button>
+                      </Button>
                     )}
                   {!r.extendedTo && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Extend: ${name(r)}`}
                       onClick={() => {
                         setExtendTo('');
@@ -606,19 +596,17 @@ function SubjectRequests() {
                       }}
                     >
                       Extend
-                    </button>
+                    </Button>
                   )}
                   {r.status !== 'RECEIVED' && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Complete: ${name(r)}`}
                       onClick={() => setStep({ r, kind: 'COMPLETED' })}
                     >
                       Complete
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Refuse: ${name(r)}`}
                     onClick={() => {
                       setExemption('');
@@ -626,7 +614,7 @@ function SubjectRequests() {
                     }}
                   >
                     Refuse
-                  </button>
+                  </Button>
                 </div>
               ),
           },
@@ -694,7 +682,7 @@ function SubjectRequests() {
           step?.kind === 'REFUSED' ? (
             <Field label="Exemption relied on">
               <input
-                className={input}
+               
                 maxLength={500}
                 value={exemption}
                 onChange={(e) => setExemption(e.target.value)}
@@ -705,7 +693,7 @@ function SubjectRequests() {
               <Field label={`New due date (no later than ${fmtDate(step.r.latestExtension)})`}>
                 <input
                   type="date"
-                  className={input}
+                 
                   min={step.r.dueOn}
                   max={step.r.latestExtension}
                   value={extendTo}
@@ -792,7 +780,7 @@ function Breaches() {
     <Section title="Personal data breaches">
       <form onSubmit={newBreach} aria-label="Record a breach" className="grid gap-3 md:grid-cols-2">
         <Field label="Title">
-          <input name="title" required minLength={3} maxLength={200} className={input} />
+          <input name="title" required minLength={3} maxLength={200} />
         </Field>
         <Field label="Discovered at">
           <input
@@ -800,7 +788,7 @@ function Breaches() {
             name="discoveredAt"
             required
             max={londonNowLocal()}
-            className={input}
+           
           />
         </Field>
         <div className="md:col-span-2">
@@ -810,24 +798,24 @@ function Breaches() {
               required
               minLength={3}
               maxLength={4000}
-              className={input}
+             
             />
           </Field>
         </div>
         <Field label="Occurred at (optional)">
-          <input type="datetime-local" name="occurredAt" className={input} />
+          <input type="datetime-local" name="occurredAt" />
         </Field>
         <Field label="Types of data (comma separated, optional)">
-          <input name="dataCategories" className={input} />
+          <input name="dataCategories" />
         </Field>
         <Field label="People affected, estimate (optional)">
-          <input type="number" min={0} name="subjectsEstimate" className={input} />
+          <input type="number" min={0} name="subjectsEstimate" />
         </Field>
         <Field label="Containment so far (optional)">
-          <input name="containment" maxLength={2000} className={input} />
+          <input name="containment" maxLength={2000} />
         </Field>
         <div className="md:col-span-2">
-          <button className={button}>Record breach</button>
+          <Button htmlType="submit" type="primary">Record breach</Button>
         </div>
       </form>
       {msg}
@@ -896,8 +884,7 @@ function Breaches() {
             cell: (b) => (
               <div className="flex flex-wrap gap-2">
                 {b.status !== 'CLOSED' && (
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Record containment: ${name(b)}`}
                     onClick={() => {
                       setContain({
@@ -909,11 +896,10 @@ function Breaches() {
                     }}
                   >
                     {b.containedAt ? 'Update containment' : 'Record containment'}
-                  </button>
+                  </Button>
                 )}
                 {(b.status === 'OPEN' || b.status === 'ASSESSED') && (
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`${b.status === 'OPEN' ? 'Assess' : 'Reassess'}: ${name(b)}`}
                     onClick={() => {
                       setRisk(b.risk ?? 'RISK');
@@ -923,11 +909,10 @@ function Breaches() {
                     }}
                   >
                     {b.status === 'OPEN' ? 'Assess' : 'Reassess'}
-                  </button>
+                  </Button>
                 )}
                 {b.status === 'ASSESSED' && b.icoReportable && (
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Record ICO report: ${name(b)}`}
                     onClick={() => {
                       setReport({ at: londonNowLocal(), ref: '', late: '', notified: '' });
@@ -935,17 +920,16 @@ function Breaches() {
                     }}
                   >
                     Record ICO report
-                  </button>
+                  </Button>
                 )}
                 {((b.status === 'ASSESSED' && b.icoReportable === false) ||
                   b.status === 'REPORTED') && (
-                  <button
-                    className={smallButton}
+                  <Button                     type="link" size="small"
                     aria-label={`Close: ${name(b)}`}
                     onClick={() => setStep({ b, kind: 'close' })}
                   >
                     Close
-                  </button>
+                  </Button>
                 )}
               </div>
             ),
@@ -1018,7 +1002,7 @@ function Breaches() {
               <Field label="Contained at">
                 <input
                   type="datetime-local"
-                  className={input}
+                 
                   max={londonNowLocal()}
                   value={contain.at}
                   onChange={(e) => setContain({ ...contain, at: e.target.value })}
@@ -1026,7 +1010,7 @@ function Breaches() {
               </Field>
               <Field label="How it was stopped (no names)">
                 <textarea
-                  className={input}
+                 
                   maxLength={2000}
                   value={contain.how}
                   onChange={(e) => setContain({ ...contain, how: e.target.value })}
@@ -1036,7 +1020,7 @@ function Breaches() {
                 <input
                   type="number"
                   min={0}
-                  className={input}
+                 
                   value={contain.people}
                   onChange={(e) => setContain({ ...contain, people: e.target.value })}
                 />
@@ -1072,7 +1056,7 @@ function Breaches() {
                 </label>
                 <Field label="How many people">
                   <select
-                    className={input}
+                   
                     value={answers.volume}
                     onChange={(e) => setAnswers({ ...answers, volume: e.target.value })}
                   >
@@ -1083,7 +1067,7 @@ function Breaches() {
                 </Field>
                 <Field label="Likely harm to them">
                   <select
-                    className={input}
+                   
                     value={answers.likelyHarm}
                     onChange={(e) => setAnswers({ ...answers, likelyHarm: e.target.value })}
                   >
@@ -1094,7 +1078,7 @@ function Breaches() {
                 </Field>
               </fieldset>
               <Field label="Risk to people">
-                <select className={input} value={risk} onChange={(e) => setRisk(e.target.value)}>
+                <select value={risk} onChange={(e) => setRisk(e.target.value)}>
                   {Object.entries(RISK).map(([k, v]) => (
                     <option key={k} value={k}>
                       {v}
@@ -1122,14 +1106,14 @@ function Breaches() {
               <Field label="Reported at">
                 <input
                   type="datetime-local"
-                  className={input}
+                 
                   value={report.at}
                   onChange={(e) => setReport({ ...report, at: e.target.value })}
                 />
               </Field>
               <Field label="ICO reference">
                 <input
-                  className={input}
+                 
                   maxLength={60}
                   value={report.ref}
                   onChange={(e) => setReport({ ...report, ref: e.target.value })}
@@ -1138,7 +1122,7 @@ function Breaches() {
               {late && (
                 <Field label="Reasons for reporting after 72 hours">
                   <textarea
-                    className={input}
+                   
                     maxLength={2000}
                     value={report.late}
                     onChange={(e) => setReport({ ...report, late: e.target.value })}
@@ -1148,7 +1132,7 @@ function Breaches() {
               <Field label="People affected told at (optional)">
                 <input
                   type="datetime-local"
-                  className={input}
+                 
                   value={report.notified}
                   onChange={(e) => setReport({ ...report, notified: e.target.value })}
                 />
@@ -1218,7 +1202,7 @@ function Complaints() {
         <Field label="From">
           <select
             name="source"
-            className={input}
+           
             value={source}
             onChange={(e) => setSource(e.target.value)}
           >
@@ -1236,7 +1220,7 @@ function Complaints() {
               required
               pattern="[A-Za-z0-9/\-]{3,40}"
               maxLength={40}
-              className={input}
+             
             />
           </Field>
         )}
@@ -1247,12 +1231,12 @@ function Complaints() {
             required
             max={londonToday()}
             defaultValue={londonToday()}
-            className={input}
+           
           />
         </Field>
         <div className="md:col-span-2">
           <Field label="Summary (no names)">
-            <textarea name="summary" required minLength={3} maxLength={2000} className={input} />
+            <textarea name="summary" required minLength={3} maxLength={2000} />
           </Field>
         </div>
         <PersonSelect
@@ -1263,7 +1247,7 @@ function Complaints() {
           meId={me.user.id}
         />
         <Field label="Linked request (optional)">
-          <select name="subjectRequestId" className={input} defaultValue="">
+          <select name="subjectRequestId" defaultValue="">
             <option value="">None</option>
             {(dsrs.data?.data ?? []).map((r) => (
               <option key={r.id} value={r.id}>
@@ -1273,7 +1257,7 @@ function Complaints() {
           </select>
         </Field>
         <Field label="Linked breach (optional)">
-          <select name="breachId" className={input} defaultValue="">
+          <select name="breachId" defaultValue="">
             <option value="">None</option>
             {(breaches.data?.data ?? []).map((b) => (
               <option key={b.id} value={b.id}>
@@ -1283,7 +1267,7 @@ function Complaints() {
           </select>
         </Field>
         <div className="md:col-span-2">
-          <button className={button}>Log complaint</button>
+          <Button htmlType="submit" type="primary">Log complaint</Button>
         </div>
       </form>
       {msg}
@@ -1361,8 +1345,7 @@ function Complaints() {
             header: 'Next step',
             cell: (c) =>
               c.status === 'RECEIVED' ? (
-                <button
-                  className={smallButton}
+                <Button                   type="link" size="small"
                   aria-label={`Record acknowledgement: ${name(c)}`}
                   onClick={() => {
                     setOn(londonToday());
@@ -1371,10 +1354,9 @@ function Complaints() {
                   }}
                 >
                   Record acknowledgement
-                </button>
+                </Button>
               ) : c.status === 'ACKNOWLEDGED' ? (
-                <button
-                  className={smallButton}
+                <Button                   type="link" size="small"
                   aria-label={`Record outcome: ${name(c)}`}
                   onClick={() => {
                     setOn(londonToday());
@@ -1382,7 +1364,7 @@ function Complaints() {
                   }}
                 >
                   Record outcome
-                </button>
+                </Button>
               ) : null,
           },
         ]}
@@ -1415,7 +1397,7 @@ function Complaints() {
             <Field label={step?.kind === 'ack' ? 'Acknowledged on' : 'Outcome sent on'}>
               <input
                 type="date"
-                className={input}
+               
                 max={londonToday()}
                 value={on}
                 onChange={(e) => setOn(e.target.value)}
@@ -1424,7 +1406,7 @@ function Complaints() {
             {step?.kind === 'ack' && (
               <Field label="Acknowledgement text (drafted for you; edit before sending)">
                 <textarea
-                  className={input}
+                 
                   rows={5}
                   maxLength={4000}
                   value={ackText}

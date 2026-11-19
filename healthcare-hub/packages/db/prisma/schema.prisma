@@ -260,7 +260,7 @@ model SupervisionBooking {
   id               String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   organisationId   String    @map("organisation_id") @db.Uuid
   staffId          String    @map("staff_id") @db.Uuid
-  supervisorUserId String    @map("supervisor_user_id") @db.Uuid
+  supervisorUserId String?   @map("supervisor_user_id") @db.Uuid
   scheduledAt      DateTime  @map("scheduled_at") @db.Timestamptz(6)
   kind             String
   topics           String?
@@ -270,6 +270,8 @@ model SupervisionBooking {
   rebookedAs       String?   @map("rebooked_as") @db.Uuid
   bookedBy         String    @map("booked_by") @db.Uuid
   closedBy         String?   @map("closed_by") @db.Uuid
+  requestedBy      String?   @map("requested_by") @db.Uuid
+  code             String?
   version          Int       @default(1)
   createdAt        DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
@@ -688,6 +690,7 @@ model EvidenceVersion {
   uploadedAt     DateTime?  @map("uploaded_at") @db.Timestamptz(6)
   scannedAt      DateTime?  @map("scanned_at") @db.Timestamptz(6)
   uploadedBy     String     @map("uploaded_by") @db.Uuid
+  channel        String     @default("OFFICE")
   capturedAt     DateTime   @default(now()) @map("captured_at") @db.Timestamptz(6)
   validFrom      DateTime?  @map("valid_from") @db.Date
   validTo        DateTime?  @map("valid_to") @db.Date
@@ -967,9 +970,25 @@ model StaffRecord {
   staff        Staff        @relation(fields: [staffId], references: [id])
   supersedes   StaffRecord? @relation("Supersedes", fields: [supersedesId], references: [id])
   supersededBy StaffRecord? @relation("Supersedes")
+  verification StaffRecordVerification?
 
   @@index([organisationId, staffId, kind, createdAt])
   @@map("staff_record")
+}
+
+model StaffRecordVerification {
+  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  recordId       String   @unique @map("record_id") @db.Uuid
+  verifiedBy     String   @map("verified_by") @db.Uuid
+  registerRef    String?  @map("register_ref")
+  reason         String?
+  verifiedAt     DateTime @default(now()) @map("verified_at") @db.Timestamptz(6)
+
+  record StaffRecord @relation(fields: [recordId], references: [id])
+
+  @@index([organisationId, verifiedAt])
+  @@map("staff_record_verification")
 }
 
 model RoleRequirement {
@@ -1004,6 +1023,25 @@ model StaffCorrectionRequest {
 
   @@index([organisationId, status, createdAt])
   @@map("staff_correction_request")
+}
+
+model StaffChaseLog {
+  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  staffId        String   @map("staff_id") @db.Uuid
+  kind           String
+  subject        String
+  requestedOn    DateTime? @map("requested_on") @db.Date
+  chasedOn       DateTime? @map("chased_on") @db.Date
+  receivedOn     DateTime? @map("received_on") @db.Date
+  note           String?
+  createdBy      String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  version        Int      @default(1)
+
+  @@index([organisationId, staffId, kind])
+  @@map("staff_chase_log")
 }
 
 // ---------------------------------------------------------------------------
@@ -1317,6 +1355,7 @@ model Vdi {
   vehicleId          String      @map("vehicle_id") @db.Uuid
   templateId         String      @map("template_id") @db.Uuid
   shiftId            String?     @map("shift_id") @db.Uuid
+  code               String?
   checkerUserId      String      @map("checker_user_id") @db.Uuid
   odometer           Int
   outcome            CheckResult
@@ -1373,7 +1412,6 @@ model CleaningRecord {
   shiftId            String?      @map("shift_id") @db.Uuid
   type               CleaningType
   cleanedBy          String       @map("cleaned_by") @db.Uuid
-  // 0054_cleaning_checked_by.sql — second-person check for office-recorded deep cleans.
   checkedBy          String?      @map("checked_by") @db.Uuid
   clientSubmissionId String       @map("client_submission_id") @db.Uuid
   capturedAt         DateTime     @map("captured_at") @db.Timestamptz(6)
@@ -1400,7 +1438,6 @@ model Defect {
   sourceVdiId    String?        @map("source_vdi_id") @db.Uuid
   status         DefectStatus   @default(OPEN)
   classifiedBy   String?        @map("classified_by") @db.Uuid
-  // 0042_ownership_escalation.sql — owner + review-by for escalation alerts.
   ownerUserId    String?        @map("owner_user_id") @db.Uuid
   reviewBy       DateTime?      @map("review_by") @db.Date
   repairDeadline DateTime?      @map("repair_deadline") @db.Date
@@ -1408,11 +1445,10 @@ model Defect {
   repairedAt     DateTime?      @map("repaired_at") @db.Timestamptz(6)
   repairedBy     String?        @map("repaired_by") @db.Uuid
   repairJobSheetEvidenceItemId String? @map("repair_job_sheet_evidence_item_id") @db.Uuid
-  // 0058_defect_repair_record.sql — plan / start / job sheet kept apart from sign-off.
-  repairPlan       String?   @map("repair_plan")
-  repairStartedAt  DateTime? @map("repair_started_at") @db.Timestamptz(6)
-  repairStartedBy  String?   @map("repair_started_by") @db.Uuid
-  jobSheetRef      String?   @map("job_sheet_ref")
+  repairPlan      String?   @map("repair_plan")
+  repairStartedAt DateTime? @map("repair_started_at") @db.Timestamptz(6)
+  repairStartedBy String?   @map("repair_started_by") @db.Uuid
+  jobSheetRef     String?   @map("job_sheet_ref")
   version        Int            @default(1)
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -3144,36 +3180,34 @@ model NotificationPreference {
   @@map("notification_preference")
 }
 
-// ---------------------------------------------------------------------------
-// v36 tables from sql/migrations/0044–0052 (schema sync; DB already has these).
-// ---------------------------------------------------------------------------
+// ---- v36 batch 1 (migration 0044): safety registers -----------------------------------------
 
 model SafeguardingReferral {
-  id                 String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId     String    @map("organisation_id") @db.Uuid
-  code               String
-  about              String
-  category           String
-  patientRef         String    @map("patient_ref")
-  details            String
-  raisedByUserId     String    @map("raised_by_user_id") @db.Uuid
-  raisedOn           DateTime  @map("raised_on") @db.Date
-  recordedBy         String    @map("recorded_by") @db.Uuid
-  eventId            String?   @map("event_id") @db.Uuid
-  abuseAllegation    Boolean   @default(false) @map("abuse_allegation")
-  cqcNotificationId  String?   @map("cqc_notification_id") @db.Uuid
-  status             String    @default("RAISED")
-  referredOn         DateTime? @map("referred_on") @db.Date
-  agency             String?
-  agencyReference    String?   @map("agency_reference")
-  decisionReason     String?   @map("decision_reason")
-  decidedBy          String?   @map("decided_by") @db.Uuid
-  outcome            String?
-  outcomeOn          DateTime? @map("outcome_on") @db.Date
-  closedBy           String?   @map("closed_by") @db.Uuid
-  version            Int       @default(1)
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id                String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId    String    @map("organisation_id") @db.Uuid
+  code              String
+  about             String
+  category          String
+  patientRef        String    @map("patient_ref")
+  details           String
+  raisedByUserId    String    @map("raised_by_user_id") @db.Uuid
+  raisedOn          DateTime  @map("raised_on") @db.Date
+  recordedBy        String    @map("recorded_by") @db.Uuid
+  eventId           String?   @map("event_id") @db.Uuid
+  abuseAllegation   Boolean   @default(false) @map("abuse_allegation")
+  cqcNotificationId String?   @map("cqc_notification_id") @db.Uuid
+  status            String    @default("RAISED")
+  referredOn        DateTime? @map("referred_on") @db.Date
+  agency            String?
+  agencyReference   String?   @map("agency_reference")
+  decisionReason    String?   @map("decision_reason")
+  decidedBy         String?   @map("decided_by") @db.Uuid
+  outcome           String?
+  outcomeOn         DateTime? @map("outcome_on") @db.Date
+  closedBy          String?   @map("closed_by") @db.Uuid
+  version           Int       @default(1)
+  createdAt         DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("safeguarding_referral")
@@ -3202,8 +3236,8 @@ model VehicleAccident {
   closedBy             String?   @map("closed_by") @db.Uuid
   closedAt             DateTime? @map("closed_at") @db.Timestamptz(6)
   version              Int       @default(1)
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("vehicle_accident")
@@ -3218,53 +3252,55 @@ model VehicleStockItem {
   expectedQty    Int       @map("expected_qty")
   active         Boolean   @default(true)
   createdBy      String    @map("created_by") @db.Uuid
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   retiredBy      String?   @map("retired_by") @db.Uuid
   retiredAt      DateTime? @map("retired_at") @db.Timestamptz(6)
   version        Int       @default(1)
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@map("vehicle_stock_item")
 }
 
 model VehicleStockCheck {
-  id               String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId   String   @map("organisation_id") @db.Uuid
-  vehicleId        String   @map("vehicle_id") @db.Uuid
-  checkedBy        String   @map("checked_by") @db.Uuid
-  checkedAt        DateTime @default(now()) @map("checked_at") @db.Timestamptz(6)
-  lines            Json
-  shortCount       Int      @map("short_count")
-  expiredCount     Int      @map("expired_count")
-  sealBrokenCount  Int      @map("seal_broken_count")
-  note             String?
+  id              String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId  String   @map("organisation_id") @db.Uuid
+  vehicleId       String   @map("vehicle_id") @db.Uuid
+  checkedBy       String   @map("checked_by") @db.Uuid
+  checkedAt       DateTime @default(dbgenerated("now()")) @map("checked_at") @db.Timestamptz(6)
+  lines           Json
+  shortCount      Int      @map("short_count")
+  expiredCount    Int      @map("expired_count")
+  sealBrokenCount Int      @map("seal_broken_count")
+  note            String?
 
   @@map("vehicle_stock_check")
 }
 
 model ControlledDrugCheck {
-  id               String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId   String    @map("organisation_id") @db.Uuid
-  code             String
-  drug             String
-  store            String
-  vehicleId        String?   @map("vehicle_id") @db.Uuid
-  registerBalance  Int       @map("register_balance")
-  countedBalance   Int       @map("counted_balance")
-  checkedBy        String    @map("checked_by") @db.Uuid
-  checkedAt        DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
-  witnessUserId    String    @map("witness_user_id") @db.Uuid
-  status           String    @default("AWAITING_WITNESS")
-  witnessedAt      DateTime? @map("witnessed_at") @db.Timestamptz(6)
-  witnessNote      String?   @map("witness_note")
-  eventId          String?   @map("event_id") @db.Uuid
-  note             String?
-  version          Int       @default(1)
-  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id              String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId  String    @map("organisation_id") @db.Uuid
+  code            String
+  drug            String
+  store           String
+  vehicleId       String?   @map("vehicle_id") @db.Uuid
+  registerBalance Int       @map("register_balance")
+  countedBalance  Int       @map("counted_balance")
+  checkedBy       String    @map("checked_by") @db.Uuid
+  checkedAt       DateTime  @default(dbgenerated("now()")) @map("checked_at") @db.Timestamptz(6)
+  witnessUserId   String    @map("witness_user_id") @db.Uuid
+  status          String    @default("AWAITING_WITNESS")
+  witnessedAt     DateTime? @map("witnessed_at") @db.Timestamptz(6)
+  witnessNote     String?   @map("witness_note")
+  eventId         String?   @map("event_id") @db.Uuid
+  note            String?
+  version         Int       @default(1)
+  updatedAt       DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("controlled_drug_check")
 }
+
+// ---- v36 batch 2 (migration 0045): reviews, absence, leavers --------------------------------
 
 model StaffReview {
   id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
@@ -3283,90 +3319,92 @@ model StaffReview {
   cancelReason   String?   @map("cancel_reason")
   followsId      String?   @map("follows_id") @db.Uuid
   createdBy      String    @map("created_by") @db.Uuid
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   version        Int       @default(1)
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("staff_review")
 }
 
 model StaffAbsence {
-  id                   String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId       String    @map("organisation_id") @db.Uuid
-  code                 String
-  staffId              String    @map("staff_id") @db.Uuid
-  firstDay             DateTime  @map("first_day") @db.Date
-  lastDay              DateTime? @map("last_day") @db.Date
-  category             String
-  offRestrictionId     String?   @map("off_restriction_id") @db.Uuid
-  rtwOn                DateTime? @map("rtw_on") @db.Date
-  rtwByUserId          String?   @map("rtw_by_user_id") @db.Uuid
-  rtwRecordedBy        String?   @map("rtw_recorded_by") @db.Uuid
-  rtwNote              String?   @map("rtw_note")
-  phased               Boolean   @default(false)
-  phasedTerms          String?   @map("phased_terms")
-  phasedUntil          DateTime? @map("phased_until") @db.Date
-  phasedRestrictionId  String?   @map("phased_restriction_id") @db.Uuid
-  recordedBy           String    @map("recorded_by") @db.Uuid
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  version              Int       @default(1)
-  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id                  String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId      String    @map("organisation_id") @db.Uuid
+  code                String
+  staffId             String    @map("staff_id") @db.Uuid
+  firstDay            DateTime  @map("first_day") @db.Date
+  lastDay             DateTime? @map("last_day") @db.Date
+  category            String
+  offRestrictionId    String?   @map("off_restriction_id") @db.Uuid
+  rtwOn               DateTime? @map("rtw_on") @db.Date
+  rtwByUserId         String?   @map("rtw_by_user_id") @db.Uuid
+  rtwRecordedBy       String?   @map("rtw_recorded_by") @db.Uuid
+  rtwNote             String?   @map("rtw_note")
+  phased              Boolean   @default(false)
+  phasedTerms         String?   @map("phased_terms")
+  phasedUntil         DateTime? @map("phased_until") @db.Date
+  phasedRestrictionId String?   @map("phased_restriction_id") @db.Uuid
+  recordedBy          String    @map("recorded_by") @db.Uuid
+  createdAt           DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  version             Int       @default(1)
+  updatedAt           DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("staff_absence")
 }
 
 model LeaverRecord {
-  id                String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId    String    @map("organisation_id") @db.Uuid
-  code              String
-  staffId           String    @map("staff_id") @db.Uuid
-  lastDay           DateTime  @map("last_day") @db.Date
-  reason            String
-  reasonNote        String?   @map("reason_note")
-  status            String    @default("OPEN")
-  badgeReturnedAt   DateTime? @map("badge_returned_at") @db.Timestamptz(6)
-  badgeReturnedBy   String?   @map("badge_returned_by") @db.Uuid
-  kitReturnedAt     DateTime? @map("kit_returned_at") @db.Timestamptz(6)
-  kitReturnedBy     String?   @map("kit_returned_by") @db.Uuid
-  payrollToldAt     DateTime? @map("payroll_told_at") @db.Timestamptz(6)
-  payrollToldBy     String?   @map("payroll_told_by") @db.Uuid
-  exitInterview     String?   @map("exit_interview")
-  exitInterviewAt   DateTime? @map("exit_interview_at") @db.Timestamptz(6)
-  exitInterviewBy   String?   @map("exit_interview_by") @db.Uuid
-  keepUntil         DateTime? @map("keep_until") @db.Date
-  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
-  completedBy       String?   @map("completed_by") @db.Uuid
-  cancelReason      String?   @map("cancel_reason")
-  startedBy         String    @map("started_by") @db.Uuid
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  version           Int       @default(1)
-  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id              String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId  String    @map("organisation_id") @db.Uuid
+  code            String
+  staffId         String    @map("staff_id") @db.Uuid
+  lastDay         DateTime  @map("last_day") @db.Date
+  reason          String
+  reasonNote      String?   @map("reason_note")
+  status          String    @default("OPEN")
+  badgeReturnedAt DateTime? @map("badge_returned_at") @db.Timestamptz(6)
+  badgeReturnedBy String?   @map("badge_returned_by") @db.Uuid
+  kitReturnedAt   DateTime? @map("kit_returned_at") @db.Timestamptz(6)
+  kitReturnedBy   String?   @map("kit_returned_by") @db.Uuid
+  payrollToldAt   DateTime? @map("payroll_told_at") @db.Timestamptz(6)
+  payrollToldBy   String?   @map("payroll_told_by") @db.Uuid
+  exitInterview   String?   @map("exit_interview")
+  exitInterviewAt DateTime? @map("exit_interview_at") @db.Timestamptz(6)
+  exitInterviewBy String?   @map("exit_interview_by") @db.Uuid
+  keepUntil       DateTime? @map("keep_until") @db.Date
+  completedAt     DateTime? @map("completed_at") @db.Timestamptz(6)
+  completedBy     String?   @map("completed_by") @db.Uuid
+  cancelReason    String?   @map("cancel_reason")
+  startedBy       String    @map("started_by") @db.Uuid
+  createdAt       DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  version         Int       @default(1)
+  updatedAt       DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("leaver_record")
 }
 
+// ---- v36 batch 3 (migration 0046): open shifts, swaps, hours, patterns ----------------------
+
 model OpenShift {
-  id                  String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId      String    @map("organisation_id") @db.Uuid
-  code                String
-  shiftId             String    @map("shift_id") @db.Uuid
-  role                StaffRole
-  startsAt            DateTime  @map("starts_at") @db.Timestamptz(6)
-  endsAt              DateTime  @map("ends_at") @db.Timestamptz(6)
-  note                String?
-  status              String    @default("OPEN")
-  postedBy            String    @map("posted_by") @db.Uuid
-  filledStaffId       String?   @map("filled_staff_id") @db.Uuid
-  filledAssignmentId  String?   @map("filled_assignment_id") @db.Uuid
-  filledBy            String?   @map("filled_by") @db.Uuid
-  filledAt            DateTime? @map("filled_at") @db.Timestamptz(6)
-  cancelReason        String?   @map("cancel_reason")
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  version             Int       @default(1)
-  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id                 String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId     String    @map("organisation_id") @db.Uuid
+  code               String
+  shiftId            String    @map("shift_id") @db.Uuid
+  role               StaffRole
+  startsAt           DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt             DateTime  @map("ends_at") @db.Timestamptz(6)
+  note               String?
+  status             String    @default("OPEN")
+  postedBy           String    @map("posted_by") @db.Uuid
+  filledStaffId      String?   @map("filled_staff_id") @db.Uuid
+  filledAssignmentId String?   @map("filled_assignment_id") @db.Uuid
+  filledBy           String?   @map("filled_by") @db.Uuid
+  filledAt           DateTime? @map("filled_at") @db.Timestamptz(6)
+  cancelReason       String?   @map("cancel_reason")
+  createdAt          DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  version            Int       @default(1)
+  updatedAt          DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   offers OpenShiftOffer[]
 
@@ -3380,7 +3418,7 @@ model OpenShiftOffer {
   openShiftId    String    @map("open_shift_id") @db.Uuid
   staffId        String    @map("staff_id") @db.Uuid
   offeredBy      String    @map("offered_by") @db.Uuid
-  offeredAt      DateTime  @default(now()) @map("offered_at") @db.Timestamptz(6)
+  offeredAt      DateTime  @default(dbgenerated("now()")) @map("offered_at") @db.Timestamptz(6)
   withdrawnAt    DateTime? @map("withdrawn_at") @db.Timestamptz(6)
 
   openShift OpenShift @relation(fields: [openShiftId], references: [id])
@@ -3406,9 +3444,9 @@ model ShiftSwapRequest {
   decidedAt        DateTime? @map("decided_at") @db.Timestamptz(6)
   decisionNote     String?   @map("decision_note")
   warnings         Json      @default("[]")
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   version          Int       @default(1)
-  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, code])
   @@map("shift_swap_request")
@@ -3427,31 +3465,33 @@ model ShiftTimeEntry {
   supersedesId   String?   @map("supersedes_id") @db.Uuid
   reason         String?
   recordedBy     String    @map("recorded_by") @db.Uuid
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
 
   @@map("shift_time_entry")
 }
 
 model ShiftPattern {
-  id                String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId    String    @map("organisation_id") @db.Uuid
-  code              String
-  name              String
-  startTime         String    @map("start_time")
-  endTime           String    @map("end_time")
-  paidBreakMinutes  Int       @default(0) @map("paid_break_minutes")
-  onDays            Int       @map("on_days")
-  offDays           Int       @map("off_days")
-  active            Boolean   @default(true)
-  createdBy         String    @map("created_by") @db.Uuid
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  retiredBy         String?   @map("retired_by") @db.Uuid
-  retiredAt         DateTime? @map("retired_at") @db.Timestamptz(6)
-  version           Int       @default(1)
-  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id               String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId   String    @map("organisation_id") @db.Uuid
+  code             String
+  name             String
+  startTime        String    @map("start_time")
+  endTime          String    @map("end_time")
+  paidBreakMinutes Int       @default(0) @map("paid_break_minutes")
+  onDays           Int       @map("on_days")
+  offDays          Int       @map("off_days")
+  active           Boolean   @default(true)
+  createdBy        String    @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
+  retiredBy        String?   @map("retired_by") @db.Uuid
+  retiredAt        DateTime? @map("retired_at") @db.Timestamptz(6)
+  version          Int       @default(1)
+  updatedAt        DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@map("shift_pattern")
 }
+
+// ---- v36 batch 4 (migration 0047): continuity, statement of purpose, DSPT -------------------
 
 model ContinuityPlan {
   id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
@@ -3464,9 +3504,9 @@ model ContinuityPlan {
   retiredBy      String?   @map("retired_by") @db.Uuid
   retiredAt      DateTime? @map("retired_at") @db.Timestamptz(6)
   createdBy      String    @map("created_by") @db.Uuid
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   version        Int       @default(1)
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   tests ContinuityTest[]
 
@@ -3484,7 +3524,7 @@ model ContinuityTest {
   notes          String?
   followUp       String?  @map("follow_up")
   recordedBy     String   @map("recorded_by") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   actionId       String?  @map("action_id") @db.Uuid
 
   plan ContinuityPlan @relation(fields: [planId], references: [id])
@@ -3493,19 +3533,19 @@ model ContinuityTest {
 }
 
 model StatementOfPurposeVersion {
-  id              String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId  String    @map("organisation_id") @db.Uuid
-  versionNo       Int       @map("version_no")
-  summary         String
-  evidenceItemId  String?   @map("evidence_item_id") @db.Uuid
-  status          String    @default("DRAFT")
-  draftedBy       String    @map("drafted_by") @db.Uuid
-  draftedAt       DateTime  @default(now()) @map("drafted_at") @db.Timestamptz(6)
-  publishedBy     String?   @map("published_by") @db.Uuid
-  publishedAt     DateTime? @map("published_at") @db.Timestamptz(6)
-  notificationId  String?   @map("notification_id") @db.Uuid
-  version         Int       @default(1)
-  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  versionNo      Int       @map("version_no")
+  summary        String
+  evidenceItemId String?   @map("evidence_item_id") @db.Uuid
+  status         String    @default("DRAFT")
+  draftedBy      String    @map("drafted_by") @db.Uuid
+  draftedAt      DateTime  @default(dbgenerated("now()")) @map("drafted_at") @db.Timestamptz(6)
+  publishedBy    String?   @map("published_by") @db.Uuid
+  publishedAt    DateTime? @map("published_at") @db.Timestamptz(6)
+  notificationId String?   @map("notification_id") @db.Uuid
+  version        Int       @default(1)
+  updatedAt      DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   @@unique([organisationId, versionNo])
   @@map("statement_of_purpose_version")
@@ -3522,9 +3562,9 @@ model DsptAssessment {
   submittedBy    String?   @map("submitted_by") @db.Uuid
   reference      String?
   createdBy      String    @map("created_by") @db.Uuid
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(dbgenerated("now()")) @map("created_at") @db.Timestamptz(6)
   version        Int       @default(1)
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   items DsptItem[]
 
@@ -3544,119 +3584,10 @@ model DsptItem {
   markedBy       String?   @map("marked_by") @db.Uuid
   markedAt       DateTime? @map("marked_at") @db.Timestamptz(6)
   version        Int       @default(1)
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(dbgenerated("now()")) @map("updated_at") @db.Timestamptz(6)
 
   assessment DsptAssessment @relation(fields: [assessmentId], references: [id])
 
   @@unique([assessmentId, position])
   @@map("dspt_item")
-}
-
-model CqcSelfAudit {
-  id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId String    @map("organisation_id") @db.Uuid
-  code           String
-  status         String    @default("OPEN")
-  startedBy      String    @map("started_by") @db.Uuid
-  startedAt      DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
-  submittedBy    String?   @map("submitted_by") @db.Uuid
-  submittedAt    DateTime? @map("submitted_at") @db.Timestamptz(6)
-  reviewedBy     String?   @map("reviewed_by") @db.Uuid
-  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
-  reviewNote     String?   @map("review_note")
-  version        Int       @default(1)
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-
-  @@unique([organisationId, code])
-  @@map("cqc_self_audit")
-}
-
-model CqcSelfAuditAnswer {
-  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId String   @map("organisation_id") @db.Uuid
-  selfAuditId    String   @map("self_audit_id") @db.Uuid
-  questionKey    String   @map("question_key")
-  answer         String
-  note           String?
-  answeredBy     String   @map("answered_by") @db.Uuid
-  answeredAt     DateTime @default(now()) @map("answered_at") @db.Timestamptz(6)
-  version        Int      @default(1)
-  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
-
-  @@unique([selfAuditId, questionKey])
-  @@map("cqc_self_audit_answer")
-}
-
-model AgencyWorker {
-  id                       String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId           String    @map("organisation_id") @db.Uuid
-  code                     String
-  name                     String
-  agency                   String
-  role                     StaffRole
-  confirmationItems        String    @map("confirmation_items")
-  confirmationReceivedOn   DateTime  @map("confirmation_received_on") @db.Date
-  confirmationRecordedBy   String    @map("confirmation_recorded_by") @db.Uuid
-  confirmationVerifiedBy   String?   @map("confirmation_verified_by") @db.Uuid
-  confirmationVerifiedAt   DateTime? @map("confirmation_verified_at") @db.Timestamptz(6)
-  confirmationExpiresOn    DateTime  @map("confirmation_expires_on") @db.Date
-  localInductionDone       Boolean   @default(false) @map("local_induction_done")
-  idCheckedOnArrival       Boolean   @default(false) @map("id_checked_on_arrival")
-  version                  Int       @default(1)
-  updatedAt                DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@unique([organisationId, code])
-  @@map("agency_worker")
-}
-
-model DvlaCheck {
-  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId String   @map("organisation_id") @db.Uuid
-  staffId        String   @map("staff_id") @db.Uuid
-  checkCode      String   @map("check_code")
-  categories     String
-  points         Int
-  checkedOn      DateTime @map("checked_on") @db.Date
-  nextCheckOn    DateTime @map("next_check_on") @db.Date
-  recordedBy     String   @map("recorded_by") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@map("dvla_check")
-}
-
-model HcpcRegistration {
-  id             String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId String   @map("organisation_id") @db.Uuid
-  staffId        String   @map("staff_id") @db.Uuid
-  registrationNo String   @map("registration_no")
-  checkedOn      DateTime @map("checked_on") @db.Date
-  expiresOn      DateTime @map("expires_on") @db.Date
-  recordedBy     String   @map("recorded_by") @db.Uuid
-  version        Int      @default(1)
-  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@unique([organisationId, staffId])
-  @@map("hcpc_registration")
-}
-
-model TrainingPlan {
-  id              String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  organisationId  String    @map("organisation_id") @db.Uuid
-  code            String
-  courseCode      String    @map("course_code")
-  plannedOn       DateTime  @map("planned_on") @db.Date
-  places          Int
-  invitedStaffIds String[]  @default([]) @map("invited_staff_ids") @db.Uuid
-  status          String    @default("PLANNED")
-  createdBy       String    @map("created_by") @db.Uuid
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(6)
-  cancelledBy     String?   @map("cancelled_by") @db.Uuid
-  version         Int       @default(1)
-  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-
-  @@unique([organisationId, code])
-  @@map("training_plan")
 }

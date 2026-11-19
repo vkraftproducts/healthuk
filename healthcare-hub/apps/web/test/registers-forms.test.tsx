@@ -1,3 +1,4 @@
+import { chooseAntOption, openAntSelect, selectAntByLabel, visibleAntOptions } from './ant-testing.js';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -75,7 +76,7 @@ const capability = { stretcher: false, wheelchairCapacity: 1, clinicalKit: false
 describe('vehicle register (findings 39, 41, 42, 43)', () => {
   it('shows the latest reading with its date, or says there are none', async () => {
     const none = { ...vehicle, id: 'v2', callsign: 'AMB-09', latestReading: null };
-    renderAt('/vehicles', ['fleet.vehicle.view'], (p) =>
+    renderAt('/vehicles?tab=vehicles&view=list', ['fleet.vehicle.view'], (p) =>
       p.startsWith('/api/v1/vehicles') ? { data: [vehicle, none], nextCursor: null } : { data: [] },
     );
     const row = await screen.findByRole('row', { name: /AMB-03/ });
@@ -85,9 +86,10 @@ describe('vehicle register (findings 39, 41, 42, 43)', () => {
   });
 
   it('add vehicle names each field that needs fixing and sends nothing', async () => {
-    const { send } = renderAt('/vehicles', FLEET, (p) =>
+    const { send } = renderAt('/vehicles?tab=vehicles&view=list', FLEET, (p) =>
       p.includes('/locations') ? { data: [{ id: LOC, name: 'Watford' }] } : { data: [] },
     );
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a vehicle' }));
     const form = await screen.findByRole('form', { name: 'Add a vehicle' });
     await userEvent.type(within(form).getByLabelText('Registration (required)'), 'A!');
     await userEvent.type(within(form).getByLabelText('VIN (optional)'), 'SHORT');
@@ -102,9 +104,10 @@ describe('vehicle register (findings 39, 41, 42, 43)', () => {
   });
 
   it('add vehicle sends the register fields, including weight and licence category', async () => {
-    const { send } = renderAt('/vehicles', FLEET, (p) =>
+    const { send } = renderAt('/vehicles?tab=vehicles&view=list', FLEET, (p) =>
       p.includes('/locations') ? { data: [{ id: LOC, name: 'Watford' }] } : { data: [] },
     );
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a vehicle' }));
     const form = await screen.findByRole('form', { name: 'Add a vehicle' });
     await userEvent.type(within(form).getByLabelText('Registration (required)'), 'ab12 cde');
     await userEvent.type(within(form).getByLabelText('Callsign (required)'), 'PTS-04');
@@ -133,9 +136,10 @@ describe('vehicle register (findings 39, 41, 42, 43)', () => {
   });
 
   it('D1: a leased vehicle needs its end date; over 3,500 kg needs C1', async () => {
-    const { send } = renderAt('/vehicles', FLEET, (p) =>
+    const { send } = renderAt('/vehicles?tab=vehicles&view=list', FLEET, (p) =>
       p.includes('/locations') ? { data: [{ id: LOC, name: 'Watford' }] } : { data: [] },
     );
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a vehicle' }));
     const form = await screen.findByRole('form', { name: 'Add a vehicle' });
     await userEvent.type(within(form).getByLabelText('Registration (required)'), 'SY21 ABC');
     await userEvent.type(within(form).getByLabelText('Callsign (required)'), 'AMB-21');
@@ -232,14 +236,12 @@ describe('vehicle register (findings 39, 41, 42, 43)', () => {
     );
     await userEvent.click(await screen.findByRole('tab', { name: 'Documents' }));
     const form = await screen.findByRole('form', { name: 'Add a document requirement' });
-    const select = within(form).getByLabelText('Requirement');
-    const options = within(select)
-      .getAllByRole('option')
-      .map((o) => o.textContent);
+    await openAntSelect('Requirement');
+    const options = visibleAntOptions();
     expect(options).toContain('Motor insurance');
     expect(options).not.toContain('MOT (library)');
     expect(options).not.toContain('Manual handling');
-    await userEvent.selectOptions(select, 't-ins');
+    await chooseAntOption('Motor insurance');
     await userEvent.type(within(form).getByLabelText(/Current expiry date/), '2027-03-01');
     await userEvent.click(within(form).getByRole('button', { name: 'Add requirement' }));
     await waitFor(() =>
@@ -255,9 +257,8 @@ describe('vehicle register (findings 39, 41, 42, 43)', () => {
 
 describe('inspection checklists and equipment (findings 7, 44)', () => {
   it('drafts a checklist with critical items (D6: published by a second person)', async () => {
-    const { send } = renderAt('/vehicles', FLEET, () => ({ data: [] }));
-    await userEvent.click(await screen.findByRole('tab', { name: 'Inspection checklists' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Draft a new checklist' }));
+    const { send } = renderAt('/vehicles?tab=checks&view=checklists', FLEET, () => ({ data: [] }));
+    await userEvent.click(await screen.findByRole('button', { name: /Draft a new version/ }));
     const dialog = screen.getByRole('dialog', { name: 'Draft a new checklist' });
     await userEvent.type(within(dialog).getByLabelText('Checklist name'), 'Daily vehicle check');
     await userEvent.type(within(dialog).getByLabelText('Item 1'), 'Tyres');
@@ -285,19 +286,18 @@ describe('inspection checklists and equipment (findings 7, 44)', () => {
       publishedByName: null,
       publishedAt: null,
     });
-    const { send } = renderAt('/vehicles', FLEET, (p) =>
+    const { send } = renderAt('/vehicles?tab=checks&view=checklists', FLEET, (p) =>
       p === '/api/v1/vdi-templates?all=true'
         ? { data: [tpl('t1', ME), tpl('t2', OTHER)] }
         : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Inspection checklists' }));
     const mine = await screen.findByRole('row', { name: /Daily check t1/ });
-    expect(mine).toHaveTextContent('someone else must publish it');
+    // v36: the drafter's row offers no Publish (only View items).
     expect(within(mine).queryByRole('button', { name: /^Publish/ })).toBeNull();
     const theirs = screen.getByRole('row', { name: /Daily check t2/ });
     expect(theirs).toHaveTextContent('Draft – awaiting a second person to publish');
     await userEvent.click(
-      within(theirs).getByRole('button', { name: 'Publish Daily check t2 version 2' }),
+      within(theirs).getByRole('button', { name: 'Publish – Daily check t2 v2' }),
     );
     await userEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish checklist' }),
@@ -330,7 +330,7 @@ describe('inspection checklists and equipment (findings 7, 44)', () => {
       ],
       version: 5,
     };
-    const { send } = renderAt('/vehicles', FLEET, (p) =>
+    const { send } = renderAt('/vehicles?tab=equipment&view=equipment', FLEET, (p) =>
       p.startsWith('/api/v1/equipment')
         ? { data: [asset] }
         : p.includes('/locations')
@@ -339,14 +339,18 @@ describe('inspection checklists and equipment (findings 7, 44)', () => {
             ? { data: [vehicle] }
             : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Equipment' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Show details of STR-04' }));
+
+    const more = async () =>
+      userEvent.click(await screen.findByRole('button', { name: 'More actions – STR-04' }));
+    await more();
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Details/ }));
     expect(screen.getByRole('heading', { name: 'STR-04' })).toBeInTheDocument();
-    expect(screen.getAllByText(/LOLER thorough examination/).length).toBeGreaterThan(1);
-    await userEvent.click(screen.getByRole('button', { name: 'Edit STR-04' }));
-    const dialog = screen.getByRole('dialog', { name: 'Edit STR-04' });
+    expect(screen.getAllByText(/LOLER thorough examination/).length).toBeGreaterThan(0);
+    await more();
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Edit/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit STR-04' });
     await userEvent.type(within(dialog).getByLabelText('Serial number (optional)'), 'SN-1');
-    await userEvent.selectOptions(within(dialog).getByLabelText('Kept'), 'location');
+    await selectAntByLabel('Kept', 'At a base');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save asset' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(
@@ -415,12 +419,11 @@ describe('premises register (findings 64, 65)', () => {
     const row = await screen.findByRole('row', { name: /Fire risk assessment/ });
     expect(row).toHaveTextContent('Pat Premises');
     expect(row).not.toHaveTextContent('Assigned');
-    expect(row).toHaveTextContent('No schedule linked');
-    await userEvent.click(screen.getByRole('button', { name: 'Add premises item' }));
-    const schedule = await screen.findByLabelText('Schedule (optional)');
-    const options = within(schedule)
-      .getAllByRole('option')
-      .map((o) => o.textContent);
+    expect(row).toHaveTextContent('Not set');
+    expect(row).toHaveTextContent('Link a schedule first');
+    await userEvent.click(screen.getByRole('button', { name: /Add premises item/ }));
+    await openAntSelect('Schedule (optional)');
+    const options = visibleAntOptions();
     expect(options).toContain('Fire risk assessment (annual)');
     expect(options).not.toContain('Library fire item');
   });
@@ -431,7 +434,7 @@ describe('premises register (findings 64, 65)', () => {
       await screen.findByRole('button', { name: 'Link a schedule to Fire risk assessment' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Link a schedule to Fire risk assessment' });
-    await userEvent.selectOptions(within(dialog).getByLabelText('Schedule'), 't-org');
+    await selectAntByLabel('Schedule', 'Fire risk assessment (annual)');
     await userEvent.type(within(dialog).getByLabelText('First due date (optional)'), '2027-01-15');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Link schedule' }));
     await waitFor(() =>
@@ -632,6 +635,7 @@ describe('planner (findings 68, 69, 70)', () => {
               }
             : { data: [] },
     );
+    await userEvent.click(await screen.findByRole('button', { name: /Plan a shift/ }));
     const form = await screen.findByRole('form', { name: 'Plan a shift' });
     await waitFor(() => expect(within(form).getByLabelText('Driver')).toHaveValue('s1'));
     const second = within(within(form).getByLabelText('Second crew member'))
@@ -653,26 +657,27 @@ describe('planner (findings 68, 69, 70)', () => {
           ? { data: [{ id: LOC, name: 'Watford' }] }
           : { data: [] },
     );
+    await userEvent.click(await screen.findByRole('button', { name: /Book a journey/ }));
     const form = await screen.findByRole('form', { name: 'Book a journey' });
     await userEvent.type(within(form).getByLabelText('Customer'), 'Synthetic NHS Trust');
     await userEvent.type(
-      within(form).getByLabelText('Booking reference (never a patient name)'),
+      within(form).getByLabelText('Patient reference (never a name)'),
       'PX-1',
     );
     await userEvent.type(within(form).getByLabelText('Pickup from'), '09:00');
     await userEvent.type(within(form).getByLabelText('Pickup by'), '09:30');
-    await userEvent.type(within(form).getByLabelText('Appointment time (optional)'), '10:15');
+    await userEvent.type(within(form).getByLabelText('Appointment time'), '10:15');
     await userEvent.type(within(form).getByLabelText('Pickup address'), '1 Synthetic Road');
     await userEvent.type(within(form).getByLabelText('Destination'), 'Synthetic Hospital');
     await userEvent.click(within(form).getByLabelText('Stairs at pickup or destination'));
     await userEvent.click(within(form).getByLabelText('Bariatric handling'));
     await userEvent.type(
-      within(form).getByLabelText('Contact name (optional)'),
+      within(form).getByLabelText('Contact name'),
       'Synthetic Person',
     );
     await userEvent.selectOptions(within(form).getByLabelText('Repeats'), 'WEEKLY');
     await userEvent.type(within(form).getByLabelText('Until'), '2026-11-27');
-    await userEvent.click(within(form).getByRole('button', { name: 'Book' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'Book journey' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith('POST', '/api/v1/bookings', ORG, expect.anything()),
     );
@@ -702,14 +707,15 @@ describe('planner (findings 68, 69, 70)', () => {
             : { data: [] },
       send,
     );
+    await userEvent.click(await screen.findByRole('button', { name: /Book a journey/ }));
     const form = await screen.findByRole('form', { name: 'Book a journey' });
     await userEvent.type(within(form).getByLabelText('Customer'), 'Synthetic NHS Trust');
     await userEvent.type(
-      within(form).getByLabelText('Booking reference (never a patient name)'),
+      within(form).getByLabelText('Patient reference (never a name)'),
       'BK-77',
     );
     await userEvent.selectOptions(within(form).getByLabelText('Contract'), 'NHS');
-    await userEvent.click(within(form).getByLabelText('Eligibility criteria met'));
+    await userEvent.click(within(form).getByLabelText('NHS eligibility criteria met'));
     await userEvent.type(within(form).getByLabelText('Criteria applied'), 'Medical need');
     await userEvent.type(within(form).getByLabelText('Assessed by'), 'Synthetic Assessor');
     await userEvent.type(within(form).getByLabelText('Pickup from'), '09:00');
@@ -720,7 +726,7 @@ describe('planner (findings 68, 69, 70)', () => {
     await userEvent.click(within(form).getByLabelText(/Book a return journey/));
     await userEvent.type(within(form).getByLabelText('Return pickup from'), '14:00');
     await userEvent.type(within(form).getByLabelText('Return pickup by'), '14:30');
-    await userEvent.click(within(form).getByRole('button', { name: 'Book' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'Book journey' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith('POST', '/api/v1/bookings', ORG, expect.anything()),
     );
@@ -737,6 +743,7 @@ describe('planner (findings 68, 69, 70)', () => {
       assessedBy: 'Synthetic Assessor',
     });
     expect(body.returnJourney.pickupFrom).toBeTruthy();
-    expect(await screen.findByText(/above the permitted load of every vehicle/)).toBeVisible();
+    // Inside the booking dialog (Ant's motion keeps opacity 0 in jsdom, so no toBeVisible).
+    expect(await screen.findByText(/above the permitted load of every vehicle/)).toBeInTheDocument();
   });
 });

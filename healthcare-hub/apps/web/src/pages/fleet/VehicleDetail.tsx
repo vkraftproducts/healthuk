@@ -1,22 +1,22 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
-import { Link, useParams } from '@tanstack/react-router';
+import { Button, Card, Input, Select, Space, Typography } from 'antd';
+import { Link, useParams, useSearch } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
+  PageHeader,
   Section,
   Tabs,
-  button,
   fmtDate,
   input,
-  smallButton,
   useCan,
   useRun,
   words,
 } from '../../components.js';
 import { EvidenceDialog, UploadDialog } from '../evidence/Evidence.js';
 import { useApp } from '../../shell/AppContext.js';
-import { useOne } from '../settings/hooks.js';
+import { useOne, usePeople } from '../settings/hooks.js';
 import { Defects } from './Defects.js';
 import { VehicleBadge } from './Fleet.js';
 import {
@@ -49,7 +49,9 @@ const HEADLINE: Record<string, { kind: StatusKind; text: string }> = {
 export function VehicleDetail() {
   const { id } = useParams({ strict: false }) as { id: string };
   const can = useCan();
-  const [tab, setTab] = useState('overview');
+  // v36 "History" and "Records" buttons link straight to a tab (?tab=status, ?tab=documents).
+  const linked = (useSearch({ strict: false }) as { tab?: string }).tab;
+  const [tab, setTab] = useState(linked ?? 'overview');
   const res = useOne<Row>(`/api/v1/vehicles/${id}`);
   if (res.isLoading) return <p role="status">Loading…</p>;
   if (res.isError || !res.data)
@@ -60,44 +62,50 @@ export function VehicleDetail() {
     );
   const v = res.data;
   return (
-    <div className="space-y-4">
-      <nav aria-label="Breadcrumb" className="text-sm">
-        <Link to="/vehicles" className="font-medium text-hub-teal-dark underline">
+    <Space direction="vertical" size="large" className="w-full">
+      <nav aria-label="Breadcrumb" className="text-sm text-slate-700">
+        <Link to="/vehicles" className="font-medium text-[#1667d9] underline">
           Vehicles and assets
         </Link>{' '}
         / {v.callsign}
       </nav>
-      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-hub-card p-4">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {v.callsign} <span className="text-slate-600">/ {v.registration}</span>
-          </h1>
-          <p className="text-sm">
-            {VEHICLE_TYPE[v.type] ?? words(v.type)} · {v.seats} seats ·{' '}
-            {v.capability.wheelchairCapacity} wheelchair ·{' '}
-            {v.capability.stretcher ? 'stretcher' : 'no stretcher'} · licence {v.licenceCategory}
-          </p>
-          <p className="text-sm">Latest odometer reading: {odometerText(v)}</p>
-          {v.capability.lost.length > 0 && (
-            <p className="mt-1 text-sm text-red-900">
-              Capability reduced: {v.capability.lost.join('; ')}
-            </p>
-          )}
-        </div>
-        {v.headline ? (
-          <StatusBadge
-            status={HEADLINE[v.headline.status]?.kind ?? 'GREY'}
-            reason={
-              v.headline.reason
-                ? `${HEADLINE[v.headline.status]?.text ?? words(v.headline.status)} – ` +
+      <Card size="small">
+        <PageHeader
+          title={`${v.callsign} / ${v.registration}`}
+          description={
+            <>
+              <Typography.Text className="text-sm">
+                {VEHICLE_TYPE[v.type] ?? words(v.type)} · {v.seats} seats ·{' '}
+                {v.capability.wheelchairCapacity} wheelchair ·{' '}
+                {v.capability.stretcher ? 'stretcher' : 'no stretcher'} · licence{' '}
+                {v.licenceCategory}
+              </Typography.Text>
+              <Typography.Paragraph className="!mb-0 text-sm">
+                Latest odometer reading: {odometerText(v)}
+              </Typography.Paragraph>
+              {v.capability.lost.length > 0 && (
+                <Typography.Paragraph className="!mb-0 text-sm text-red-900" role="alert">
+                  Capability reduced: {v.capability.lost.join('; ')}
+                </Typography.Paragraph>
+              )}
+            </>
+          }
+          extra={
+            v.headline ? (
+              <StatusBadge
+                status={HEADLINE[v.headline.status]?.kind ?? 'GREY'}
+                reason={
                   v.headline.reason
-                : (HEADLINE[v.headline.status]?.text ?? words(v.headline.status))
-            }
-          />
-        ) : (
-          <VehicleBadge v={v} />
-        )}
-      </header>
+                    ? `${HEADLINE[v.headline.status]?.text ?? words(v.headline.status)} – ${v.headline.reason}`
+                    : (HEADLINE[v.headline.status]?.text ?? words(v.headline.status))
+                }
+              />
+            ) : (
+              <VehicleBadge v={v} />
+            )
+          }
+        />
+      </Card>
       <Tabs
         label="Vehicle sections"
         current={tab}
@@ -130,7 +138,7 @@ export function VehicleDetail() {
           <Documents vehicleId={v.id} />
         )}
       </Tabs>
-    </div>
+    </Space>
   );
 }
 
@@ -153,13 +161,13 @@ function Register({ v }: { v: Row }) {
       title="Vehicle register"
       actions={
         can('fleet.vehicle.manage') ? (
-          <button
-            className={smallButton}
+          <Button
+            size="small"
             aria-label={`Edit register details for ${v.callsign}`}
             onClick={() => setEditing(true)}
           >
             Edit details
-          </button>
+          </Button>
         ) : null
       }
     >
@@ -313,13 +321,13 @@ function Overview({ v }: { v: Row }) {
                     key: 'a',
                     header: 'Action',
                     cell: (r: Row) => (
-                      <button
-                        className={smallButton}
+                      <Button
+                        size="small"
                         aria-label={`Record service done for ${r.title}`}
                         onClick={() => setDonePlan(r)}
                       >
                         Record service done
-                      </button>
+                      </Button>
                     ),
                   },
                 ]
@@ -369,13 +377,13 @@ function Overview({ v }: { v: Row }) {
                     header: 'Action',
                     cell: (r: Row) =>
                       r.flags.length && !r.review ? (
-                        <button
-                          className={smallButton}
+                        <Button
+                          size="small"
                           aria-label={`Review the ${fmtDate(r.readOn)} reading of ${v.callsign}`}
                           onClick={() => setReviewing(r)}
                         >
                           Confirm or correct
-                        </button>
+                        </Button>
                       ) : null,
                   },
                 ]
@@ -395,7 +403,9 @@ function Overview({ v }: { v: Row }) {
             <Field label="Date">
               <input name="readOn" type="date" required className={input} />
             </Field>
-            <button className={button}>Record</button>
+            <Button type="primary" htmlType="submit">
+              Record
+            </Button>
           </form>
         )}
       </Section>
@@ -440,9 +450,10 @@ function OdometerReview({
         <div className="grid gap-3">
           <Field label="Decision">
             <select
-              className={input}
+              aria-label="Decision"
               value={decision}
               onChange={(e) => setDecision(e.target.value as typeof decision)}
+              className="field"
             >
               <option value="CONFIRMED">The reading is right</option>
               <option value="CORRECTED">The reading is wrong: correct it</option>
@@ -451,10 +462,11 @@ function OdometerReview({
           {decision === 'CORRECTED' && (
             <Field label="Correct reading (miles)">
               <input
-                className={input}
+                aria-label="Correct reading (miles)"
                 inputMode="numeric"
                 value={corrected}
                 onChange={(e) => setCorrected(e.target.value)}
+                className="field"
               />
             </Field>
           )}
@@ -473,8 +485,18 @@ function OdometerReview({
 }
 
 function Inspections({ vehicleId }: { vehicleId: string }) {
+  const { api, orgId, me } = useApp();
+  const can = useCan();
   const vdis = useOne<{ data: Row[] }>(`/api/v1/vdis?vehicleId=${vehicleId}`);
   const cleaning = useOne<{ data: Row[] }>(`/api/v1/cleaning-records?vehicleId=${vehicleId}`);
+  const people = usePeople();
+  const nameOf = (id: string) => people.find((p) => p.id === id)?.displayName ?? id.slice(0, 8);
+  const [amending, setAmending] = useState<Row | null>(null);
+  const [itemCode, setItemCode] = useState('');
+  const [newResult, setNewResult] = useState<'PASS' | 'FAIL' | 'NA'>('PASS');
+  const mayAmend = (r: Row) =>
+    can('fleet.vehicle.manage') || (can('fleet.vdi.submit') && r.checkerUserId === me.user.id);
+  const items = (amending?.results as Row[] | undefined) ?? [];
   return (
     <>
       <DataTable<Row>
@@ -491,31 +513,130 @@ function Inspections({ vehicleId }: { vehicleId: string }) {
               new Date(r.capturedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' }),
           },
           {
-            key: 'r',
-            header: 'Received',
-            cell: (r) =>
-              new Date(r.receivedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' }),
+            key: 'who',
+            header: 'Checked by',
+            cell: (r) => nameOf(r.checkerUserId as string),
+          },
+          {
+            key: 'odo',
+            header: 'Odometer',
+            cell: (r) => `${Number(r.odometer).toLocaleString('en-GB')} mi`,
           },
           {
             key: 'o',
             header: 'Outcome',
-            cell: (r) => (
-              <StatusBadge
-                status={r.outcome === 'PASS' ? 'GREEN' : 'RED'}
-                reason={
-                  r.outcome === 'PASS'
-                    ? 'Pass'
-                    : `Fail – ${r.results
-                        .filter((x: Row) => x.result === 'FAIL')
-                        .map((x: Row) => words(x.code))
-                        .join(', ')}`
-                }
-              />
-            ),
+            cell: (r) => {
+              const fails = (r.results as Row[]).filter((x) => x.result === 'FAIL');
+              const reasons = fails
+                .map((x) => `${words(x.code)}${x.reason ? `: ${x.reason}` : ''}`)
+                .join('; ');
+              return (
+                <StatusBadge
+                  status={r.outcome === 'PASS' ? 'GREEN' : 'RED'}
+                  reason={r.outcome === 'PASS' ? 'Pass' : `Fail – ${reasons || 'see items'}`}
+                />
+              );
+            },
           },
-          { key: 'a', header: 'Amendments', cell: (r) => String(r.amendments.length) },
+          {
+            key: 'photo',
+            header: 'Photos',
+            cell: (r) => String((r.results as Row[]).filter((x) => x.photoEvidenceItemId).length),
+          },
+          {
+            key: 'def',
+            header: 'Linked defects',
+            cell: (r) => String((r.defectIds as string[] | undefined)?.length ?? 0),
+          },
+          { key: 'a', header: 'Amendments', cell: (r) => String(r.amendments?.length ?? 0) },
+          ...(can('fleet.vehicle.manage') || can('fleet.vdi.submit')
+            ? [
+                {
+                  key: 'act',
+                  header: 'Actions',
+                  cell: (r: Row) =>
+                    mayAmend(r) ? (
+                      <Button
+                        type="link"
+                        size="small"
+                        className="!h-auto !p-0"
+                        aria-label={`Amend inspection from ${new Date(r.capturedAt).toLocaleDateString('en-GB')}`}
+                        onClick={() => {
+                          setAmending(r);
+                          const first = (r.results as Row[])[0];
+                          setItemCode(String(first?.code ?? ''));
+                          setNewResult('PASS');
+                        }}
+                      >
+                        Amend
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-slate-600">Only the checker or fleet lead</span>
+                    ),
+                },
+              ]
+            : []),
         ]}
       />
+      <ActionDialog
+        open={!!amending}
+        title="Amend a checklist item"
+        confirmLabel="Save amendment"
+        reasonLabel="Why are you changing it?"
+        confirmDisabled={!itemCode}
+        onCancel={() => setAmending(null)}
+        onConfirm={(reason) =>
+          api.send('POST', `/api/v1/vdis/${amending!.id}/amendments`, orgId, {
+            code: itemCode,
+            newResult,
+            reason,
+          })
+        }
+        fields={
+          <div className="grid gap-3">
+            <Field label="Checklist item">
+              <select
+                aria-label="Checklist item"
+                className="field"
+                value={itemCode}
+                onChange={(e) => setItemCode(e.target.value)}
+              >
+                {items.map((it) => (
+                  <option key={String(it.code)} value={String(it.code)}>
+                    {words(String(it.code))} (was {String(it.result)})
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="New result">
+              <select
+                aria-label="New result"
+                className="field"
+                value={newResult}
+                onChange={(e) => setNewResult(e.target.value as typeof newResult)}
+              >
+                <option value="PASS">Pass</option>
+                <option value="FAIL">Fail</option>
+                <option value="NA">Not applicable</option>
+              </select>
+            </Field>
+          </div>
+        }
+      >
+        <p>
+          The original check stays on the record. Your name, the new result and the reason are kept
+          as an amendment. Changing a fail to pass does not close a linked defect.
+        </p>
+        {amending && (amending.amendments as Row[] | undefined)?.length ? (
+          <ul className="mt-2 list-disc pl-5 text-sm" aria-label="Earlier amendments">
+            {(amending.amendments as Row[]).map((a) => (
+              <li key={`${a.code}-${a.at}`}>
+                {words(a.code)} → {words(a.newResult)} ({nameOf(a.amendedBy as string)}): {a.reason}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </ActionDialog>
       <DataTable<Row>
         caption="Cleaning records"
         rows={cleaning.data?.data ?? []}
@@ -581,21 +702,21 @@ function Documents({ vehicleId }: { vehicleId: string }) {
             header: 'Action',
             cell: (r) => (
               <span className="flex flex-wrap gap-1">
-                <button
-                  className={smallButton}
+                <Button
+                  size="small"
                   aria-label={`Documents for ${r.templateTitle}`}
                   onClick={() => setDocsFor(r)}
                 >
                   Documents
-                </button>
+                </Button>
                 {can('compliance.evidence.upload') && (
-                  <button
-                    className={smallButton}
+                  <Button
+                    size="small"
                     aria-label={`Upload evidence for ${r.templateTitle}`}
                     onClick={() => setUploadFor(r)}
                   >
                     Upload evidence
-                  </button>
+                  </Button>
                 )}
               </span>
             ),
@@ -656,8 +777,9 @@ function AddDocumentRequirement({ vehicleId, applied }: { vehicleId: string; app
     <Section title="Add a document requirement">
       {templates.data && usable.length === 0 ? (
         <p className="text-sm">
-          Every published vehicle requirement is already on this vehicle. To add MOT, insurance or
-          road tax, adopt and publish them in Settings, Requirement library.
+          {(templates.data.data ?? []).some((t) => !t.isLibrary && effective(t))
+            ? 'Every published vehicle requirement is already on this vehicle.'
+            : 'No vehicle requirements are published yet. Adopt and publish MOT, insurance or road tax in Settings, Requirement library.'}
         </p>
       ) : (
         <form
@@ -666,30 +788,20 @@ function AddDocumentRequirement({ vehicleId, applied }: { vehicleId: string; app
           aria-label="Add a document requirement"
         >
           <Field label="Requirement">
-            <select
-              className={input}
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              <option value="">Choose MOT, insurance, road tax…</option>
-              {usable.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={expiry ? 'Current expiry date (optional)' : 'Next due date (optional)'}>
-            <input
-              type="date"
-              className={input}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
+            <Select
+              value={templateId || undefined}
+              placeholder="Choose MOT, insurance, road tax…"
+              onChange={setTemplateId}
+              style={{ width: '100%' }}
+              options={usable.map((t) => ({ value: t.id, label: t.title }))}
             />
           </Field>
-          <button className={button} disabled={!templateId}>
+          <Field label={expiry ? 'Current expiry date (optional)' : 'Next due date (optional)'}>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Button type="primary" htmlType="submit" disabled={!templateId}>
             Add requirement
-          </button>
+          </Button>
         </form>
       )}
       {msg}
