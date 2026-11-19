@@ -23,6 +23,7 @@ import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { idPipe, iso, myStaffId, nextRegisterCode, vehicleLabels } from './shared.js';
+import { nextV36Code } from './sync/staff-lib.js';
 
 const ALLOCATE = 'jobs.allocate';
 const PLAN_VIEW = 'jobs.job.view';
@@ -504,7 +505,7 @@ export class ShiftSwapsController {
       const r = await tx.shiftSwapRequest.create({
         data: {
           organisationId: a.organisationId,
-          code: await nextRegisterCode(tx, a.organisationId, 'SWP'),
+          code: await nextV36Code(tx, a.organisationId, 'SW', 'shift_swap_request', 2),
           fromAssignmentId: a.id,
           toAssignmentId: b.id,
           fromStaffId: a.staffId,

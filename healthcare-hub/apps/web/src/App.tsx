@@ -1,3 +1,4 @@
+import { V36Frame } from './v36/V36Frame.js';
 import {
   Link,
   Navigate,
@@ -96,6 +97,12 @@ function Home() {
     return <Navigate to="/me" replace />;
   // Managers/leads (and anyone else on `/`): My work + overview.
   return <Dashboard />;
+}
+
+/** v36 is the front end except in tests and with ?classic (the earlier React screens). */
+function isV36Front(): boolean {
+  if (import.meta.env.MODE === 'test') return false;
+  return !new URLSearchParams(window.location.search).has('classic');
 }
 
 function buildRouter(history?: RouterHistory) {
@@ -287,7 +294,7 @@ function Authenticated({
         signOut: signOut ? () => signOut('You have signed out.') : undefined,
       }}
     >
-      <RouterProvider router={router} />
+      {isV36Front() ? <V36Frame /> : <RouterProvider router={router} />}
     </AppContext.Provider>
   );
 }

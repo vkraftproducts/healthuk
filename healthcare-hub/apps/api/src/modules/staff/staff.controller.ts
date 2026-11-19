@@ -91,6 +91,7 @@ import { audit, body, dbNow, ifMatchVersion, staleOrNotFound } from '../../commo
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { encryptField, fieldKey } from '../../common/field-crypto.js';
 import { DB } from '../../db.provider.js';
+import { nextV36Code } from '../v36/sync/staff-lib.js';
 import { UserCache } from '../../auth/user-cache.js';
 import { toCsv } from '../../common/csv.js';
 import { instanceInclude, toDate, toInstanceDto } from '../requirements/requirements.mapper.js';
@@ -338,6 +339,9 @@ export class StaffController {
           requestedBy: hub.user.id,
         },
       });
+      // v36 reference COR-08…, continuing after the highest one on record.
+      const code = await nextV36Code(tx, s.organisationId, 'COR', 'staff_correction_request', 2);
+      await tx.$executeRaw`UPDATE staff_correction_request SET code = ${code} WHERE id = ${c.id}::uuid`;
       await audit(this.db, tx, hub, {
         action: 'staff.self.correction_request',
         entity: 'staff_correction_request',

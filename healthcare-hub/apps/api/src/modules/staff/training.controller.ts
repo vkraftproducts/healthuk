@@ -35,6 +35,7 @@ import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../co
 import { audit, body, ifMatchVersion, requireAny, staleOrNotFound } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
+import { nextV36Code } from '../v36/sync/staff-lib.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { toDate } from '../requirements/requirements.mapper.js';
 import { toRecordDto } from './staff.mapper.js';
@@ -457,6 +458,7 @@ export class TrainingController {
           requestedBy: hub.user.id,
         },
       });
+      await this.giveCode(tx, b.id, b.organisationId);
       await audit(this.db, tx, hub, {
         action: 'staff.supervision.request',
         entity: 'supervision_booking',
@@ -528,7 +530,11 @@ export class TrainingController {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
       const b = await tx.supervisionBooking.findUnique({ where: { id } });
       if (!b) throw notFound();
-      if (b.supervisorUserId !== hub.user.id && !hub.permissions.has(MANAGE))
+      // v36 (supHeld / supMissed): the supervisor, HR, the managers and the governance lead.
+      const governance =
+        hub.permissions.has('staff.profile.view_basic') &&
+        hub.permissions.has('compliance.evidence.verify');
+      if (b.supervisorUserId !== hub.user.id && !hub.permissions.has(MANAGE) && !governance)
         throw new HubError('FORBIDDEN', 403);
       const s = await tx.staff.findUniqueOrThrow({ where: { id: b.staffId } });
       if (s.userId === hub.user.id) throw new HubError('SELF_APPROVAL', 422);
@@ -701,6 +707,12 @@ export class TrainingController {
     return rec;
   }
 
+  /** v36 reference SUP-303…, continuing after the highest one on record. */
+  private async giveCode(tx: TenantTx, id: string, orgId: string) {
+    const code = await nextV36Code(tx, orgId, 'SUP', 'supervision_booking');
+    await tx.$executeRaw`UPDATE supervision_booking SET code = ${code} WHERE id = ${id}::uuid`;
+  }
+
   private async createBooking(
     tx: TenantTx,
     hub: HubRequestContext,
@@ -732,6 +744,7 @@ export class TrainingController {
         bookedBy: hub.user.id,
       },
     });
+    await this.giveCode(tx, b.id, s.organisationId);
     await audit(this.db, tx, hub, {
       action: 'staff.supervision.book',
       entity: 'supervision_booking',

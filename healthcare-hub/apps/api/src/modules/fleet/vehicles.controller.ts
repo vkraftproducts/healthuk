@@ -42,9 +42,9 @@ import {
   type VehicleDto,
   type VehicleStatusChangeDto,
 } from '@hub/contracts';
-import { RequirePermission } from '../../common/decorators.js';
+import { OrgMember, RequirePermission } from '../../common/decorators.js';
 import { Hub, tenantOf, type HubRequest, type HubRequestContext } from '../../common/context.js';
-import { audit, body, ifMatchVersion, staleOrNotFound } from '../../common/http.js';
+import { audit, body, ifMatchVersion, requireAny, staleOrNotFound } from '../../common/http.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
@@ -370,13 +370,15 @@ export class VehiclesController {
     });
   }
 
-  @RequirePermission(MANAGE)
+  // v36 odoRec: crew record the odometer of a vehicle too (as they do in a daily check).
+  @OrgMember()
   @Post(':id/odometer')
   async odometer(
     @Hub() hub: HubRequestContext,
     @Param('id', idPipe) id: string,
     @Body() raw: unknown,
   ) {
+    requireAny(hub, MANAGE, 'fleet.vdi.submit');
     const input = body(OdometerInput, raw);
     if (input.readOn > londonDate(new Date()))
       throw new HubError('VALIDATION_FAILED', 400, 'The reading date is in the future');

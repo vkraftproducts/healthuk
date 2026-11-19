@@ -7,7 +7,7 @@ import {
   recordOdometer,
   refreshVehicleStatus,
 } from '@hub/domain';
-import { londonDate } from '@hub/rules';
+import { addDays, londonDate } from '@hub/rules';
 import type { CleaningDto } from '@hub/contracts';
 import {
   CleaningInput,
@@ -101,7 +101,8 @@ export class InspectionsController {
    * D6: a second person publishes the draft. Publishing retires the previous version of the same
    * checklist and any other published checklist for the same vehicle type (one per type).
    */
-  @RequirePermission('fleet.vehicle.manage')
+  // v36 clPub: a manager, the Fleet Lead or the governance lead publishes.
+  @RequirePermission('fleet.checklist.publish')
   @Post('vdi-templates/:id/publish')
   async publishTemplate(@Hub() hub: HubRequestContext, @Param('id', idPipe) id: string) {
     return this.db.withTenant(tenantOf(hub), async (tx) => {
@@ -273,6 +274,7 @@ export class InspectionsController {
             r.reason ?? '',
             captured,
             r.photoEvidenceItemId ?? null,
+            input.failedSeverity ?? 'MINOR',
           );
       }
       await refreshVehicleStatus(tx, v.id);
@@ -297,17 +299,23 @@ export class InspectionsController {
     reason: string,
     at: Date,
     photoEvidenceItemId: string | null,
+    nonCritical: 'MINOR' | 'MAJOR' = 'MINOR',
   ): Promise<void> {
-    const severity = item.critical ? 'CRITICAL' : 'MINOR';
+    const severity = item.critical ? 'CRITICAL' : nonCritical;
     const { defaultDefectOwnership } = await import('@hub/domain');
     const ownership = await defaultDefectOwnership(tx, v.organisationId, severity, at);
+    // v36: review in 2 days (critical), 7 (major) or 14 (minor) from the day it was found.
+    ownership.reviewBy = new Date(
+      `${addDays(londonDate(at), severity === 'CRITICAL' ? 2 : severity === 'MAJOR' ? 7 : 14)}T00:00:00.000Z`,
+    );
     const d = await tx.defect.create({
       data: {
         organisationId: v.organisationId,
         vehicleId: v.id,
         severity,
         stopUse: item.critical,
-        description: `VDI: ${item.label} failed – ${reason}`.slice(0, 1000),
+        // v36 wording: "Tail-lift / ramp operates and locks – Platform drifts down under load".
+        description: `${item.label} – ${reason}`.slice(0, 1000),
         reportedBy: hub.user.id,
         discoveredAt: at,
         sourceVdiId: vdiId,

@@ -25,6 +25,7 @@ export const PERMISSIONS = {
   'fleet.defect.manage': 'Classify and manage defects',
   'fleet.vdi.submit': 'Submit a vehicle daily inspection and cleaning record',
   'fleet.vdi.view': 'View vehicle inspections',
+  'fleet.checklist.publish': 'Publish a drafted daily vehicle check list (second person)',
   'fleet.expense.submit': 'Submit fuel and expenses',
   'fleet.expense.approve': 'Approve fuel and expenses',
   // compliance & governance
@@ -231,9 +232,12 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'fleet.vehicle.view',
       'fleet.vehicle.manage',
       'fleet.return_to_service',
+      'fleet.checklist.publish',
       'fleet.defect.create',
       'fleet.defect.manage',
       'fleet.vdi.view',
+      // v36 Vehicles › Daily checks: the Fleet Lead can do a daily check (chkStart).
+      'fleet.vdi.submit',
       'fleet.expense.approve',
       'compliance.requirement.view',
       'compliance.requirement.manage',
@@ -293,6 +297,9 @@ export const SYSTEM_ROLES: readonly SystemRole[] = [
       'premises.item.view',
       'fleet.vehicle.view',
       'fleet.vdi.view',
+      // v36: governance reports defects (defNew) and publishes the daily check list (clPub).
+      'fleet.defect.create',
+      'fleet.checklist.publish',
       'staff.self.view',
       'admin.audit.view',
       'admin.audit.verify',
