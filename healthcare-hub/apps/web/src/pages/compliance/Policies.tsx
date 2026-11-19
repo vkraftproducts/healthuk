@@ -1,15 +1,13 @@
 import { DataTable, StatusBadge } from '@hub/ui';
+import { Button } from 'antd';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import {
   ActionDialog,
   Field,
   PersonSelect,
   Section,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -122,13 +120,13 @@ function CreatePolicy() {
       <form onSubmit={submit} className="space-y-3" aria-label="Add a policy">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Code">
-            <input name="code" required pattern="[A-Za-z0-9][A-Za-z0-9-]{1,19}" className={input} />
+            <input name="code" required pattern="[A-Za-z0-9][A-Za-z0-9-]{1,19}" />
           </Field>
           <Field label="Title">
-            <input name="title" required minLength={2} maxLength={200} className={input} />
+            <input name="title" required minLength={2} maxLength={200} />
           </Field>
           <Field label="Type">
-            <select name="category" className={input} defaultValue="POLICY">
+            <select name="category" defaultValue="POLICY">
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c === 'SOP' ? 'Standard operating procedure' : words(c)}
@@ -144,10 +142,10 @@ function CreatePolicy() {
             meId={me.user.id}
           />
           <Field label="Review by (optional)">
-            <input type="date" name="reviewDate" className={input} />
+            <input type="date" name="reviewDate" />
           </Field>
           <Field label="Document (optional)">
-            <input type="file" name="file" accept="application/pdf" className={input} />
+            <input type="file" name="file" accept="application/pdf" />
           </Field>
         </div>
         <Field label="Summary of what it says">
@@ -157,10 +155,10 @@ function CreatePolicy() {
             minLength={3}
             maxLength={2000}
             rows={2}
-            className={input}
+           
           />
         </Field>
-        <fieldset className="rounded border border-hub-line p-2">
+        <fieldset className="">
           <legend className="px-1 text-sm font-semibold">
             Who must read it {readers.length === 0 ? '(nobody ticked: everyone)' : ''}
           </legend>
@@ -183,7 +181,7 @@ function CreatePolicy() {
             </label>
           </div>
         </fieldset>
-        <button className={button}>Add policy</button>
+        <Button htmlType="submit" type="primary">Add policy</Button>
         {msg}
       </form>
     </Section>
@@ -208,8 +206,7 @@ function Readers({ id }: { id: string }) {
       </p>
       {pct !== null && <p className="text-sm">{pct}% of required readers have acknowledged.</p>}
       {waiting > 0 && can(MANAGE) && (
-        <button
-          className={smallButton}
+        <Button size="small"
           onClick={() =>
             void run(
               () => api.send('POST', `/api/v1/policies/${id}/chase`, orgId, {}),
@@ -218,7 +215,7 @@ function Readers({ id }: { id: string }) {
           }
         >
           Remind those outstanding
-        </button>
+        </Button>
       )}
       {msg}
       <ul className="max-h-48 space-y-1 overflow-y-auto">
@@ -292,24 +289,22 @@ export function Policies() {
     const out: ReactNode[] = [];
     if (p.myAcknowledgement === 'REQUIRED' && can('compliance.policy.acknowledge'))
       out.push(
-        <button
+        <Button size="small"
           key="ack"
-          className={smallButton}
           aria-label={`Read and acknowledge: ${label(p)}`}
           onClick={() => open({ kind: 'ack', p })}
         >
           Read and acknowledge
-        </button>,
+        </Button>,
       );
     out.push(
-      <button
+      <Button size="small"
         key="details"
-        className={smallButton}
         aria-label={`Details: ${label(p)}`}
         onClick={() => open({ kind: 'details', p })}
       >
         Details
-      </button>,
+      </Button>,
     );
     if (can(MANAGE)) {
       const v = inProgress(p);
@@ -329,36 +324,33 @@ export function Policies() {
           );
         else
           out.push(
-            <button
+            <Button size="small"
               key="next"
-              className={smallButton}
               aria-label={`${STEP[to]!.label} v${v.version}: ${label(p)}`}
               onClick={() => open({ kind: 'step', p, v, to })}
             >
               {STEP[to]!.label} v{v.version}
-            </button>,
+            </Button>,
           );
         if (v.status !== 'DRAFT')
           out.push(
-            <button
+            <Button size="small"
               key="back"
-              className={smallButton}
               aria-label={`Send back to draft v${v.version}: ${label(p)}`}
               onClick={() => open({ kind: 'step', p, v, to: 'DRAFT' })}
             >
               Send back to draft
-            </button>,
+            </Button>,
           );
       } else
         out.push(
-          <button
+          <Button size="small"
             key="ver"
-            className={smallButton}
             aria-label={`New version: ${label(p)}`}
             onClick={() => open({ kind: 'version', p })}
           >
             New version
-          </button>,
+          </Button>,
         );
     }
     return <div className="flex flex-wrap items-center gap-2">{out}</div>;
@@ -416,13 +408,12 @@ export function Policies() {
   const docId: string | null = p?.currentVersion?.documentEvidenceVersionId ?? null;
   const openDoc =
     docId && can('compliance.requirement.view') ? (
-      <button
-        type="button"
-        className={smallButton}
+      <Button
+        size="small"
         onClick={() => void run(() => openEvidence(api, orgId, docId), 'Document opened.')}
       >
         Open document
-      </button>
+      </Button>
     ) : null;
 
   return (
@@ -488,7 +479,7 @@ export function Policies() {
             <Field label="Takes effect from (optional, default today)">
               <input
                 type="date"
-                className={input}
+               
                 value={effectiveFrom}
                 onChange={(e) => setEffectiveFrom(e.target.value)}
               />
@@ -497,7 +488,7 @@ export function Policies() {
             <>
               <Field label="What changed">
                 <textarea
-                  className={input}
+                 
                   rows={3}
                   maxLength={2000}
                   value={summary}
@@ -515,7 +506,7 @@ export function Policies() {
               <Field label="Review by (optional)">
                 <input
                   type="date"
-                  className={input}
+                 
                   value={reviewDate}
                   onChange={(e) => setReviewDate(e.target.value)}
                 />

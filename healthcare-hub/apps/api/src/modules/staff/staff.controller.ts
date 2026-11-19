@@ -48,6 +48,8 @@ import {
   type StaffLifecycle,
 } from '@hub/rules';
 import {
+  ChaseLogInput,
+  ChaseLogPatch,
   CloseInput,
   CorrectionDecision,
   CorrectionInput,
@@ -103,7 +105,7 @@ import {
   toStaffDto,
 } from './staff.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const BASIC = 'staff.profile.view_basic';
 const CLEARANCE = 'staff.profile.view_clearance';
 const SENSITIVE = 'staff.sensitive.view';
@@ -208,8 +210,36 @@ export class StaffController {
           nextCursor,
         };
       }
+      // v36 pipeline: how long each person has been in their stage, and chases now overdue.
+      const events = await tx.staffLifecycleEvent.findMany({
+        where: { staffId: { in: ids } },
+        orderBy: { at: 'desc' },
+        select: { staffId: true, toState: true, at: true },
+      });
+      const chases = await tx.staffChaseLog.findMany({
+        where: { staffId: { in: ids }, receivedOn: null },
+        select: { staffId: true, requestedOn: true, chasedOn: true },
+      });
+      const weekAgo = new Date(now.getTime() - 7 * 86_400_000);
       return {
-        data: pageRows.map((s) => toStaffDto(s, sum.get(s.id)!, rOf(s.id))),
+        data: pageRows.map((s) => {
+          // The start of the current run in this stage: newest events first, stop at a change.
+          let since = s.createdAt;
+          for (const e of events) {
+            if (e.staffId !== s.id) continue;
+            if (e.toState !== s.lifecycleState) break;
+            since = e.at;
+          }
+          const overdue = chases.filter((c) => {
+            const d = c.chasedOn ?? c.requestedOn;
+            return c.staffId === s.id && d !== null && d < weekAgo;
+          }).length;
+          return {
+            ...toStaffDto(s, sum.get(s.id)!, rOf(s.id)),
+            stageSince: since.toISOString(),
+            followUpsOverdue: overdue,
+          };
+        }),
         nextCursor,
       };
     });
@@ -1064,6 +1094,120 @@ export class StaffController {
         summary: { staffId: id, role: a.role },
       });
       return roleApprovalDto(r, now);
+    });
+  }
+
+  @RequirePermission('staff.profile.manage')
+  @Get(':id/chase-log')
+  async listChaseLog(@Hub() hub: HubRequestContext, @Param('id', idPipe) id: string) {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const s = await tx.staff.findUnique({ where: { id } });
+      if (!s) throw notFound();
+      const rows = await tx.staffChaseLog.findMany({
+        where: { staffId: id },
+        orderBy: { createdAt: 'desc' },
+      });
+      return {
+        data: rows.map((r) => ({
+          id: r.id,
+          staffId: r.staffId,
+          kind: r.kind,
+          subject: r.subject,
+          requestedOn: r.requestedOn?.toISOString().slice(0, 10) ?? null,
+          chasedOn: r.chasedOn?.toISOString().slice(0, 10) ?? null,
+          receivedOn: r.receivedOn?.toISOString().slice(0, 10) ?? null,
+          note: r.note,
+          createdAt: r.createdAt.toISOString(),
+        })),
+      };
+    });
+  }
+
+  @RequirePermission('staff.profile.manage')
+  @Post(':id/chase-log')
+  async addChaseLog(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Body() raw: unknown,
+  ) {
+    const input = body(ChaseLogInput, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      await this.subjectForChange(tx, hub, id);
+      const r = await tx.staffChaseLog.create({
+        data: {
+          organisationId: hub.orgId as string,
+          staffId: id,
+          kind: input.kind,
+          subject: input.subject,
+          requestedOn: input.requestedOn ? new Date(input.requestedOn) : null,
+          chasedOn: input.chasedOn ? new Date(input.chasedOn) : null,
+          receivedOn: input.receivedOn ? new Date(input.receivedOn) : null,
+          note: input.note ?? null,
+          createdBy: hub.user.id,
+        },
+      });
+      await audit(this.db, tx, hub, {
+        action: 'staff.chase.create',
+        entity: 'staff_chase_log',
+        entityId: r.id,
+        summary: { staffId: id, kind: input.kind },
+      });
+      return {
+        id: r.id,
+        staffId: r.staffId,
+        kind: r.kind,
+        subject: r.subject,
+        requestedOn: r.requestedOn?.toISOString().slice(0, 10) ?? null,
+        chasedOn: r.chasedOn?.toISOString().slice(0, 10) ?? null,
+        receivedOn: r.receivedOn?.toISOString().slice(0, 10) ?? null,
+        note: r.note,
+        createdAt: r.createdAt.toISOString(),
+      };
+    });
+  }
+
+  @RequirePermission('staff.profile.manage')
+  @Patch(':id/chase-log/:chaseId')
+  async patchChaseLog(
+    @Hub() hub: HubRequestContext,
+    @Param('id', idPipe) id: string,
+    @Param('chaseId', idPipe) chaseId: string,
+    @Body() raw: unknown,
+  ) {
+    const input = body(ChaseLogPatch, raw);
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      await this.subjectForChange(tx, hub, id);
+      const cur = await tx.staffChaseLog.findFirst({ where: { id: chaseId, staffId: id } });
+      if (!cur) throw notFound();
+      const r = await tx.staffChaseLog.update({
+        where: { id: chaseId },
+        data: {
+          ...(input.kind !== undefined ? { kind: input.kind } : {}),
+          ...(input.subject !== undefined ? { subject: input.subject } : {}),
+          ...(input.requestedOn !== undefined
+            ? { requestedOn: input.requestedOn ? new Date(input.requestedOn) : null }
+            : {}),
+          ...(input.chasedOn !== undefined
+            ? { chasedOn: input.chasedOn ? new Date(input.chasedOn) : null }
+            : {}),
+          ...(input.receivedOn !== undefined
+            ? { receivedOn: input.receivedOn ? new Date(input.receivedOn) : null }
+            : {}),
+          ...(input.note !== undefined ? { note: input.note ?? null } : {}),
+          updatedAt: new Date(),
+        },
+      });
+      return {
+        id: r.id,
+        staffId: r.staffId,
+        kind: r.kind,
+        subject: r.subject,
+        requestedOn: r.requestedOn?.toISOString().slice(0, 10) ?? null,
+        chasedOn: r.chasedOn?.toISOString().slice(0, 10) ?? null,
+        receivedOn: r.receivedOn?.toISOString().slice(0, 10) ?? null,
+        note: r.note,
+        createdAt: r.createdAt.toISOString(),
+      };
     });
   }
 

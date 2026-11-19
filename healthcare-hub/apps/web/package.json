@@ -13,14 +13,14 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.3.4",
+    "@ant-design/icons": "^5.6.1",
     "@hub/config": "workspace:*",
     "@hub/contracts": "workspace:*",
     "@hub/rules": "workspace:*",
     "@hub/ui": "workspace:*",
     "@tanstack/react-query": "5.105.0",
     "@tanstack/react-router": "1.170.46",
-    "antd": "^6.7.1",
+    "antd": "^5.29.3",
     "dayjs": "^1.11.23",
     "react": "18.3.1",
     "react-dom": "18.3.1",

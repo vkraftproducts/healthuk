@@ -416,6 +416,8 @@ export const EquipmentDto = z.object({
       requirementInstanceId: uuid,
       status: z.string(),
       reasonText: z.string(),
+      /** When it next falls due (expiry or due date), if known. */
+      nextDate: z.string().nullable().optional(),
     }),
   ),
   version,
@@ -449,6 +451,7 @@ export const VdiTemplateDto = z.object({
   status: z.enum(['DRAFT', 'PUBLISHED', 'RETIRED']),
   createdBy: uuid.nullable(),
   createdByName: z.string().nullable(),
+  createdAt: z.string().optional(),
   publishedBy: uuid.nullable(),
   publishedByName: z.string().nullable(),
   publishedAt: isoDateTime.nullable(),
@@ -482,6 +485,7 @@ export const VdiSubmit = z.strictObject({
 });
 export const VdiDto = z.object({
   id: uuid,
+  code: z.string().nullable().optional(),
   vehicleId: uuid,
   templateId: uuid,
   checkerUserId: uuid,
@@ -495,6 +499,7 @@ export const VdiDto = z.object({
       critical: z.boolean(),
       result: z.enum(['PASS', 'FAIL', 'NA']),
       reason: z.string().nullable(),
+      photoEvidenceItemId: uuid.nullable().optional(),
       amended: z.boolean(),
     }),
   ),
@@ -538,6 +543,18 @@ export const CleaningDto = z.object({
   notes: z.string().nullable().optional(),
   duplicate: z.boolean(),
 });
+export const DeepCleanCreate = z
+  .strictObject({
+    vehicleId: uuid,
+    cleanedOn: isoDate,
+    cleanedBy: uuid,
+    checkedBy: uuid,
+    note: z.string().trim().min(3).max(500).optional(),
+  })
+  .refine((d) => d.cleanedBy !== d.checkedBy, {
+    message: 'Someone else must check the deep clean',
+    path: ['checkedBy'],
+  });
 
 // Defects ------------------------------------------------------------------------
 export const DefectCreate = z
@@ -562,6 +579,11 @@ export const DefectPatch = z
     repairNotes: z.string().trim().max(2000),
     /** D4: the repair record can carry the garage's job sheet. */
     repairJobSheetEvidenceItemId: uuid,
+    /** v36: the garage job sheet reference given at sign-off (JS-2231). */
+    jobSheetRef: z.string().trim().min(1).max(40),
+    /** v36 "Owner / review date": who follows the defect up and by when. */
+    ownerUserId: uuid,
+    reviewBy: isoDate,
   })
   .partial()
   .refine((o) => Object.keys(o).length > 0, 'Nothing to change');
@@ -570,6 +592,7 @@ export const ReleaseInput = z.strictObject({ reason, evidenceItemId: uuid.option
 export const DefectReopen = z.strictObject({ reason });
 export const DefectDto = z.object({
   id: uuid,
+  code: z.string().nullable().optional(),
   vehicleId: uuid.nullable(),
   assetId: uuid.nullable(),
   /** Callsign or asset tag, so lists can say what the defect is on. */
@@ -584,10 +607,18 @@ export const DefectDto = z.object({
   status: z.enum(['OPEN', 'REPAIRING', 'REPAIRED', 'RELEASED']),
   classifiedBy: uuid.nullable(),
   classifiedByName: z.string().nullable(),
+  ownerUserId: uuid.nullable().optional(),
+  ownerName: z.string().nullable().optional(),
+  reviewBy: isoDate.nullable().optional(),
   repairDeadline: isoDate.nullable(),
   /** Deadline position in London time; DONE once the repair is signed off. */
   repairDue: z.enum(['NONE', 'DUE', 'DUE_SOON', 'DUE_TODAY', 'OVERDUE', 'DONE']),
   repairNotes: z.string().nullable(),
+  /** v36 detail: the plan given when the repair started, and when / by whom it started. */
+  repairPlan: z.string().nullable().optional(),
+  repairStartedAt: isoDateTime.nullable().optional(),
+  repairStartedByName: z.string().nullable().optional(),
+  jobSheetRef: z.string().nullable().optional(),
   repairedAt: isoDateTime.nullable(),
   repairedBy: uuid.nullable(),
   repairedByName: z.string().nullable(),

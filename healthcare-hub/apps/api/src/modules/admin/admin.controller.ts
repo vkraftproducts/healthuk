@@ -29,6 +29,7 @@ import { UserCache } from '../../auth/user-cache.js';
 import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { flagFutureShifts } from '../staff/control-flags.js';
+import { mfaRequiredFor } from '../../auth/mfa.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidParam = (v: string) => {
@@ -47,12 +48,22 @@ export class AdminController {
   @RequirePermission('admin.users.manage')
   @Get('users')
   async users(@Hub() hub: HubRequestContext): Promise<{ data: AdminUserDto[] }> {
-    const rows = await this.db.withTenant(tenantOf(hub), (tx) =>
-      tx.membership.findMany({
+    const { rows, creds } = await this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.membership.findMany({
         include: { user: true, role: true },
         orderBy: { createdAt: 'asc' },
-      }),
-    );
+      });
+      // Local sign-in accounts are readable only with app.local_auth on (0038 policy).
+      await tx.$executeRaw`SELECT set_config('app.local_auth', 'on', true)`;
+      const ids = [...new Set(rows.map((m) => m.userId))];
+      const creds = new Map(
+        (
+          await tx.$queryRaw<{ user_id: string; totp_enabled: boolean }[]>`
+            SELECT user_id, totp_enabled FROM local_credential WHERE user_id = ANY(${ids}::uuid[])`
+        ).map((c) => [c.user_id, c.totp_enabled]),
+      );
+      return { rows, creds };
+    });
     const byUser = new Map<string, AdminUserDto>();
     for (const m of rows) {
       const u = byUser.get(m.userId) ?? {
@@ -73,6 +84,13 @@ export class AdminController {
         validTo: m.validTo?.toISOString() ?? null,
       });
       byUser.set(m.userId, u);
+    }
+    for (const u of byUser.values()) {
+      const current = u.memberships.filter((m) => !m.validTo).map((m) => m.roleKey);
+      u.signIn = {
+        mfaRequired: mfaRequiredFor(current),
+        mfaEnabled: creds.has(u.id) ? (creds.get(u.id) ?? false) : null,
+      };
     }
     return { data: [...byUser.values()] };
   }

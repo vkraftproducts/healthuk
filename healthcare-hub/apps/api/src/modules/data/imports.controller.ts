@@ -35,7 +35,7 @@ import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const ROLLBACK_DAYS = 7;
 
 type Kind = 'STAFF' | 'VEHICLES';

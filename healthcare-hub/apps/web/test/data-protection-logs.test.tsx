@@ -63,7 +63,12 @@ function renderSettings() {
     get: get as ApiClient['get'],
     send: send as ApiClient['send'],
   };
-  render(<App api={api} history={createMemoryHistory({ initialEntries: ['/settings'] })} />);
+  render(
+    <App
+      api={api}
+      history={createMemoryHistory({ initialEntries: ['/compliance?tab=privacy'] })}
+    />,
+  );
   return { send, get };
 }
 beforeEach(() => sessionStorage.clear());
@@ -71,7 +76,6 @@ beforeEach(() => sessionStorage.clear());
 describe('data protection logs (task 27)', () => {
   it('lists disclosures with who recorded them and the linked request', async () => {
     renderSettings();
-    await userEvent.click(await screen.findByRole('tab', { name: 'Data protection' }));
     const table = await screen.findByRole('table', { name: 'Disclosures' });
     const row = await within(table).findByRole('row', { name: /Synthetic Police Force/ });
     expect(row).toHaveTextContent('2 Nov 2026');
@@ -81,7 +85,6 @@ describe('data protection logs (task 27)', () => {
 
   it('records a disclosure linked to a subject request', async () => {
     const { send } = renderSettings();
-    await userEvent.click(await screen.findByRole('tab', { name: 'Data protection' }));
     const form = await screen.findByRole('form', { name: 'Record a disclosure' });
     await userEvent.type(
       within(form).getByLabelText('Shared with (organisation or role)'),
@@ -112,7 +115,6 @@ describe('data protection logs (task 27)', () => {
 
   it('shows the retention log in words and filters by records category', async () => {
     const { get } = renderSettings();
-    await userEvent.click(await screen.findByRole('tab', { name: 'Data protection' }));
     const table = await screen.findByRole('table', { name: 'Retention runs' });
     const row = await within(table).findByRole('row', { name: /Patient contact/ });
     expect(row).toHaveTextContent('Anonymised');

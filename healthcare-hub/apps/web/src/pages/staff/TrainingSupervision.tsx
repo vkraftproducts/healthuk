@@ -1,21 +1,22 @@
 import { londonDate, londonDateTime } from '@hub/rules';
-import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { DataTable, type StatusKind } from '@hub/ui';
+import { Button, Card, Checkbox, Input, Modal, Select, Space } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   PersonSelect,
   Section,
-  button,
+  fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
-import { useOne, usePeople } from '../settings/hooks.js';
+import { useInvalidate, useOne, usePeople } from '../settings/hooks.js';
 import { ROLE_LABEL, list } from './labels.js';
+import { Ms, RowActions, SegTabs, WfCard, WfSearch, WfSelect, WfTag } from '../../v36/ui.js';
+import { Who } from '../../v36/kit.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -96,26 +97,19 @@ export function GroupTraining() {
         aria-label="Record group training"
         onSubmit={(e) => void submit(e)}
       >
-        <div className="flex flex-wrap items-end gap-3">
+        <Space wrap align="end" size="middle">
           <Field label="Course">
-            <select
-              className={input}
-              value={courseId}
-              required
-              onChange={(e) => setCourseId(e.target.value)}
-            >
-              <option value="">Choose a course</option>
-              {courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title}
-                </option>
-              ))}
-            </select>
+            <Select
+              style={{ width: 240 }}
+              value={courseId || undefined}
+              onChange={setCourseId}
+              placeholder="Choose a course"
+              options={courses.map((c) => ({ value: c.id as string, label: c.title as string }))}
+            />
           </Field>
           <Field label="Session date">
-            <input
+            <Input
               type="date"
-              className={input}
               value={completedOn}
               max={today}
               required
@@ -123,8 +117,7 @@ export function GroupTraining() {
             />
           </Field>
           <Field label="Register reference">
-            <input
-              className={input}
+            <Input
               value={sessionRef}
               maxLength={60}
               required
@@ -132,23 +125,17 @@ export function GroupTraining() {
             />
           </Field>
           <Field label="Provider (optional)">
-            <input
-              className={input}
-              value={provider}
-              maxLength={120}
-              onChange={(e) => setProvider(e.target.value)}
-            />
+            <Input value={provider} maxLength={120} onChange={(e) => setProvider(e.target.value)} />
           </Field>
           <Field label="Expiry (optional)">
-            <input
+            <Input
               type="date"
-              className={input}
               value={expiresOn}
               min={completedOn}
               onChange={(e) => setExpiresOn(e.target.value)}
             />
           </Field>
-        </div>
+        </Space>
         {course && !expiresOn && (
           <p className="text-sm">
             {course.intervalMonths
@@ -156,48 +143,124 @@ export function GroupTraining() {
               : 'This course does not expire.'}
           </p>
         )}
-        <fieldset className="space-y-2 rounded border border-hub-line p-3">
-          <legend className="text-sm font-semibold">
-            Attendees ({picked.length} ticked, up to 100)
-          </legend>
-          <Field label="Find a person">
-            <input
-              className={`${input} w-64`}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-          </Field>
-          {shown.length === 0 && <p className="text-sm">Nobody matches.</p>}
-          <ul className="grid gap-1 sm:grid-cols-2" aria-label="Attendees">
-            {shown.map((s) =>
-              s.id === myStaffId ? (
-                <li key={s.id} className="text-sm text-slate-700">
-                  {s.displayName} (you – someone else records your training)
-                </li>
-              ) : (
-                <li key={s.id}>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={picked.includes(s.id)}
-                      onChange={() => toggle(s.id)}
-                    />
-                    {s.displayName}
-                    {s.roles?.length ? ` – ${list(s.roles, ROLE_LABEL)}` : ''}
-                  </label>
-                </li>
-              ),
-            )}
-          </ul>
-        </fieldset>
-        <button
-          type="submit"
-          className={button}
+        <Card size="small" title={`Attendees (${picked.length} ticked, up to 100)`}>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Field label="Find a person">
+              <Input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                style={{ width: 260 }}
+              />
+            </Field>
+            {shown.length === 0 && <p className="text-sm">Nobody matches.</p>}
+            <ul className="grid gap-1 sm:grid-cols-2" aria-label="Attendees">
+              {shown.map((s) =>
+                s.id === myStaffId ? (
+                  <li key={s.id} className="text-sm text-slate-700">
+                    {s.displayName} (you – someone else records your training)
+                  </li>
+                ) : (
+                  <li key={s.id}>
+                    <Checkbox checked={picked.includes(s.id)} onChange={() => toggle(s.id)}>
+                      {s.displayName}
+                      {s.roles?.length ? ` – ${list(s.roles, ROLE_LABEL)}` : ''}
+                    </Checkbox>
+                  </li>
+                ),
+              )}
+            </ul>
+          </Space>
+        </Card>
+        <Button
+          type="primary"
+          htmlType="submit"
           disabled={!courseId || !sessionRef.trim() || picked.length === 0 || picked.length > 100}
         >
           Record training for {picked.length} {picked.length === 1 ? 'person' : 'people'}
-        </button>
+        </Button>
       </form>
+      {msg}
+    </Section>
+  );
+}
+
+/** Training records awaiting a second person to verify against the register (UK-36). */
+export function VerifyTrainingRecords() {
+  const { api, orgId, me } = useApp();
+  const queue = useOne<{ data: Row[] }>('/api/v1/training-records/awaiting-verification');
+  const [pick, setPick] = useState<Row | null>(null);
+  const { run, msg } = useRun();
+  const rows = queue.data?.data ?? [];
+
+  return (
+    <Section title="Verify training records">
+      <p className="text-sm">
+        Each record was added after a group session or from a staff file. Someone other than whoever
+        recorded it must confirm the register. This does not replace verified certificate evidence
+        on a requirement.
+      </p>
+      <DataTable<Row>
+        caption="Awaiting verification"
+        rows={rows}
+        rowKey={(r) => r.id}
+        loading={queue.isLoading}
+        emptyMessage="No training records are waiting."
+        columns={[
+          { key: 'p', header: 'Person', cell: (r) => r.staffName },
+          { key: 'c', header: 'Course', cell: (r) => `${r.title} (${r.courseCode})` },
+          { key: 'd', header: 'Completed', cell: (r) => fmtDate(r.completedOn) },
+          { key: 's', header: 'Register ref', cell: (r) => r.sessionRef ?? '—' },
+          {
+            key: 'b',
+            header: 'Recorded by',
+            cell: (r) =>
+              r.recordedBy === me.user.id ? (
+                <span>You recorded this — someone else must verify</span>
+              ) : (
+                r.recordedByName
+              ),
+          },
+          {
+            key: 'a',
+            header: 'Action',
+            cell: (r) =>
+              r.recordedBy === me.user.id ? null : (
+                <Button
+                  size="small"
+                  aria-label={`Verify training for ${r.staffName}`}
+                  onClick={() => setPick(r)}
+                >
+                  Verify
+                </Button>
+              ),
+          },
+        ]}
+      />
+      <ActionDialog
+        open={pick !== null}
+        title={pick ? `Verify training: ${pick.staffName}` : ''}
+        confirmLabel="Verify against register"
+        onCancel={() => setPick(null)}
+        onConfirm={async () => {
+          if (!pick) return;
+          const ok = await run(
+            () =>
+              api.send('POST', `/api/v1/training-records/${pick.id}/verify`, orgId, {
+                ...(pick.sessionRef ? { registerRef: pick.sessionRef } : {}),
+              }),
+            'Training record verified.',
+          );
+          if (ok) setPick(null);
+        }}
+      >
+        {pick && (
+          <p>
+            {pick.title} on {fmtDate(pick.completedOn)}
+            {pick.sessionRef ? ` · register ${pick.sessionRef}` : ''}. Confirm you have checked the
+            signed register for {pick.staffName}.
+          </p>
+        )}
+      </ActionDialog>
       {msg}
     </Section>
   );
@@ -209,12 +272,6 @@ export const SUPERVISION_KIND: Record<string, string> = {
   CLINICAL: 'Clinical supervision',
   RETURN_TO_WORK: 'Return to work',
   PROBATION_REVIEW: 'Probation review',
-};
-const BOOKING_STATUS: Record<string, string> = {
-  BOOKED: 'Booked',
-  HELD: 'Held',
-  CANCELLED: 'Cancelled',
-  MISSED: 'Missed',
 };
 
 export function bookingBadge(b: Row, now = Date.now()): { status: StatusKind; reason: string } {
@@ -238,87 +295,424 @@ export function bookingBadge(b: Row, now = Date.now()): { status: StatusKind; re
   }
 }
 
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** London day of a date or instant, as v36 writes it: "8 Sep" / "8 Sep 2026" (never "Sept"). */
+const ldParts = (iso: string) => {
+  const x = iso.length === 10 ? iso : londonDate(new Date(iso));
+  return { d: Number(x.slice(8, 10)), m: MON[Number(x.slice(5, 7)) - 1]!, y: x.slice(0, 4) };
+};
+const dmy = (iso: string) => {
+  const p = ldParts(iso);
+  return `${p.d} ${p.m} ${p.y}`;
+};
+const dmShort = (iso: string) => {
+  const p = ldParts(iso);
+  return `${p.d} ${p.m}`;
+};
+
+/** v36 status pill for a booking, with its words (also used by the status filter). */
+function bookingTag(b: Row): {
+  tone: 'blue' | 'green' | 'red' | 'grey' | 'amber';
+  icon: string;
+  text: string;
+} {
+  switch (b.status) {
+    case 'REQUESTED':
+      return {
+        tone: 'amber',
+        icon: 'schedule',
+        text: `Requested by ${b.requestedByName ?? b.staffName ?? 'staff'}`,
+      };
+    case 'HELD':
+      return { tone: 'green', icon: 'check_circle', text: 'Held' };
+    case 'CANCELLED':
+      return { tone: 'grey', icon: 'block', text: 'Cancelled' };
+    case 'MISSED':
+      return b.rebookedAs
+        ? { tone: 'grey', icon: 'event_repeat', text: 'Missed – rebooked' }
+        : {
+            tone: 'red',
+            icon: 'error',
+            text: `Missed – rebook by ${dmShort(new Date(Date.parse(b.scheduledAt) + 14 * 86_400_000).toISOString())}`,
+          };
+    default:
+      return Date.parse(b.scheduledAt) < Date.now()
+        ? { tone: 'amber', icon: 'schedule', text: 'Booked – record what happened' }
+        : { tone: 'blue', icon: 'hourglass_top', text: 'Booked' };
+  }
+}
+
+/** v36 Supervision: Bookings and Next due (every 8 weeks from the last one held). */
 export function SupervisionBookings() {
-  const { me } = useApp();
+  const { me, api, orgId } = useApp();
   const can = useCan();
   const manage = can(MANAGE);
   const myStaffId = useMyStaffId();
+  const [view, setView] = useState<'book' | 'due'>('book');
+  const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [closing, setClosing] = useState<Row | null>(null);
-  const res = useOne<{ data: Row[] }>(
-    `/api/v1/supervision-bookings${status ? `?status=${status}` : ''}`,
+  const [booking, setBooking] = useState<{ staffId?: string } | null>(null);
+  const [confirming, setConfirming] = useState<Row | null>(null);
+  const [confirmSup, setConfirmSup] = useState('');
+  const [confirmAt, setConfirmAt] = useState('');
+  const people = usePeople();
+  const res = useOne<{ data: Row[] }>('/api/v1/supervision-bookings');
+  const nextQ = useOne<{ data: Row[] }>('/api/v1/supervision/next-due');
+  const all = res.data?.data ?? [];
+  const toAction =
+    all.filter((b) => b.status === 'REQUESTED').length +
+    all.filter((b) => b.status === 'BOOKED' && Date.parse(b.scheduledAt) < Date.now()).length +
+    all.filter((b) => b.status === 'MISSED' && !b.rebookedAs).length;
+  const canClose = (r: Row) =>
+    r.status === 'BOOKED' &&
+    !(myStaffId && r.staffId === myStaffId) &&
+    (r.supervisorUserId === me.user.id || manage);
+
+  // Next due (server): 8 weeks after the last supervision held, with the escalation words.
+  const due = (nextQ.data?.data ?? []).map((x) => {
+    const s = { id: x.staffId as string, displayName: x.staffName as string, jobTitle: x.jobTitle };
+    const late = x.overdueDays as number | null;
+    const e = x.escalation as { stage: string; toName: string | null } | null;
+    const esc = !e
+      ? ''
+      : e.stage === 'MANAGER' && e.toName
+        ? ` · Escalated to ${e.toName}`
+        : ' · Escalated to lead';
+    const tag = x.bookedAt
+      ? {
+          tone: 'green' as const,
+          icon: 'check_circle',
+          text: `Booked ${dmShort(x.bookedAt as string)}`,
+        }
+      : late !== null && late > 0
+        ? {
+            tone: 'red' as const,
+            icon: 'error',
+            text: `${late} day${late === 1 ? '' : 's'} overdue${esc}`,
+          }
+        : late !== null && late > -7
+          ? {
+              tone: 'amber' as const,
+              icon: 'schedule',
+              text: late === 0 ? 'Due today' : `Due in ${-late} day${late === -1 ? '' : 's'}`,
+            }
+          : x.nextDueOn
+            ? {
+                tone: 'grey' as const,
+                icon: 'radio_button_unchecked',
+                text: `Due ${dmShort(x.nextDueOn as string)}`,
+              }
+            : { tone: 'red' as const, icon: 'error', text: 'None held yet' };
+    return {
+      s,
+      heldOn: x.lastHeldOn as string | null,
+      nextOn: x.nextDueOn as string | null,
+      tag,
+    };
+  });
+  const overdue = due.filter((d) => d.tag.tone === 'red').length;
+
+  const t = q.trim().toLowerCase();
+  const match = (txt: string) => !t || txt.toLowerCase().includes(t);
+  const bookRows = all.filter(
+    (r) =>
+      match(`${r.staffName} ${r.supervisorName} ${r.topics ?? ''}`) &&
+      (!status || bookingTag(r).text === status),
   );
-  const rows = res.data?.data ?? [];
+  const dueRows = due.filter(
+    (d) => match(`${d.s.displayName} ${d.s.jobTitle ?? ''}`) && (!status || d.tag.text === status),
+  );
+  const statusOptions = (texts: string[]) => {
+    const counts = new Map<string, number>();
+    texts.forEach((x) => counts.set(x, (counts.get(x) ?? 0) + 1));
+    return [
+      { value: '', label: 'All statuses' },
+      ...[...counts].map(([k, n]) => ({ value: k, label: `${k} (${n})` })),
+    ];
+  };
+
   return (
-    <div className="space-y-4">
-      <Section title="Supervision bookings">
-        <p className="text-sm">
-          {manage
-            ? 'All supervision bookings. The supervisor or HR records what happened; nobody records their own supervision.'
-            : 'Supervisions booked for you and the ones you supervise.'}
-        </p>
-        <Field label="Show">
-          <select
-            className={`${input} w-56`}
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">All bookings</option>
-            {Object.entries(BOOKING_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <DataTable<Row>
-          caption="Supervision bookings"
-          rows={rows}
-          rowKey={(r) => r.id}
-          loading={res.isLoading}
-          error={res.isError ? 'Could not load supervision bookings.' : null}
-          emptyMessage="No supervision bookings."
-          columns={[
-            { key: 'p', header: 'Person', cell: (r) => r.staffName },
-            { key: 's', header: 'Supervisor', cell: (r) => r.supervisorName },
-            { key: 'w', header: 'When', cell: (r) => fmtDateTime(r.scheduledAt) },
-            { key: 'k', header: 'Type', cell: (r) => SUPERVISION_KIND[r.kind] ?? 'Other' },
-            { key: 't', header: 'Topics', cell: (r) => r.topics ?? '' },
-            { key: 'st', header: 'Status', cell: (r) => <StatusBadge {...bookingBadge(r)} /> },
-            {
-              key: 'a',
-              header: 'Outcome',
-              cell: (r) => {
-                if (r.status !== 'BOOKED') return '';
-                if (myStaffId && r.staffId === myStaffId)
-                  return <span className="text-sm">Your supervisor records this.</span>;
-                if (r.supervisorUserId !== me.user.id && !manage) return '';
-                return (
-                  <button
-                    type="button"
-                    className={smallButton}
-                    aria-label={`Record outcome: ${r.staffName}`}
-                    onClick={() => setClosing(r)}
-                  >
-                    Record outcome
-                  </button>
-                );
+    <>
+      <SegTabs
+        label="Supervision"
+        current={view}
+        onChange={(v) => {
+          setView(v);
+          setStatus('');
+        }}
+        options={[
+          {
+            id: 'book',
+            label: 'Bookings',
+            icon: 'event_note',
+            count: all.length,
+            ...(toAction ? { flag: { text: `${toAction} to action`, tone: 'am' as const } } : {}),
+          },
+          {
+            id: 'due',
+            label: 'Next due',
+            icon: 'event_upcoming',
+            count: due.length,
+            ...(overdue ? { flag: { text: `${overdue} overdue`, tone: 'rd' as const } } : {}),
+          },
+        ]}
+      />
+      {view === 'book' ? (
+        <WfCard
+          title="Bookings"
+          table
+          extra={
+            manage ? (
+              <Button type="primary" icon={<Ms i="event" />} onClick={() => setBooking({})}>
+                Book supervision
+              </Button>
+            ) : undefined
+          }
+        >
+          <div className="pc-tools rec-f in-card">
+            <WfSearch value={q} onChange={setQ} />
+            <WfSelect
+              label="Filter by status"
+              value={status}
+              onChange={setStatus}
+              options={statusOptions(all.map((r) => bookingTag(r).text))}
+            />
+          </div>
+          <DataTable<Row>
+            caption="Supervision bookings"
+            rows={bookRows}
+            rowKey={(r) => r.id}
+            loading={res.isLoading}
+            error={res.isError ? 'Could not load supervision bookings.' : null}
+            emptyMessage="No supervision bookings."
+            rowTone={(r) => {
+              const tg = bookingTag(r);
+              return tg.tone === 'red' || r.status === 'REQUESTED'
+                ? tg.tone === 'red'
+                  ? 'red'
+                  : 'amber'
+                : tg.tone === 'amber'
+                  ? 'amber'
+                  : null;
+            }}
+            columns={[
+              {
+                key: 'p',
+                header: 'Person',
+                cell: (r) => (
+                  <>
+                    <b>{r.staffName}</b>
+                    {r.code && <span className="sub">{r.code}</span>}
+                  </>
+                ),
               },
-            },
-          ]}
-        />
-      </Section>
-      {manage && <BookSupervision myStaffId={myStaffId} />}
+              { key: 'k', header: 'Type', cell: (r) => SUPERVISION_KIND[r.kind] ?? 'Other' },
+              {
+                key: 's',
+                header: 'Supervisor',
+                cell: (r) =>
+                  r.supervisorName ? (
+                    r.supervisorName
+                  ) : (
+                    <span className="wf-mut">To be confirmed</span>
+                  ),
+              },
+              { key: 'w', header: 'When', cell: (r) => dmy(r.scheduledAt) },
+              {
+                key: 't',
+                header: 'Topics / outcome',
+                cell: (r) => (
+                  <>
+                    {r.topics ?? '—'}
+                    {r.statusReason && (
+                      <span className="sub">
+                        {r.status === 'HELD' ? 'Outcome' : 'Reason'}: {r.statusReason}
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'st',
+                header: 'Status',
+                cell: (r) => {
+                  const tg = bookingTag(r);
+                  return (
+                    <WfTag tone={tg.tone} icon={tg.icon}>
+                      {tg.text}
+                    </WfTag>
+                  );
+                },
+              },
+              {
+                key: 'a',
+                header: '',
+                cell: (r) =>
+                  manage && r.status === 'REQUESTED' ? (
+                    <RowActions
+                      name={r.staffName}
+                      primary={{
+                        label: 'Confirm',
+                        icon: 'event_available',
+                        onClick: () => {
+                          setConfirmSup('');
+                          setConfirmAt(r.scheduledAt.slice(0, 16));
+                          setConfirming(r);
+                        },
+                      }}
+                    />
+                  ) : canClose(r) ? (
+                    <RowActions
+                      name={r.staffName}
+                      primary={{
+                        label: 'Record outcome',
+                        icon: 'edit_note',
+                        onClick: () => setClosing(r),
+                      }}
+                    />
+                  ) : r.status === 'MISSED' && !r.rebookedAs && manage ? (
+                    <RowActions
+                      name={r.staffName}
+                      primary={{
+                        label: 'Rebook',
+                        icon: 'event_repeat',
+                        onClick: () => setBooking({ staffId: r.staffId }),
+                      }}
+                    />
+                  ) : myStaffId && r.staffId === myStaffId && r.status === 'BOOKED' ? (
+                    <span className="wf-mut">Your supervisor records this.</span>
+                  ) : null,
+              },
+            ]}
+          />
+        </WfCard>
+      ) : (
+        <WfCard
+          title="Next due"
+          table
+          extra={<span className="wf-mini">Every 8 weeks from the last supervision held</span>}
+        >
+          <div className="pc-tools rec-f in-card">
+            <WfSearch value={q} onChange={setQ} />
+            <WfSelect
+              label="Filter by status"
+              value={status}
+              onChange={setStatus}
+              options={statusOptions(due.map((d) => d.tag.text))}
+            />
+          </div>
+          <DataTable<(typeof due)[number]>
+            caption="Supervision next due"
+            rows={dueRows}
+            rowKey={(d) => d.s.id}
+            loading={nextQ.isLoading}
+            emptyMessage="Nobody to show."
+            rowTone={(d) => (d.tag.tone === 'red' ? 'red' : null)}
+            columns={[
+              { key: 'p', header: 'Person', cell: (d) => <Who name={d.s.displayName} /> },
+              { key: 'r', header: 'Role', cell: (d) => d.s.jobTitle ?? '—' },
+              {
+                key: 'l',
+                header: 'Last held',
+                cell: (d) => (d.heldOn ? dmy(d.heldOn) : '—'),
+              },
+              {
+                key: 'n',
+                header: 'Next due',
+                cell: (d) => (d.nextOn ? dmy(d.nextOn) : '—'),
+              },
+              {
+                key: 's',
+                header: 'Status',
+                cell: (d) => (
+                  <WfTag tone={d.tag.tone} icon={d.tag.icon}>
+                    {d.tag.text}
+                  </WfTag>
+                ),
+              },
+              {
+                key: 'a',
+                header: '',
+                cell: (d) =>
+                  manage && d.tag.tone !== 'green' ? (
+                    <RowActions
+                      name={d.s.displayName}
+                      primary={{
+                        label: 'Book',
+                        icon: 'event',
+                        onClick: () => setBooking({ staffId: d.s.id }),
+                      }}
+                    />
+                  ) : null,
+              },
+            ]}
+          />
+        </WfCard>
+      )}
+      <Modal
+        open={booking !== null}
+        title="Book supervision"
+        footer={null}
+        onCancel={() => setBooking(null)}
+        width={760}
+        destroyOnHidden
+      >
+        <BookSupervision myStaffId={myStaffId} initialStaffId={booking?.staffId} />
+      </Modal>
       {closing && <CloseBooking booking={closing} onClose={() => setClosing(null)} />}
-    </div>
+      <ActionDialog
+        open={!!confirming}
+        title={`Confirm supervision – ${confirming?.staffName ?? ''}`}
+        confirmLabel="Confirm booking"
+        confirmDisabled={!confirmSup || !confirmAt}
+        onCancel={() => setConfirming(null)}
+        onConfirm={async () => {
+          await api.send(
+            'POST',
+            `/api/v1/supervision-bookings/${confirming!.id as string}/confirm`,
+            orgId,
+            {
+              supervisorUserId: confirmSup,
+              scheduledAt: toInstant(confirmAt),
+            },
+          );
+          setConfirming(null);
+        }}
+        fields={
+          <>
+            <PersonSelect
+              label="Supervisor"
+              value={confirmSup}
+              onChange={setConfirmSup}
+              people={people}
+              meId={me.user.id}
+            />
+            <Field label="When">
+              <Input
+                type="datetime-local"
+                value={confirmAt}
+                onChange={(e) => setConfirmAt(e.target.value)}
+              />
+            </Field>
+          </>
+        }
+      />
+    </>
   );
 }
 
-function BookSupervision({ myStaffId }: { myStaffId: string | null }) {
+function BookSupervision({
+  myStaffId,
+  initialStaffId,
+}: {
+  myStaffId: string | null;
+  initialStaffId?: string;
+}) {
   const { api, orgId, me } = useApp();
   const people = usePeople();
   const staff = useCurrentStaff();
-  const [staffId, setStaffId] = useState('');
+  const [staffId, setStaffId] = useState(initialStaffId ?? '');
   const [supervisor, setSupervisor] = useState(me.user.id);
   const [at, setAt] = useState('');
   const [kind, setKind] = useState('ONE_TO_ONE');
@@ -344,65 +738,55 @@ function BookSupervision({ myStaffId }: { myStaffId: string | null }) {
   }
   return (
     <Section title="Book a supervision">
-      <form
-        className="flex flex-wrap items-end gap-3"
-        aria-label="Book a supervision"
-        onSubmit={(e) => void submit(e)}
-      >
-        <Field label="Person">
-          <select
-            className={input}
-            value={staffId}
-            required
-            onChange={(e) => setStaffId(e.target.value)}
-          >
-            <option value="">Choose a person</option>
-            {staff
-              .filter((s) => s.id !== myStaffId)
-              .map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.displayName}
-                </option>
-              ))}
-          </select>
-        </Field>
-        <PersonSelect
-          label="Supervisor"
-          value={supervisor}
-          onChange={setSupervisor}
-          people={people}
-          meId={me.user.id}
-        />
-        <Field label="Date and time">
-          <input
-            type="datetime-local"
-            className={input}
-            value={at}
-            required
-            onChange={(e) => setAt(e.target.value)}
+      <form aria-label="Book a supervision" onSubmit={(e) => void submit(e)}>
+        <Space wrap align="end" size="middle">
+          <Field label="Person">
+            <Select
+              style={{ width: 220 }}
+              value={staffId || undefined}
+              onChange={setStaffId}
+              placeholder="Choose a person"
+              options={staff
+                .filter((s) => s.id !== myStaffId)
+                .map((s) => ({ value: s.id as string, label: s.displayName as string }))}
+            />
+          </Field>
+          <PersonSelect
+            label="Supervisor"
+            value={supervisor}
+            onChange={setSupervisor}
+            people={people}
+            meId={me.user.id}
           />
-        </Field>
-        <Field label="Type">
-          <select className={input} value={kind} onChange={(e) => setKind(e.target.value)}>
-            {Object.entries(SUPERVISION_KIND).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Topics (optional, no patient details)">
-          <textarea
-            className={`${input} w-80`}
-            rows={2}
-            maxLength={1000}
-            value={topics}
-            onChange={(e) => setTopics(e.target.value)}
-          />
-        </Field>
-        <button className={button} type="submit" disabled={!staffId || !supervisor || !at}>
-          Book supervision
-        </button>
+          <Field label="Date and time">
+            <Input
+              type="datetime-local"
+              value={at}
+              required
+              onChange={(e) => setAt(e.target.value)}
+            />
+          </Field>
+          <Field label="Type">
+            <Select
+              style={{ width: 200 }}
+              value={kind}
+              onChange={setKind}
+              options={Object.entries(SUPERVISION_KIND).map(([k, v]) => ({ value: k, label: v }))}
+            />
+          </Field>
+          <Field label="Topics (optional, no patient details)">
+            <Input.TextArea
+              rows={2}
+              maxLength={1000}
+              value={topics}
+              onChange={(e) => setTopics(e.target.value)}
+              style={{ width: 320 }}
+            />
+          </Field>
+          <Button type="primary" htmlType="submit" disabled={!staffId || !supervisor || !at}>
+            Book supervision
+          </Button>
+        </Space>
       </form>
       {msg}
     </Section>
@@ -434,33 +818,26 @@ function CloseBooking({ booking, onClose }: { booking: Row; onClose: () => void 
             {fmtDateTime(booking.scheduledAt)}.
           </p>
           <Field label="What happened?">
-            <select className={input} value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-              <option value="HELD">It was held</option>
-              <option value="CANCELLED">It was cancelled</option>
-              <option value="MISSED">It was missed</option>
-            </select>
+            <Select
+              value={outcome}
+              onChange={setOutcome}
+              options={[
+                { value: 'HELD', label: 'It was held' },
+                { value: 'CANCELLED', label: 'It was cancelled' },
+                { value: 'MISSED', label: 'It was missed' },
+              ]}
+            />
           </Field>
           {held ? (
             <>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={attended}
-                  onChange={(e) => setAttended(e.target.checked)}
-                />
+              <Checkbox checked={attended} onChange={(e) => setAttended(e.target.checked)}>
                 {booking.staffName} attended
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={wellbeing}
-                  onChange={(e) => setWellbeing(e.target.checked)}
-                />
+              </Checkbox>
+              <Checkbox checked={wellbeing} onChange={(e) => setWellbeing(e.target.checked)}>
                 Wellbeing check done
-              </label>
+              </Checkbox>
               <Field label="Competence concerns (optional)">
-                <textarea
-                  className={input}
+                <Input.TextArea
                   rows={2}
                   maxLength={1000}
                   value={concerns}
@@ -468,8 +845,7 @@ function CloseBooking({ booking, onClose }: { booking: Row; onClose: () => void 
                 />
               </Field>
               <Field label="Agreed actions (optional)">
-                <textarea
-                  className={input}
+                <Input.TextArea
                   rows={2}
                   maxLength={2000}
                   value={actions}
@@ -477,19 +853,13 @@ function CloseBooking({ booking, onClose }: { booking: Row; onClose: () => void 
                 />
               </Field>
               <Field label="Next supervision due (optional)">
-                <input
-                  type="date"
-                  className={input}
-                  value={nextDue}
-                  onChange={(e) => setNextDue(e.target.value)}
-                />
+                <Input type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} />
               </Field>
             </>
           ) : (
             <Field label="Rebook for (optional)">
-              <input
+              <Input
                 type="datetime-local"
-                className={input}
                 value={rebookAt}
                 onChange={(e) => setRebookAt(e.target.value)}
               />
@@ -526,5 +896,314 @@ function CloseBooking({ booking, onClose }: { booking: Row; onClose: () => void 
         changed; they can then agree with it or comment.
       </p>
     </ActionDialog>
+  );
+}
+
+// ---- v36 planned training sessions ------------------------------------------------------------
+/** Planned sessions (invite who is due) before attendance becomes a group session to verify. */
+export function PlannedSessions() {
+  const { api, orgId, me } = useApp();
+  const manage = me.permissions.includes(MANAGE);
+  const invalidate = useInvalidate();
+  const plans = useOne<{ data: Row[] }>('/api/v1/training-plans');
+  const courses = useOne<{ data: Row[] }>(manage ? '/api/v1/training-courses' : null);
+  const [planning, setPlanning] = useState(false);
+  const [courseCode, setCourseCode] = useState('TR-BLS');
+  const [plannedOn, setPlannedOn] = useState('');
+  const [places, setPlaces] = useState(8);
+  const [inviteDue, setInviteDue] = useState(true);
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dShort = (d: string) =>
+    `${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+  const statusTag = (r: Row) => {
+    if (r.status === 'CANCELLED')
+      return (
+        <WfTag tone="grey" icon="block">
+          Cancelled
+        </WfTag>
+      );
+    if (r.status === 'HELD')
+      return (
+        <WfTag tone="green" icon="check_circle">
+          Held
+        </WfTag>
+      );
+    const n = r.daysUntil as number;
+    if (n < 0)
+      return (
+        <WfTag tone="amber" icon="schedule">
+          Planned {-n} day{n === -1 ? '' : 's'} ago
+        </WfTag>
+      );
+    if (n === 0)
+      return (
+        <WfTag tone="blue" icon="hourglass_top">
+          Planned today
+        </WfTag>
+      );
+    return (
+      <WfTag tone="blue" icon="hourglass_top">
+        Planned in {n} day{n === 1 ? '' : 's'}
+      </WfTag>
+    );
+  };
+  return (
+    <WfCard
+      title="Planned sessions"
+      table
+      extra={
+        manage && (
+          <Button
+            type="primary"
+            size="small"
+            icon={<Ms i="event" />}
+            onClick={() => {
+              setPlannedOn(londonDate(new Date()));
+              setPlanning(true);
+            }}
+          >
+            Plan a session
+          </Button>
+        )
+      }
+    >
+      <DataTable<Row>
+        caption="Planned sessions"
+        rows={plans.data?.data ?? []}
+        rowKey={(r) => r.id}
+        loading={plans.isLoading}
+        error={plans.isError ? 'Could not load planned sessions.' : null}
+        emptyMessage="No sessions are planned."
+        columns={[
+          {
+            key: 's',
+            header: 'Session',
+            cell: (r) => (
+              <>
+                <b>{r.courseTitle}</b>
+                <span className="sub">
+                  {r.code} · {dShort(r.plannedOn)} · {(r.invitedNames as string[]).length} of{' '}
+                  {r.places} places
+                </span>
+              </>
+            ),
+          },
+          {
+            key: 'i',
+            header: 'Invited',
+            cell: (r) =>
+              (r.invitedNames as string[]).length
+                ? (r.invitedNames as string[]).join(', ')
+                : '—',
+          },
+          { key: 'st', header: 'Status', cell: (r) => statusTag(r) },
+          {
+            key: 'a',
+            header: '',
+            cell: (r) =>
+              manage && r.status === 'PLANNED' ? (
+                <RowActions
+                  name={r.courseTitle}
+                  ghost
+                  primary={{
+                    label: 'Invite who is due',
+                    icon: 'group_add',
+                    onClick: async () => {
+                      await api.send(
+                        'POST',
+                        `/api/v1/training-plans/${r.id as string}/invite-due`,
+                        orgId,
+                        {},
+                      );
+                      void invalidate();
+                    },
+                  }}
+                  more={[
+                    {
+                      label: 'Cancel session',
+                      icon: 'block',
+                      danger: true,
+                      onClick: async () => {
+                        await api.send(
+                          'POST',
+                          `/api/v1/training-plans/${r.id as string}/cancel`,
+                          orgId,
+                          {},
+                        );
+                        void invalidate();
+                      },
+                    },
+                  ]}
+                />
+              ) : null,
+          },
+        ]}
+      />
+      <ActionDialog
+        open={planning}
+        title="Plan a training session"
+        confirmLabel="Plan session"
+        confirmDisabled={!courseCode || !plannedOn || places < 1}
+        onCancel={() => setPlanning(false)}
+        onConfirm={async () => {
+          await api.send('POST', '/api/v1/training-plans', orgId, {
+            courseCode,
+            plannedOn,
+            places,
+            inviteDue,
+          });
+          setPlanning(false);
+          void invalidate();
+        }}
+        fields={
+          <>
+            <Field label="Course">
+              <Select
+                style={{ width: '100%' }}
+                value={courseCode}
+                options={(courses.data?.data ?? []).map((c) => ({
+                  value: c.code as string,
+                  label: `${c.title} (${c.code})`,
+                }))}
+                onChange={setCourseCode}
+              />
+            </Field>
+            <Field label="Date">
+              <Input type="date" value={plannedOn} onChange={(e) => setPlannedOn(e.target.value)} />
+            </Field>
+            <Field label="Places">
+              <Input
+                type="number"
+                min={1}
+                max={200}
+                value={places}
+                onChange={(e) => setPlaces(Number(e.target.value) || 1)}
+              />
+            </Field>
+            <Checkbox checked={inviteDue} onChange={(e) => setInviteDue(e.target.checked)}>
+              Invite everyone who is due, overdue or missing this course
+            </Checkbox>
+          </>
+        }
+      />
+    </WfCard>
+  );
+}
+
+// ---- v36 group training sessions --------------------------------------------------------------
+/** Group sessions waiting for a second person to check the signed register. */
+export function GroupSessions() {
+  const { api, orgId, me } = useApp();
+  const queue = useOne<{ data: Row[] }>('/api/v1/training-records/awaiting-verification');
+  const [recording, setRecording] = useState(false);
+  const [pick, setPick] = useState<Row[] | null>(null);
+  const { run, msg } = useRun();
+  const groups = new Map<string, Row[]>();
+  for (const r of queue.data?.data ?? []) {
+    const k = `${r.sessionRef ?? r.id}|${r.courseCode}|${r.completedOn}`;
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+  }
+  const rows = [...groups.values()];
+  return (
+    <WfCard
+      title="Group training sessions"
+      table
+      extra={
+        <Button type="primary" icon={<Ms i="groups" />} onClick={() => setRecording(true)}>
+          Record a group session
+        </Button>
+      }
+    >
+      <DataTable<Row[]>
+        caption="Group training sessions"
+        rows={rows}
+        rowKey={(g) => g[0]!.id}
+        loading={queue.isLoading}
+        emptyMessage="No group sessions are waiting for verification."
+        columns={[
+          {
+            key: 'c',
+            header: 'Course',
+            cell: (g) => (
+              <>
+                <b>{g[0]!.title}</b>
+                <span className="sub">
+                  {[fmtDate(g[0]!.completedOn), g[0]!.provider].filter(Boolean).join(' · ')}
+                </span>
+              </>
+            ),
+          },
+          { key: 'a', header: 'Attendees', cell: (g) => g.map((r) => r.staffName).join(', ') },
+          { key: 'r', header: 'Register', cell: (g) => g[0]!.sessionRef ?? '—' },
+          {
+            key: 'b',
+            header: 'Recorded by',
+            cell: (g) => (
+              <>
+                {g[0]!.recordedByName}
+                <span className="sub">{fmtDateTime(g[0]!.createdAt)}</span>
+              </>
+            ),
+          },
+          {
+            key: 's',
+            header: 'Status',
+            cell: () => (
+              <WfTag tone="blue" icon="hourglass_top">
+                Awaiting verification
+              </WfTag>
+            ),
+          },
+          {
+            key: 'x',
+            header: '',
+            cell: (g) =>
+              g[0]!.recordedBy === me.user.id ? (
+                <span className="wf-mut">You recorded this</span>
+              ) : (
+                <RowActions
+                  name={g[0]!.title}
+                  primary={{ label: 'Verify all', icon: 'verified', onClick: () => setPick(g) }}
+                />
+              ),
+          },
+        ]}
+      />
+      <ActionDialog
+        open={pick !== null}
+        title={pick ? `Verify ${pick[0]!.title}` : ''}
+        confirmLabel="Verify against register"
+        onCancel={() => setPick(null)}
+        onConfirm={async () => {
+          const g = pick!;
+          const ok = await run(async () => {
+            for (const r of g)
+              await api.send('POST', `/api/v1/training-records/${r.id}/verify`, orgId, {
+                ...(r.sessionRef ? { registerRef: r.sessionRef } : {}),
+              });
+          }, 'Training records verified.');
+          if (ok) setPick(null);
+        }}
+      >
+        {pick && (
+          <p>
+            Confirm you have checked the signed register
+            {pick[0]!.sessionRef ? ` ${pick[0]!.sessionRef}` : ''} for{' '}
+            {pick.map((r) => r.staffName).join(', ')}.
+          </p>
+        )}
+      </ActionDialog>
+      <Modal
+        open={recording}
+        title="Record a group session"
+        footer={null}
+        onCancel={() => setRecording(false)}
+        width={820}
+        destroyOnHidden
+      >
+        <GroupTraining />
+      </Modal>
+      {msg}
+    </WfCard>
   );
 }

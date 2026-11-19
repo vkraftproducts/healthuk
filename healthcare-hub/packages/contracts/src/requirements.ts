@@ -158,6 +158,15 @@ export const InstanceDto = z.object({
   effect: z.enum(['NONE', 'POLICY_BLOCK', 'BLOCK']),
   currentlyVerified: z.boolean(),
   computedAt: isoDateTime.nullable(),
+  /** Latest verified evidence on this instance (vehicle documents panel). */
+  latestEvidence: z
+    .object({
+      fileName: z.string().nullable(),
+      verifiedByName: z.string().nullable(),
+      verifiedAt: isoDateTime.nullable(),
+    })
+    .nullable()
+    .optional(),
   version,
 });
 export type InstanceDto = z.infer<typeof InstanceDto>;
@@ -295,6 +304,8 @@ export const EvidenceState = z.enum([
 ]);
 export const EvidenceVersionDto = z.object({
   id: uuid,
+  /** The uploaded file's name, when known. */
+  fileName: z.string().optional(),
   itemId: uuid,
   versionNo: version,
   title: z.string(),
@@ -305,6 +316,8 @@ export const EvidenceVersionDto = z.object({
   scanStatus: z.enum(['PENDING', 'CLEAN', 'MALICIOUS', 'FAILED']),
   state: EvidenceState,
   uploadedBy: uuid,
+  /** Where the file was uploaded from (office, staff app, or candidate portal). */
+  channel: z.enum(['STAFF_APP', 'CANDIDATE_PORTAL', 'OFFICE']).optional(),
   uploadedAt: isoDateTime.nullable(),
   validFrom: isoDate.nullable(),
   validTo: isoDate.nullable(),

@@ -201,6 +201,7 @@ describe('live changes stream', () => {
     await su.end();
     expect(rows.map((r) => r.table_name)).toEqual([
       'audit_log',
+      'demo_seed_state',
       'idempotency_key',
       'notification_delivery',
       'notification_outbox',

@@ -22,6 +22,7 @@ import {
   runRetention,
   runPendingExports,
   snapshotAll,
+  syncOverdueAlerts,
   verifyAuditChains,
 } from '@hub/domain';
 import { loadConfig } from './config.js';
@@ -39,6 +40,7 @@ const QUEUES = [
   'retention',
   'breach-clock',
   'deliver-escalations',
+  'sync-overdue-alerts',
 ] as const;
 
 async function main(): Promise<void> {
@@ -149,6 +151,13 @@ async function main(): Promise<void> {
   await boss.schedule('breach-clock', '*/15 * * * *', undefined, { tz: LONDON });
   // Escalation stages are whole UK days, so planning is cheap; every 5 minutes keeps retries prompt.
   await boss.schedule('deliver-escalations', '*/5 * * * *', undefined, { tz: LONDON });
+  // Persist overdue actions/audits/supervisions/defects as alerts so escalation can fire.
+  await boss.work('sync-overdue-alerts', async () => {
+    const r = await syncOverdueAlerts(db, new Date(), (msg, ctx) => logger.warn(ctx, msg));
+    if (r.actions + r.audits + r.supervisions + r.defects + r.checks + r.failed > 0)
+      logger.info(r, 'overdue alerts');
+  });
+  await boss.schedule('sync-overdue-alerts', '*/10 * * * *', undefined, { tz: LONDON });
   logger.info('worker started');
 
   const stop = async (): Promise<void> => {

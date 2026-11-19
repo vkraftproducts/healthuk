@@ -3,7 +3,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { Db } from '@hub/db';
 import { addDays, londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, makeApp, sign } from './harness.js';
+import { SEED_IDS, makeApp, sign, verifyVehicleDocuments } from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -235,6 +235,7 @@ describe('odometer and maintenance [FLT-02, T12, T13]', () => {
 
   it('maintenance is due by date OR mileage, whichever first, and blocks readiness when overdue', async () => {
     const v = await vehicle();
+    await verifyVehicleDocuments(app, SEED_IDS.orgExample, v.id as string);
     await call('POST', `/api/v1/vehicles/${v.id}/odometer`, {
       body: { reading: 20_000, readOn: addDays(today(), -20) },
     });
@@ -663,14 +664,9 @@ describe('defects and return to service [FLT-06, UAT-02c]', () => {
       404,
     );
     expect((await call('GET', '/api/v1/defects', { sub: 'dev|crew' })).status).toBe(403);
-    expect(
-      (
-        await call('PATCH', `/api/v1/defects/${d.body.id}`, {
-          body: { severity: 'MINOR' },
-          ifMatch: d.body.version,
-        })
-      ).status,
-    ).toBe(400);
+    // v36: a reported minor defect gets the organisation's default repair deadline straight away,
+    // so it always has one when it is classified.
+    expect(d.body.repairDeadline).toEqual(expect.any(String));
     const ok = await call('PATCH', `/api/v1/defects/${d.body.id}`, {
       body: { severity: 'MINOR', repairDeadline: addDays(today(), 14) },
       ifMatch: d.body.version,
@@ -693,6 +689,7 @@ describe('defects and return to service [FLT-06, UAT-02c]', () => {
 describe('equipment, regimes and capability [FLT-03, FLT-08]', () => {
   it('quarantining a fitted stretcher removes the vehicle stretcher capability', async () => {
     const v = await vehicle();
+    await verifyVehicleDocuments(app, SEED_IDS.orgExample, v.id as string);
     const a = await call('POST', '/api/v1/equipment', {
       body: {
         assetTag: `STR-${n}`,

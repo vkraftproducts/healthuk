@@ -1,3 +1,4 @@
+import { selectAntByLabel } from './ant-testing.js';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -87,7 +88,7 @@ describe('L5 inspection view', () => {
     renderWith('/inspection', ['inspection.view', 'dashboard.view'], (p) =>
       p === '/api/v1/inspection/overview' ? overview : undefined,
     );
-    const rating = await screen.findByRole('region', { name: 'Rating' });
+    const rating = await screen.findByLabelText('Rating');
     expect(rating).toHaveTextContent('Good – Watford');
     expect(rating).toHaveTextContent('80% (8 of 10) – Internal measure — not a CQC rating');
     expect(screen.getByText('No requirements set up for this key question.')).toBeInTheDocument();
@@ -153,27 +154,24 @@ describe('H1 report an incident', () => {
     );
     const form = await screen.findByRole('form', { name: 'Report an incident' });
     expect(within(form).queryByLabelText('Date received')).not.toBeInTheDocument();
-    await within(form).findByRole('option', { name: /complaint/i });
-    await userEvent.selectOptions(
-      within(form).getByLabelText('What are you reporting?'),
-      'COMPLAINT',
-    );
+    await selectAntByLabel('What are you reporting?', /complaint/i);
     expect(within(form).getByLabelText('Date received')).toBeInTheDocument();
   });
 });
 
 describe('navigation by role', () => {
+  // v36 side nav is the eight modules: Inspection sits under Reports, reporting under Compliance.
   it('shows Inspection and Report an incident only to those who hold the permission', async () => {
     renderWith('/report', ['events.event.report', 'inspection.view'], () => undefined);
     const nav = await screen.findByRole('navigation', { name: 'Primary' });
-    expect(within(nav).getByRole('link', { name: 'Inspection' })).toBeInTheDocument();
-    expect(within(nav).getByRole('link', { name: 'Report an incident' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Reports' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Compliance' })).toBeInTheDocument();
   });
 
   it('hides them from someone without either permission', async () => {
     renderWith('/', ['staff.self.view'], () => undefined);
     const nav = await screen.findByRole('navigation', { name: 'Primary' });
-    expect(within(nav).queryByRole('link', { name: 'Inspection' })).not.toBeInTheDocument();
-    expect(within(nav).queryByRole('link', { name: 'Report an incident' })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('link', { name: 'Compliance' })).not.toBeInTheDocument();
   });
 });

@@ -5,7 +5,6 @@ import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
-
 const ORG = '01900000-0000-7000-8000-000000000001';
 const me = (permissions: string[]): MeResponse => ({
   user: {
@@ -67,11 +66,15 @@ function renderAlerts(permissions: string[]) {
     readyz: async () => ({ status: 'ready' }),
     get: async (p) => {
       paths.push(p);
-      return {
-        items: p.includes('event=ACTION_OVERDUE') ? [actionItem] : [alertItem, actionItem],
-        rules: [{ event: 'EXPIRY_WARNING', email: true, roleNames: ['Governance lead'] }],
-        emailReminders: true,
-      };
+      if (p.startsWith('/api/v1/alerts/centre')) {
+        return {
+          items: p.includes('event=ACTION_OVERDUE') ? [actionItem] : [alertItem, actionItem],
+          rules: [{ event: 'EXPIRY_WARNING', email: true, roleNames: ['Governance lead'] }],
+          emailReminders: true,
+        };
+      }
+      if (p === '/api/v1/alerts/count') return { open: 2, critical: 0 };
+      return { data: [] };
     },
     send,
   };
@@ -82,12 +85,13 @@ beforeEach(() => sessionStorage.clear());
 
 describe('alerts centre [task 24]', () => {
   it('lists alerts with words, says why each is shown, and explains the rules', async () => {
-    renderAlerts(['compliance.requirement.view']);
+    const { paths } = renderAlerts(['compliance.requirement.view']);
+    await waitFor(() => expect(paths.some((p) => p.startsWith('/api/v1/alerts/centre'))).toBe(true));
     const table = await screen.findByRole('table', { name: 'Your alerts' });
-    await within(table).findByText('INS-01 – Employers liability insurance');
-    expect(within(table).getByText(/High: Expired/)).toBeInTheDocument();
-    expect(within(table).getByText('A notification rule includes your role')).toBeInTheDocument();
-    expect(within(table).getByText('Your role covers this area')).toBeInTheDocument();
+    await within(table).findByRole('row', { name: /INS-01 – Employers liability insurance/ });
+    expect(table).toHaveTextContent(/High:\s*Expired/);
+    expect(table).toHaveTextContent('A notification rule includes your role');
+    expect(table).toHaveTextContent('Your role covers this area');
     expect(within(table).getAllByText('31 Oct 2026')).toHaveLength(2);
     const rules = screen.getByRole('list', { name: 'Notification rules that include your role' });
     expect(rules).toHaveTextContent(
@@ -100,8 +104,10 @@ describe('alerts centre [task 24]', () => {
 
   it('filters by area on the server and hides role-only items on request', async () => {
     const { paths } = renderAlerts(['compliance.requirement.view']);
+    await waitFor(() => expect(paths.some((p) => p.startsWith('/api/v1/alerts/centre'))).toBe(true));
     const table = await screen.findByRole('table', { name: 'Your alerts' });
-    await within(table).findByText('ACT-7 – Re-audit hand hygiene');
+    await waitFor(() => expect(within(table).queryByText('Loading…')).not.toBeInTheDocument());
+    await within(table).findByRole('row', { name: /ACT-7 – Re-audit hand hygiene/ });
     await userEvent.click(screen.getByLabelText('Only things I own or was told about'));
     expect(within(table).queryByText('ACT-7 – Re-audit hand hygiene')).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText('Show'), 'ACTION_OVERDUE');
@@ -115,7 +121,7 @@ describe('alerts centre [task 24]', () => {
     });
     expect(screen.queryByRole('button', { name: /Acknowledge ACT-7/ })).not.toBeInTheDocument();
     await userEvent.click(ack);
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Acknowledge INS-01/ });
     await userEvent.click(within(dialog).getByRole('button', { name: 'Acknowledge' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith(
@@ -125,13 +131,18 @@ describe('alerts centre [task 24]', () => {
         {},
       ),
     );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await userEvent.click(
       screen.getByRole('button', {
         name: 'Snooze reminders for INS-01 – Employers liability insurance',
       }),
     );
-    const snooze = await screen.findByRole('dialog');
-    await userEvent.selectOptions(within(snooze).getByLabelText('Pause reminders for'), '3');
+    const snooze = await screen.findByRole('dialog', { name: /Snooze reminders for INS-01/ });
+    const pauseLabel = within(snooze).getByText(/^Pause reminders for/);
+    const pauseField = pauseLabel.closest('label') ?? pauseLabel.parentElement!;
+    const pauseCombo = within(pauseField as HTMLElement).getByRole('combobox', { hidden: true });
+    await userEvent.click(pauseCombo);
+    await userEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: '3 days' }));
     await userEvent.type(
       within(snooze).getByLabelText(/^Why are you snoozing it\?/),
       'Renewal booked',

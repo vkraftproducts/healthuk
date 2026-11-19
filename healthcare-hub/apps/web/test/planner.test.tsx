@@ -121,8 +121,8 @@ const DISPATCH = ['jobs.job.view', 'jobs.allocate', 'fleet.vehicle.view'];
 describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
   it('shows crews, job chips, blocked vehicles in words and the unallocated job card', async () => {
     renderPlanner(DISPATCH, {});
-    expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
-    expect(screen.getByText('BLOCKED – Blocked')).toBeInTheDocument();
+    expect(await screen.findByText(/^Alex Driver \+ Sam Carer/)).toBeInTheDocument();
+    expect(screen.getByText('Blocked – Blocked')).toBeInTheDocument();
     expect(screen.getAllByText(/J-104 allocated/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/J-105 in progress/).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: /J-117/ }));
@@ -194,7 +194,8 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
     expect(row).toHaveTextContent('BLOCKED – Blocked');
     expect(within(table).getByRole('row', { name: /AMB-01/ })).toHaveTextContent('2 jobs');
     await userEvent.click(within(table).getAllByRole('button')[0]!);
-    expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
+    // v36 day view: callsign in bold, crew and times underneath.
+    expect(await screen.findByText(/^Alex Driver \+ Sam Carer · /)).toBeInTheDocument();
   });
 
   it('manage shift: takes a not-started job off the shift with a reason (task 26)', async () => {
@@ -245,7 +246,7 @@ describe('work planner [JOB-02, JOB-03, UAT-04]', () => {
 
   it('people without allocation rights cannot manage shifts (task 26)', async () => {
     renderPlanner(['jobs.job.view'], {});
-    expect(await screen.findByText('AMB-01 / Alex Driver + Sam Carer')).toBeInTheDocument();
+    expect(await screen.findByText(/^Alex Driver \+ Sam Carer/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Manage shift for AMB-01' })).toBeNull();
   });
 

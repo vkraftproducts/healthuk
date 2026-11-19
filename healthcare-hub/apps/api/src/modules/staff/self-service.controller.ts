@@ -28,7 +28,7 @@ import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const MAX_OPEN = 10;
 const DUE = 'compliance.due_date.change';
 const MANAGE = 'staff.profile.manage';

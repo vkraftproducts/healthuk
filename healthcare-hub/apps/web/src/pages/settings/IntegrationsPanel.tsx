@@ -1,5 +1,6 @@
+import { Alert, Button, Card } from 'antd';
 import { useState } from 'react';
-import { Field, Section, input, saveBlob, smallButton, useRun, words } from '../../components.js';
+import { Field, Section, saveBlob, useRun, words } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useOne } from './hooks.js';
 
@@ -22,13 +23,15 @@ export function IntegrationsPanel() {
   return (
     <div className="space-y-6">
       {msg}
-      <p
+      <Alert
+        type="warning"
+        showIcon
         role="note"
-        className="rounded border border-amber-700 bg-amber-50 p-3 text-sm text-amber-900"
-      >
-        {res.data?.notice ??
-          'Mock integrations only. No external system is contacted and every record is synthetic.'}
-      </p>
+        message={
+          res.data?.notice ??
+          'Mock integrations only. No external system is contacted and every record is synthetic.'
+        }
+      />
       <Section title="Integrations">
         {res.isError && <p role="alert">Integrations could not be loaded.</p>}
         <label className="mb-3 flex items-center gap-2 text-sm">
@@ -37,11 +40,8 @@ export function IntegrationsPanel() {
         </label>
         <ul className="space-y-3">
           {rows.map((r) => (
-            <li
-              key={r.adapter}
-              aria-label={r.name}
-              className="rounded-lg border border-hub-line bg-hub-card p-3"
-            >
+            <li key={r.adapter} aria-label={r.name}>
+              <Card size="small">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h3 className="font-semibold">
@@ -61,8 +61,7 @@ export function IntegrationsPanel() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {!r.connected ? (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       onClick={() =>
                         void run(
                           () => api.send('POST', `${base}/${r.adapter}/connect`, orgId, {}),
@@ -71,12 +70,11 @@ export function IntegrationsPanel() {
                       }
                     >
                       Connect (mock)
-                    </button>
+                    </Button>
                   ) : (
                     <>
                       {r.direction === 'INBOUND' && (
-                        <button
-                          className={smallButton}
+                        <Button                           type="link" size="small"
                           onClick={() =>
                             void run(
                               () =>
@@ -88,11 +86,10 @@ export function IntegrationsPanel() {
                           }
                         >
                           Run mock sync
-                        </button>
+                        </Button>
                       )}
                       {r.adapter === 'PAYROLL' && (
-                        <button
-                          className={smallButton}
+                        <Button                           type="link" size="small"
                           onClick={() =>
                             void run(
                               async () =>
@@ -108,11 +105,10 @@ export function IntegrationsPanel() {
                           }
                         >
                           Download hours CSV
-                        </button>
+                        </Button>
                       )}
                       {r.adapter === 'CALENDAR' && (
-                        <button
-                          className={smallButton}
+                        <Button                           type="link" size="small"
                           onClick={() =>
                             void run(
                               async () =>
@@ -125,10 +121,9 @@ export function IntegrationsPanel() {
                           }
                         >
                           Download calendar file
-                        </button>
+                        </Button>
                       )}
-                      <button
-                        className={smallButton}
+                      <Button                         type="link" size="small"
                         onClick={() =>
                           void run(
                             () => api.send('POST', `${base}/${r.adapter}/disconnect`, orgId, {}),
@@ -137,11 +132,12 @@ export function IntegrationsPanel() {
                         }
                       >
                         Disconnect
-                      </button>
+                      </Button>
                     </>
                   )}
                 </div>
               </div>
+              </Card>
             </li>
           ))}
         </ul>
@@ -151,7 +147,7 @@ export function IntegrationsPanel() {
           <Field label="From">
             <input
               type="date"
-              className={input}
+             
               value={from}
               onChange={(e) => setFrom(e.target.value)}
             />
@@ -159,7 +155,7 @@ export function IntegrationsPanel() {
           <Field label="To">
             <input
               type="date"
-              className={input}
+             
               value={to}
               onChange={(e) => setTo(e.target.value)}
             />

@@ -1,4 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
+import { openSettingsView } from './ant-testing.js';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
@@ -86,7 +87,7 @@ beforeEach(() => sessionStorage.clear());
 describe('import and export settings [PRD 4.12]', () => {
   it('previews a CSV with per-row results before anything is created', async () => {
     const sent = renderAt(['admin.import.manage', 'staff.profile.manage', 'admin.export.full']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Import and export' }));
+    await openSettingsView('Import and export');
     const file = new File(['staffNo,displayName,location\n'], 'staff.csv', { type: 'text/csv' });
     await userEvent.upload(screen.getByLabelText('CSV file'), file);
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
@@ -102,7 +103,7 @@ describe('import and export settings [PRD 4.12]', () => {
 
   it('a governance reviewer sees placeholders and source status as references and can decide', async () => {
     renderAt(['admin.requirements.publish']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Import and export' }));
+    await openSettingsView('Import and export');
     expect(await screen.findByText('Unresolved: [ENTER PRACTICE NAME]')).toBeInTheDocument();
     const table = screen.getByRole('table', { name: 'Staged workbook rows' });
     expect(within(table).getByText('Compliant')).toBeInTheDocument();
@@ -115,7 +116,7 @@ describe('import and export settings [PRD 4.12]', () => {
 
   it('a reject needs a reason and sends it as the decision note', async () => {
     const sent = renderAt(['admin.requirements.publish']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Import and export' }));
+    await openSettingsView('Import and export');
     fireEvent.click(await screen.findByRole('button', { name: 'Reject mapping: Safe row 3 P-01' }));
     const dialog = await screen.findByRole('dialog');
     const confirm = within(dialog).getByRole('button', { name: 'Reject mapping' });
@@ -133,7 +134,7 @@ describe('import and export settings [PRD 4.12]', () => {
     item.proposedByName = 'Dev';
     try {
       renderAt(['admin.requirements.publish']);
-      fireEvent.click(await screen.findByRole('tab', { name: 'Import and export' }));
+      await openSettingsView('Import and export');
       expect(
         await screen.findByText('You proposed this; someone else decides.'),
       ).toBeInTheDocument();

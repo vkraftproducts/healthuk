@@ -219,6 +219,8 @@ export function fakeServer() {
     uploads: 0,
     completed: 0,
     requests: [] as Req[],
+    /** Extra routes for a test: return a [status, body] pair to answer, or undefined to fall through. */
+    extra: null as null | ((method: string, path: string, body: unknown) => [number, unknown] | undefined),
   };
   const res = (status: number, body?: unknown) =>
     ({
@@ -236,6 +238,8 @@ export function fakeServer() {
     if (url.startsWith('https://blob.test/')) return res(200, { received: 2048 });
     if (st.revoked) return res(401, { code: st.revoked });
     const path = url.replace('https://api.test', '');
+    const hit = st.extra?.(method, path, body);
+    if (hit) return res(hit[0], hit[1]);
     if (method === 'GET' && path === '/api/v1/crew/today') return res(200, st.today);
     if (method === 'GET' && path.startsWith('/api/v1/crew/jobs/'))
       return st.job ? res(200, st.job) : res(404, { code: 'NOT_FOUND' });

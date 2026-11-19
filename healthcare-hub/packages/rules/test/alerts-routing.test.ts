@@ -56,6 +56,7 @@ describe('alert links (no personal data in URLs)', () => {
     expect(alertLink('AUDIT', 'au1')).toBe('/compliance/audits/au1');
     expect(alertLink('EVENT', 'e1')).toBe('/compliance/events/e1');
     expect(alertLink('POLICY', 'p1')).toBe('/compliance?tab=policies');
+    expect(alertLink('EVIDENCE', 'e1')).toBe('/me');
     expect(alertLink('SOMETHING_ELSE', 'z1')).toBe('/alerts');
   });
 });

@@ -1,21 +1,13 @@
 import { UK_REGISTRATION, UK_REGISTRATION_MESSAGE } from '@hub/contracts';
 import { licenceNeededText } from '@hub/rules';
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Button, Checkbox, Input, Modal, Select } from 'antd';
 import { useState, type FormEvent } from 'react';
 import { ApiError } from '../../api.js';
-import {
-  ActionDialog,
-  Field,
-  Section,
-  button,
-  errText,
-  fmtDate,
-  input,
-  smallButton,
-  useCan,
-} from '../../components.js';
+import { ActionDialog, Field, Section, errText, fmtDate, input, useCan } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useInvalidate, useOne } from '../settings/hooks.js';
+import { Ms, RowActions, WfCard, WfTag } from '../../v36/ui.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -387,7 +379,9 @@ export function AddVehicle() {
           <input type="checkbox" name="stretcher" /> Stretcher fitted
         </label>
         <div className="md:col-span-3">
-          <button className={button}>Add vehicle</button>
+          <Button htmlType="submit" type="primary">
+            Add vehicle
+          </Button>
         </div>
       </form>
       <ProblemSummary problems={problems} />
@@ -460,45 +454,35 @@ export function VehicleEditDialog({ v, onClose }: { v: Row | null; onClose: () =
       fields={
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="VIN (optional)">
-            <input className={input} value={vin} onChange={(e) => setVin(e.target.value)} />
+            <Input value={vin} onChange={(e) => setVin(e.target.value)} />
           </Field>
           <Field label="Ownership">
-            <select
-              className={input}
+            <Select
               value={ownership}
-              onChange={(e) => setOwnership(e.target.value)}
-            >
-              {Object.entries(OWNERSHIP).map(([k, t]) => (
-                <option key={k} value={k}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              onChange={setOwnership}
+              style={{ width: '100%' }}
+              options={Object.entries(OWNERSHIP).map(([k, t]) => ({ value: k, label: t }))}
+            />
           </Field>
           <Field label="Licence category needed to drive it">
-            <select className={input} value={licence} onChange={(e) => setLicence(e.target.value)}>
-              {LICENCE_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {licenceText(c)}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={licence}
+              onChange={setLicence}
+              style={{ width: '100%' }}
+              options={LICENCE_CATEGORIES.map((c) => ({ value: c, label: licenceText(c) }))}
+            />
           </Field>
           <Field label="Gross vehicle weight in kg (optional)">
-            <input className={input} value={gvw} onChange={(e) => setGvw(e.target.value)} />
+            <Input value={gvw} onChange={(e) => setGvw(e.target.value)} />
           </Field>
           <Field label="Permitted loads (optional, comma separated)">
-            <input className={input} value={loads} onChange={(e) => setLoads(e.target.value)} />
+            <Input value={loads} onChange={(e) => setLoads(e.target.value)} />
           </Field>
           <Field label="Seats">
-            <input className={input} value={seats} onChange={(e) => setSeats(e.target.value)} />
+            <Input value={seats} onChange={(e) => setSeats(e.target.value)} />
           </Field>
           <Field label="Wheelchair spaces">
-            <input
-              className={input}
-              value={wheelchairs}
-              onChange={(e) => setWheelchairs(e.target.value)}
-            />
+            <Input value={wheelchairs} onChange={(e) => setWheelchairs(e.target.value)} />
           </Field>
         </div>
       }
@@ -518,101 +502,118 @@ export function VdiChecklists() {
   const [retiring, setRetiring] = useState<Row | null>(null);
   const [publishing, setPublishing] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | 'new' | null>(null);
+  const [viewing, setViewing] = useState<Row | null>(null);
   return (
     <>
-      <p className="text-sm">
-        Crews use the latest published checklist for the vehicle type at the start of each shift. A
-        new checklist is saved as a draft and published by a second person; publishing retires the
-        old version. A failed critical item raises a stop-use defect automatically.
-      </p>
-      <DataTable<Row>
-        caption="Inspection checklists"
-        rows={res.data?.data ?? []}
-        rowKey={(r) => r.id}
-        loading={res.isLoading}
-        error={res.isError ? 'Could not load checklists.' : null}
-        emptyMessage="No active checklists. Publish one so crews can check vehicles."
-        columns={[
-          { key: 'n', header: 'Checklist', cell: (r) => `${r.name} (version ${r.version})` },
-          {
-            key: 't',
-            header: 'Vehicle type',
-            cell: (r) => (r.vehicleType ? VEHICLE_TYPE[r.vehicleType] : 'All vehicles'),
-          },
-          {
-            key: 'i',
-            header: 'Items',
-            cell: (r) => {
-              const critical = (r.items as Row[]).filter((i) => i.critical).length;
-              return `${r.items.length} items, ${critical} critical`;
+      <WfCard
+        title="Check list versions"
+        table
+        extra={
+          manage && (
+            <Button type="primary" icon={<Ms i="note_add" />} onClick={() => setEditing('new')}>
+              Draft a new version
+            </Button>
+          )
+        }
+      >
+        <DataTable<Row>
+          caption="Check list versions"
+          rows={(res.data?.data ?? []).filter((r) => r.status !== 'RETIRED')}
+          rowKey={(r) => r.id}
+          loading={res.isLoading}
+          error={res.isError ? 'Could not load checklists.' : null}
+          emptyMessage="No active checklists. Publish one so crews can check vehicles."
+          rowTone={(r) => (r.status === 'DRAFT' ? 'amber' : null)}
+          columns={[
+            {
+              key: 'n',
+              header: 'Version',
+              cell: (r) => {
+                const critical = (r.items as Row[]).filter((i) => i.critical).length;
+                return (
+                  <>
+                    <b>
+                      {r.name} v{r.version}
+                    </b>
+                    <span className="sub">
+                      {r.items.length} items, {critical} critical
+                      {r.vehicleType ? ` · ${VEHICLE_TYPE[r.vehicleType]}` : ''}
+                    </span>
+                  </>
+                );
+              },
             },
-          },
-          {
-            key: 's',
-            header: 'Status',
-            cell: (r) => (
-              <>
-                <StatusBadge
-                  status={CHECKLIST_STATUS[r.status ?? 'PUBLISHED']?.kind ?? 'GREY'}
-                  reason={CHECKLIST_STATUS[r.status ?? 'PUBLISHED']?.text ?? 'Unknown'}
-                />
-                <span className="block text-xs">
-                  Drafted by {r.createdByName ?? 'unknown'}
-                  {r.publishedAt &&
-                    `; published by ${r.publishedByName ?? 'unknown'} ` +
-                      `on ${fmtDate(r.publishedAt)}`}
-                </span>
-              </>
-            ),
-          },
-          {
-            key: 'a',
-            header: 'Action',
-            cell: (r) =>
-              manage ? (
-                <div className="flex flex-wrap gap-2">
-                  {r.status === 'DRAFT' &&
-                    (r.createdBy === me.user.id ? (
-                      <span className="text-xs">
-                        You drafted {r.name}: someone else must publish it.
-                      </span>
-                    ) : (
-                      <button
-                        className={smallButton}
-                        aria-label={`Publish ${r.name} version ${r.version}`}
-                        onClick={() => setPublishing(r)}
-                      >
-                        Publish
-                      </button>
-                    ))}
-                  {r.status !== 'RETIRED' && (
-                    <button
-                      className={smallButton}
-                      aria-label={`Draft a new version of ${r.name}`}
-                      onClick={() => setEditing(r)}
-                    >
-                      New version
-                    </button>
-                  )}
-                  {r.status !== 'RETIRED' && (
-                    <button
-                      className={smallButton}
-                      aria-label={`Retire ${r.name} version ${r.version}`}
-                      onClick={() => setRetiring(r)}
-                    >
-                      Retire
-                    </button>
-                  )}
-                </div>
-              ) : null,
-          },
-        ]}
-      />
-      {manage && (
-        <button className={button} onClick={() => setEditing('new')}>
-          Draft a new checklist
-        </button>
-      )}
+            {
+              key: 'd',
+              header: 'Drafted by',
+              cell: (r) => (
+                <>
+                  {r.createdByName ?? 'Unknown'}
+                  {r.createdAt && <span className="sub">{fmtDate(r.createdAt)}</span>}
+                </>
+              ),
+            },
+            { key: 'p', header: 'Published by', cell: (r) => r.publishedByName ?? '—' },
+            {
+              key: 's',
+              header: 'Status',
+              cell: (r) =>
+                r.status === 'DRAFT' ? (
+                  <WfTag tone="amber" icon="schedule">
+                    Draft – awaiting a second person to publish
+                  </WfTag>
+                ) : (
+                  <WfTag tone="green" icon="check_circle">
+                    Published – crews use this
+                  </WfTag>
+                ),
+            },
+            {
+              key: 'a',
+              header: '',
+              cell: (r) => {
+                const view = { label: 'View items', icon: 'list', onClick: () => setViewing(r) };
+                const more = manage
+                  ? [
+                      { label: 'New version', icon: 'note_add', onClick: () => setEditing(r) },
+                      { label: 'Retire', icon: 'block', onClick: () => setRetiring(r) },
+                    ]
+                  : [];
+                if (manage && r.status === 'DRAFT' && r.createdBy !== me.user.id)
+                  return (
+                    <RowActions
+                      name={`${r.name} v${r.version}`}
+                      primary={{
+                        label: 'Publish',
+                        icon: 'publish',
+                        onClick: () => setPublishing(r),
+                      }}
+                      more={[view, ...more]}
+                    />
+                  );
+                return (
+                  <RowActions name={`${r.name} v${r.version}`} ghost primary={view} more={more} />
+                );
+              },
+            },
+          ]}
+        />
+      </WfCard>
+      <Modal
+        open={viewing !== null}
+        title={viewing ? `${viewing.name as string} v${viewing.version as number}` : ''}
+        footer={null}
+        onCancel={() => setViewing(null)}
+      >
+        <ol>
+          {((viewing?.items as Row[]) ?? []).map((i) => (
+            <li key={i.code}>
+              {i.label}
+              {i.critical ? ' – critical (a fail stops the vehicle)' : ''}
+            </li>
+          ))}
+        </ol>
+      </Modal>
       <ActionDialog
         open={publishing !== null}
         title={`Publish ${publishing?.name ?? ''} version ${publishing?.version ?? ''}`}
@@ -650,12 +651,6 @@ export function VdiChecklists() {
     </>
   );
 }
-
-const CHECKLIST_STATUS: Record<string, { kind: StatusKind; text: string }> = {
-  DRAFT: { kind: 'AMBER', text: 'Draft – awaiting a second person to publish' },
-  PUBLISHED: { kind: 'GREEN', text: 'Published – crews use this' },
-  RETIRED: { kind: 'GREY', text: 'Retired' },
-};
 
 interface Item {
   label: string;
@@ -717,58 +712,49 @@ function ChecklistDialog({
       fields={
         <div className="grid gap-3">
           <Field label="Checklist name">
-            <input
-              className={input}
-              value={name}
-              readOnly={!!from}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <Input value={name} readOnly={!!from} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Vehicle type">
-            <select className={input} value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="">All vehicles</option>
-              {Object.entries(VEHICLE_TYPE).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={type || undefined}
+              placeholder="All vehicles"
+              onChange={setType}
+              style={{ width: '100%' }}
+              allowClear
+              options={Object.entries(VEHICLE_TYPE).map(([k, v]) => ({ value: k, label: v }))}
+            />
           </Field>
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">Items</legend>
             {items.map((it, n) => (
               <div key={n} className="flex flex-wrap items-center gap-2">
-                <input
+                <Input
                   aria-label={`Item ${n + 1}`}
-                  className={`${input} flex-1`}
+                  className="flex-1"
                   value={it.label}
                   onChange={(e) => set(n, { label: e.target.value })}
                 />
-                <label className="flex items-center gap-1 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={it.critical}
-                    onChange={(e) => set(n, { critical: e.target.checked })}
-                  />
+                <Checkbox
+                  checked={it.critical}
+                  onChange={(e) => set(n, { critical: e.target.checked })}
+                >
                   Critical (failing stops use)
-                </label>
-                <button
-                  type="button"
-                  className={smallButton}
+                </Checkbox>
+                <Button
+                  size="small"
                   aria-label={`Remove item ${n + 1}`}
                   onClick={() => setItems(items.filter((_, i) => i !== n))}
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             ))}
-            <button
-              type="button"
-              className={smallButton}
+            <Button
+              size="small"
               onClick={() => setItems([...items, { label: '', critical: false }])}
             >
               Add an item
-            </button>
+            </Button>
           </fieldset>
         </div>
       }
@@ -845,56 +831,50 @@ export function EquipmentEditDialog({
       fields={
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="Serial number (optional)">
-            <input className={input} value={serial} onChange={(e) => setSerial(e.target.value)} />
+            <Input value={serial} onChange={(e) => setSerial(e.target.value)} />
           </Field>
           <Field label="Manufacturer (optional)">
-            <input className={input} value={maker} onChange={(e) => setMaker(e.target.value)} />
+            <Input value={maker} onChange={(e) => setMaker(e.target.value)} />
           </Field>
           <Field label="Model (optional)">
-            <input className={input} value={model} onChange={(e) => setModel(e.target.value)} />
+            <Input value={model} onChange={(e) => setModel(e.target.value)} />
           </Field>
           <Field label="Safe working load in kg (optional)">
-            <input className={input} value={swl} onChange={(e) => setSwl(e.target.value)} />
+            <Input value={swl} onChange={(e) => setSwl(e.target.value)} />
           </Field>
           <Field label="Kept">
-            <select
-              className={input}
+            <Select
               value={place}
-              onChange={(e) => setPlace(e.target.value as typeof place)}
-            >
-              <option value="vehicle">On a vehicle</option>
-              <option value="location">At a base</option>
-              <option value="none">Not assigned</option>
-            </select>
+              onChange={(v) => setPlace(v as typeof place)}
+              style={{ width: '100%' }}
+              options={[
+                { value: 'vehicle', label: 'On a vehicle' },
+                { value: 'location', label: 'At a base' },
+                { value: 'none', label: 'Not assigned' },
+              ]}
+            />
           </Field>
           {place === 'vehicle' && (
             <Field label="Vehicle">
-              <select
-                className={input}
+              <Select
                 value={vehicleId}
-                onChange={(e) => setVehicleId(e.target.value)}
-              >
-                {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.callsign} ({v.registration})
-                  </option>
-                ))}
-              </select>
+                onChange={setVehicleId}
+                style={{ width: '100%' }}
+                options={vehicles.map((v) => ({
+                  value: v.id,
+                  label: `${v.callsign} (${v.registration})`,
+                }))}
+              />
             </Field>
           )}
           {place === 'location' && (
             <Field label="Base">
-              <select
-                className={input}
+              <Select
                 value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
-              >
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setLocationId}
+                style={{ width: '100%' }}
+                options={locations.map((l) => ({ value: l.id, label: l.name }))}
+              />
             </Field>
           )}
         </div>

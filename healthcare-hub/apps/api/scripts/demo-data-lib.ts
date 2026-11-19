@@ -127,9 +127,11 @@ const VEHICLE_DEADLINES: [string, string, number][] = [
   ['WAV-01', 'AMB-VEH-03', 12],
   ['AMB-04', 'AMB-VEH-01', 140],
   ['PTS-02', 'AMB-VEH-01', 200],
-  // Publishing tax applies it to every vehicle; the two on today's shifts need it verified.
+  // Insurance and tax apply to every vehicle; the two on today's shifts need them verified.
   ['AMB-04', 'AMB-VEH-03', 180],
   ['PTS-02', 'AMB-VEH-03', 250],
+  ['AMB-04', 'AMB-VEH-02', 190],
+  ['PTS-02', 'AMB-VEH-02', 260],
 ];
 const PREMISES_DEADLINES: [string, number][] = [
   ['AMB-PRM-02', -6],
@@ -273,8 +275,16 @@ export async function loadDemoData(
   const adoptions = new Map<string, { templateId: string; deadlineKind: string } | null>();
   const adopt = async (code: string) => {
     if (adoptions.has(code)) return adoptions.get(code) ?? null;
-    const library = templates.find((x) => x.code === code);
     let outcome: { templateId: string; deadlineKind: string } | null = null;
+    // The day-one starter configuration may already have adopted and published it: use that copy.
+    const own = templates.find((x) => x.code === code && !x.isLibrary);
+    const effective = (own?.versions as Row[] | undefined)?.find((v) => v.status === 'EFFECTIVE');
+    if (own && effective) {
+      outcome = { templateId: own.id as string, deadlineKind: effective.deadlineKind as string };
+      adoptions.set(code, outcome);
+      return outcome;
+    }
+    const library = templates.find((x) => x.code === code && x.isLibrary !== false);
     if (!library) result.problems.push(`requirement template ${code} is not in the library`);
     else {
       const copy = await post(
@@ -346,10 +356,16 @@ export async function loadDemoData(
       reason: `Moved to ${to}`,
     });
   // Role requirements: adopt, publish (second person) and map to roles before anyone is approved.
+  // The starter configuration may already map them; a role keeps one map per requirement.
+  const mapped = new Set(
+    (
+      ((await call('GET', '/api/v1/staff/role-requirements', MANAGER)).body.data ?? []) as Row[]
+    ).map((m) => `${m.role as string}|${m.templateId as string}`),
+  );
   for (const [role, codes] of Object.entries(ROLE_REQUIREMENTS))
     for (const code of codes) {
       const adopted = await adopt(code);
-      if (adopted)
+      if (adopted && !mapped.has(`${role}|${adopted.templateId}`))
         await post(`map ${code} to ${role}`, '/api/v1/staff/role-requirements', MANAGER, {
           role,
           templateId: adopted.templateId,

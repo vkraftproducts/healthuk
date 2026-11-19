@@ -1297,3 +1297,94 @@ Web only: no API, contract, nav or route changes. New tests pass, web type check
     `nav.ts` (which has uncommitted changes in the working tree) leaves out `governance.meeting.manage` and
     `events.event.manage`, so users with only those permissions are refused the page. Add them to
     the item, or give those tests `compliance.audit.view`.
+
+## 8. v36 registers that had no backend (17 Nov 2026)
+
+Every v36 option that earlier needed "records the system does not keep yet" now has its own tables,
+API and screen. All of it is new code; existing modules were only touched to register it (listed
+at the end). No new permission keys: each area reuses existing ones.
+
+| Area (v36 screen) | Migration | API module | Web screen (where) | API tests |
+| --- | --- | --- | --- | --- |
+| Safeguarding referrals (37) | 0044 | `v36/safety-registers.controller.ts` `/safeguarding-referrals` | `pages/registers/Safeguarding.tsx` (Compliance › Incidents & concerns) | `test/v36-safety.test.ts` |
+| Accidents & damage (42) | 0044 | same file, `/vehicle-accidents` | `pages/registers/FleetSafety.tsx` (Vehicles › Equipment & care) | same |
+| Medicines & gases, CD balance checks (42) | 0044 | same file, `/vehicle-stock`, `/controlled-drug-checks` | same | same |
+| Probation & appraisals, sickness & RTW, leavers (35) | 0045 | `v36/people-records.controller.ts` `/staff-reviews`, `/staff-absences`, `/leavers` | `pages/registers/PeopleRecords.tsx` (Staff › Training & reviews) | `test/v36-people.test.ts` |
+| Open shifts, swaps, hours, patterns (34) | 0046 | `v36/rota.controller.ts` `/open-shifts`, `/shift-swaps`, `/shift-time`, `/shift-patterns` | `pages/registers/RotaRecords.tsx` (Staff › Shifts) | `test/v36-rota.test.ts` |
+| Business continuity (43) | 0047 | `v36/governance-records.controller.ts` `/continuity-plans` | `pages/registers/GovernanceRecords.tsx` (Work planner › Contracts & continuity) | `test/v36-governance.test.ts` |
+| Statement of purpose (40) | 0047 | same file, `/statement-of-purpose` | same (Compliance › Policies & governance) | same |
+| DSP Toolkit (39) | 0047 | same file, `/dspt` | same (Compliance › Notifications & data) | same |
+
+Contracts: `packages/contracts/src/v36.ts` (schemas and DTOs) and `routes-v36.ts` (spread into
+`routes`). Web screen test: `apps/web/test/v36-registers.test.tsx`.
+
+**Rules built in (server and database, not just the UI)**
+
+- Safeguarding: restricted by RLS to `events.safeguarding.view`; patient reference only (a name is
+  refused); what was raised and the referral itself cannot be edited; an abuse allegation drafts a
+  CQC notification (Reg 18) and cannot be marked "not referred".
+- Accidents: "not safe to drive" raises a CRITICAL stop-use defect through the existing defect
+  domain functions, so existing gates block the vehicle and the existing four-eyes release returns
+  it to service. Closing needs the defect released and, if someone was hurt, a linked incident.
+- Vehicle stock checks count every listed item; checks are immutable. Controlled drug checks need
+  a different, named witness who signs on their own account; a difference or refusal stays
+  "incident needed" until an event is linked.
+- Reviews: recorded once, never by the person reviewed; the next review is scheduled from the
+  outcome. Absence: category only; RLS limits it to `staff.sensitive.view` or the person; an open
+  absence adds an OTHER restriction ("Off sick") that the interview lifts; a phased return adds a
+  time-limited restriction. Trigger: 3 episodes in 6 months (Bradford score shown).
+- Leavers: completion needs the existing lifecycle move to LEAVER (which ends access) plus every
+  item; records kept six years after the last day.
+- Open shifts and swaps write crew assignments the same way `jobs.controller` `addCrew` /
+  `swapCrew` do (leaver check, within shift, no double booking via the exclusion constraint).
+  Swaps need the colleague to agree and someone outside the swap to approve; approval swaps both
+  at once and stores working-time prompts. Hours: crew clock in/out on their own assignment; a
+  manager records or corrects with a reason (new superseding entry). Not a pay calculation.
+- Statement of purpose: one draft at a time; published by someone other than the author;
+  publishing supersedes the old version and drafts a CHANGE_OF_DETAILS CQC notification.
+- DSP Toolkit: one assessment per year with 8 standard items; an item is "in place" only with a
+  note on where the evidence is; a submitted year is locked.
+
+**Added later on 17 Nov 2026**
+
+- Applying a shift pattern: Staff › Shifts › Patterns › "Apply to a vehicle" creates one shift per
+  working day (1–12 weeks, optional crew member and role) by calling the planner's own
+  `POST /shifts` for each day, so every planner check applies. Days that clash or fail a check are
+  listed as refused; the others are still created. Web test in `v36-registers.test.tsx`.
+- Continuity tests raise actions: a result of "Actions raised" or "Failed" needs an action owner
+  and due date and creates a tracked action (source CONTINUITY, severity MEDIUM or HIGH) in the
+  existing actions list, closed by someone other than its owner. Migration 0048 adds CONTINUITY to
+  `action_source_type_check` (the same way 0033 added PREMISES) and `continuity_test.action_id`.
+  One-line additions: `ActionSourceType` in `packages/contracts/src/governance.ts`, the
+  `createAction` source union in `packages/domain/src/governance.ts`, and the action label and
+  "Open the continuity plan" link in `pages/compliance/Compliance.tsx`.
+- Mobile app: My shift › Quick actions › "Clock in, open shifts and swaps" opens
+  `apps/mobile/src/screens/Rota.tsx` (clock in/out with breaks, offer/withdraw on open shifts,
+  agree/decline/withdraw/ask for swaps). Online only and says so; nothing is queued on the device.
+  Wired in `src/app/nav.tsx` (route `rota`), `src/app/Main.tsx` and `src/screens/MyShift.tsx`.
+  Test `apps/mobile/test/rota.test.tsx`; `test/fakes.tsx` gained an `extra` route hook for it.
+
+**Not done (deliberately)**
+
+- No alerts are raised for these registers (the alerts centre maps source types per role).
+
+**Existing files touched (registration only)**
+
+`apps/api/src/app.module.ts` (controller list), `packages/contracts/src/routes.ts` (one spread),
+`packages/contracts/src/index.ts` (one export), `packages/db/prisma/schema.prisma` (new models
+appended), `apps/web/src/nav.ts` (Staff › Shifts link), `pages/compliance/Compliance.tsx`,
+`pages/fleet/Fleet.tsx`, `pages/staff/StaffList.tsx`, `pages/planner/Planner.tsx` (views wired in),
+and the "not kept yet" notes in `pages/fleet/v36/Care.tsx` and `pages/staff/v36/Rota.tsx`.
+Crew now see a Shifts tab in Staff (open shifts, swaps, my hours).
+
+**Test state on 17 Nov 2026**
+
+- API: 1474 pass, 39 fail. 38 of those failed before this work (mostly shift creation returning
+  422 in fixtures). The 39th, `m2.test.ts` "plans one notification per window…", passes on its own
+  and fails only in the full run: it assumes fewer than one batch (200) of pending notifications
+  in the shared test database, and the new test files add records to it. The test needs
+  isolating; the feature is unaffected. All 18 new v36 API tests pass; OpenAPI and isolation
+  tests cover the new routes.
+- Web: 75 tests in 21 files fail, exactly the same 75 with the original screen files (older tests
+  that predate the v36 screen layout). The 5 new screen tests in `v36-registers.test.tsx` pass.
+- Type check and lint are clean for API and web.

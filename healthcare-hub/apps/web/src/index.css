@@ -1,17 +1,38 @@
-/* Self-hosted variable fonts (SIL OFL). The CSP only allows 'self', so no Google Fonts. */
+/* Self-hosted Manrope (CSP: self only). Matches Healthcare Hub UK v36. */
 @font-face {
-  font-family: 'Inter Variable';
+  font-family: 'Manrope';
   font-style: normal;
   font-display: swap;
-  font-weight: 100 900;
-  src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 400;
+  src: url('/fonts/manrope-latin-400-normal.woff2') format('woff2');
 }
 @font-face {
-  font-family: 'Space Grotesk Variable';
+  font-family: 'Manrope';
   font-style: normal;
   font-display: swap;
-  font-weight: 300 700;
-  src: url('/fonts/space-grotesk-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 500;
+  src: url('/fonts/manrope-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('/fonts/manrope-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('/fonts/manrope-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 800;
+  src: url('/fonts/manrope-latin-800-normal.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono Variable';
@@ -25,342 +46,280 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ------------------------------------------------------------------------------------------
-   Theme tokens (light navy + teal, from the wireframe). tailwind.config.cjs maps these to the hub.* colours.
-   Inside .on-dark (sidebar, sign-in hero) the same tokens flip to light-on-dark.
-   ------------------------------------------------------------------------------------------ */
 :root {
   color-scheme: light;
-  --hub-ink: 31 58 82;
-  --hub-muted: 82 103 122;
-  --hub-teal: 15 124 134;
-  --hub-teal-dark: 11 99 107;
-  --hub-line: 214 225 234;
-  --hub-edge: 100 116 139;
-  --grad-primary: linear-gradient(135deg, #0f7c86 0%, #0b636b 100%);
-  --on-primary: #ffffff;
-  --glow: 15 124 134;
+  --hub-bg: 245 245 245;
+  --hub-card: 255 255 255;
+  --hub-hover: 250 250 250;
+  --hub-ink: 0 0 0;
+  --hub-mut: 0 0 0;
+  --hub-line: 240 240 240;
+  --hub-line2: 217 217 217;
+  --hub-accent: 22 103 217;
+  --hub-accent-strong: 9 74 179;
+  --v36-primary: #1667d9;
+  --v36-sider-w: 232px;
+  --v36-hdr-h: 56px;
+  --v36-pad: 16px;
+  --v36-radius: 6px;
+  --side: #ffffff;
+  --side-ink: rgba(0, 0, 0, 0.88);
+  --side-mut: rgba(0, 0, 0, 0.65);
+  --side-on: #e6f4ff;
 }
-.on-dark {
-  --hub-ink: 240 246 250;
-  --hub-muted: 190 205 218;
-  --hub-teal: 94 200 212;
-  --hub-teal-dark: 150 222 230;
-  --hub-line: 54 84 110;
-  --hub-edge: 125 150 175;
+html.dark {
+  color-scheme: dark;
+  --hub-bg: 10 18 32;
+  --hub-card: 20 20 20;
+  --hub-hover: 31 31 31;
+  --hub-ink: 255 255 255;
+  --hub-mut: 255 255 255;
+  --hub-line: 48 48 48;
+  --hub-line2: 66 66 66;
+  --hub-accent: 140 188 240;
+  --hub-accent-strong: 156 198 228;
+  --side: #141414;
+  --side-ink: rgba(255, 255, 255, 0.85);
+  --side-mut: rgba(255, 255, 255, 0.65);
+  --side-on: rgba(22, 103, 217, 0.2);
 }
 
 @layer base {
-  html {
-    @apply bg-hub-bg font-sans text-slate-900 antialiased;
-    background-image:
-      radial-gradient(1100px 560px at 8% -12%, rgb(15 124 134 / 0.12), transparent 62%),
-      radial-gradient(900px 520px at 100% 0%, rgb(31 58 82 / 0.07), transparent 58%),
-      radial-gradient(900px 600px at 50% 120%, rgb(15 124 134 / 0.08), transparent 60%);
-    background-attachment: fixed;
+  html,
+  body,
+  #root {
+    min-height: 100%;
   }
   body {
-    @apply bg-transparent;
-    min-height: 100vh;
+    margin: 0;
+    background: rgb(var(--hub-bg));
+    color: rgba(0, 0, 0, 0.88);
+    font-family: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  /* A faint engineering grid that fades out down the page. */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background-image:
-      linear-gradient(rgb(31 58 82 / 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(31 58 82 / 0.05) 1px, transparent 1px);
-    background-size: 44px 44px;
-    -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
-    mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
-  }
-  h1,
-  h2,
-  h3 {
-    @apply font-display text-hub-ink;
-    letter-spacing: -0.012em;
-  }
-  h1 {
-    letter-spacing: -0.02em;
+  html.dark body {
+    color: rgba(255, 255, 255, 0.85);
   }
   code,
   kbd,
   samp,
   pre {
-    @apply font-mono;
-  }
-  table {
-    font-variant-numeric: tabular-nums;
-  }
-  ::selection {
-    background: rgb(15 124 134 / 0.28);
-  }
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: #b7c6d3 transparent;
-  }
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #b7c6d3;
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #8aa3b8;
-    background-clip: content-box;
-    border: 2px solid transparent;
-  }
-  /* Form controls that pages do not style themselves. */
-  :where(
-    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
-    select,
-    textarea
-  ) {
-    background-color: #fff;
-    color: #1f3a52;
-    border-width: 1px;
-    border-style: solid;
-    border-color: #64748b;
-    border-radius: 0.5rem;
-  }
-  :where(input, textarea)::placeholder {
-    color: #5a6f82;
-  }
-  :where(input[type='checkbox'], input[type='radio']) {
-    accent-color: #0f7c86;
-  }
-  :where(button, [role='button'], summary, select):not(:disabled) {
-    cursor: pointer;
-  }
-  :where(button, a, input, select, textarea, [role='tab']) {
-    transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease,
-      box-shadow 0.18s ease,
-      color 0.15s ease,
-      filter 0.15s ease,
-      transform 0.1s ease;
-  }
-  :where(button):active:not(:disabled) {
-    transform: translateY(1px) scale(0.99);
-  }
-  :where(button):disabled {
-    cursor: not-allowed;
+    font-family: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 }
 
-/* ------------------------------------------------------------------------------------------
-   Component classes (used by the shared helpers in components.tsx and by pages directly)
-   ------------------------------------------------------------------------------------------ */
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold;
-    background-image: var(--grad-primary);
-    background-color: #0f7c86;
-    color: var(--on-primary);
-    box-shadow:
-      0 0 0 1px rgb(11 99 107 / 0.45),
-      0 8px 18px -8px rgb(var(--glow) / 0.65);
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-1.5 text-sm font-semibold;
+    background: #1667d9;
+    color: #fff;
+    border: 1px solid #094ab3;
   }
   .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.05) saturate(1.1);
-    box-shadow:
-      0 0 0 1px rgb(11 99 107 / 0.6),
-      0 10px 24px -8px rgb(var(--glow) / 0.8);
+    background: #3c88e6;
   }
   .btn-primary:disabled {
-    @apply opacity-50;
-    filter: saturate(0.4);
-    box-shadow: none;
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-hub-edge bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium;
+    border-color: #d9d9d9;
+    background: #fff;
+    color: rgba(0, 0, 0, 0.88);
   }
   .btn-ghost:hover:not(:disabled) {
-    border-color: #0f7c86;
-    background-color: #e8f3f5;
-    box-shadow: 0 6px 16px -8px rgb(var(--glow) / 0.7);
-  }
-  .on-dark .btn-ghost {
-    background-color: rgb(255 255 255 / 0.04);
-  }
-  .on-dark .btn-ghost:hover:not(:disabled) {
-    background-color: rgb(94 200 212 / 0.16);
-    border-color: #5ec8d4;
-  }
-  .btn-ghost:disabled {
-    @apply opacity-50;
+    background: rgba(0, 0, 0, 0.04);
   }
   .field {
-    @apply rounded-lg border border-hub-edge bg-hub-field px-2.5 py-1.5 text-hub-ink;
-  }
-  .field:hover {
-    border-color: #0b636b;
+    @apply w-full rounded-md border px-2.5 py-1.5 text-sm;
+    border-color: #d9d9d9;
+    background: #fff;
+    color: rgba(0, 0, 0, 0.88);
   }
   .field:focus {
-    border-color: #0f7c86;
-    box-shadow: 0 0 0 3px rgb(15 124 134 / 0.25);
+    outline: none;
+    border-color: #1667d9;
+    box-shadow: 0 0 0 2px rgb(22 103 217 / 0.18);
   }
   .section-title {
-    @apply flex items-center gap-2;
+    @apply m-0 text-base font-semibold;
   }
-  .section-title::before {
-    content: '';
-    width: 4px;
-    height: 1.05em;
-    border-radius: 2px;
-    background: var(--grad-primary);
-    box-shadow: 0 0 8px rgb(var(--glow) / 0.5);
+  /* v36 page chrome */
+  .v36-page {
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 0;
   }
-  /* HUD corner brackets: a quiet futuristic accent for key panels. */
-  .hud {
-    position: relative;
+  .v36-kpi {
+    height: 112px;
+    border-radius: 8px;
+    cursor: default;
   }
-  .hud::before,
-  .hud::after {
-    content: '';
-    position: absolute;
-    width: 14px;
-    height: 14px;
-    pointer-events: none;
-    border: 2px solid rgb(15 124 134 / 0.85);
+  .v36-kpi[data-act] {
+    cursor: pointer;
   }
-  .hud::before {
-    top: -1px;
-    left: -1px;
-    border-right: 0;
-    border-bottom: 0;
-    border-top-left-radius: inherit;
+  .v36-kpi[data-act]:hover {
+    border-color: #1667d9;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 4px 0 rgba(0, 0, 0, 0.03);
   }
-  .hud::after {
-    bottom: -1px;
-    right: -1px;
-    border-left: 0;
+  .v36-kpi.v36-kpi-on {
+    border-color: #1667d9;
+    box-shadow: 0 0 0 2px rgb(22 103 217 / 0.18);
+  }
+  .v36-kpi .ant-card-body {
+    padding: 16px 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .v36-srch {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    width: 340px;
+    max-width: 34vw;
+    padding: 0 8px 0 11px !important;
+    border: 1px solid #d9d9d9 !important;
+    border-radius: 6px;
+    background: #fff !important;
+    color: rgba(0, 0, 0, 0.45) !important;
+    justify-content: flex-start;
+  }
+  .v36-srch-lbl {
+    flex: 1;
+    text-align: left;
+    font-weight: 400;
+  }
+  .v36-srch-kbd {
+    font-size: 11px;
+    line-height: 18px;
+    padding: 0 5px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    background: #fafafa;
+    color: rgba(0, 0, 0, 0.45);
+  }
+  .v36-side-menu.ant-menu-inline .ant-menu-item {
+    margin-inline: 8px;
+    width: calc(100% - 16px);
+    border-radius: 6px;
+  }
+  .wf-task {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 4px;
+    border-top: 1px solid #ebedf0;
+    color: inherit;
+    text-decoration: none;
+  }
+  a .wf-task {
+    color: inherit;
+  }
+  .wf-task:first-child {
     border-top: 0;
-    border-bottom-right-radius: inherit;
   }
-  .glass {
-    background-color: rgb(255 255 255 / 0.78);
-    -webkit-backdrop-filter: blur(14px) saturate(1.3);
-    backdrop-filter: blur(14px) saturate(1.3);
+  .wf-task.row-click:hover {
+    background: rgba(0, 0, 0, 0.02);
   }
-  .neon-rule {
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgb(var(--hub-teal) / 0.55), transparent);
+  .wf-task .ic {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 700;
+    background: #e6f4ff;
+    color: #1667d9;
   }
-  /* Entry animation for pages. */
+  .wf-task .ic-red {
+    background: #fef3f2;
+    color: #b42318;
+  }
+  .wf-task .ic-amber {
+    background: #fffaeb;
+    color: #b54708;
+  }
+  .wf-task .ic-purple {
+    background: #f9f5ff;
+    color: #6941c6;
+  }
+  .wf-task .ic-green {
+    background: #ecfdf3;
+    color: #027a48;
+  }
+  .wf-task .tx {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .wf-task .tx b {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.88);
+  }
+  .wf-task .tx span {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.65);
+  }
+  .tg-nw {
+    flex: none;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  @media (max-width: 991px) {
+    .v36-me-text {
+      display: none;
+    }
+    .v36-srch {
+      width: auto;
+      max-width: none;
+    }
+    .v36-srch-lbl {
+      display: none;
+    }
+  }
+  .chip-date {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    font: 600 13px Manrope, system-ui, 'Segoe UI', Arial, sans-serif;
+    color: rgba(0, 0, 0, 0.65);
+    padding: 0 6px;
+  }
+  html.dark .chip-date {
+    color: rgba(255, 255, 255, 0.65);
+  }
   .rise-in {
-    animation: rise-in 0.35s ease-out both;
+    animation: rise-in 0.2s ease-out both;
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 }
 
-/* ------------------------------------------------------------------------------------------
-   Legacy utility upgrades. Pages use these classes inline; restyling them here lifts every
-   button and panel without touching each page.
-   ------------------------------------------------------------------------------------------ */
-
-/* Primary action: teal gradient with white text (AA: 4.9:1 or better). */
 .bg-hub-teal {
-  background-color: #0f7c86;
-  background-image: var(--grad-primary);
-  color: var(--on-primary);
-  box-shadow:
-    0 0 0 1px rgb(11 99 107 / 0.45),
-    0 8px 18px -8px rgb(var(--glow) / 0.65);
+  background-color: #1667d9 !important;
+  background-image: none !important;
+  color: #fff !important;
 }
-button.bg-hub-teal:hover:not(:disabled),
-a.bg-hub-teal:hover {
-  filter: brightness(1.05) saturate(1.1);
-}
-button.bg-hub-teal:disabled {
-  filter: saturate(0.4);
-  box-shadow: none;
-}
-.bg-hub-teal.text-white {
-  color: var(--on-primary);
-}
-/* Panels: faint cool top light and soft depth. */
-.bg-hub-card {
-  background-image: linear-gradient(180deg, rgb(232 243 246 / 0.7), transparent 46%);
-}
-.rounded-lg.bg-hub-card:not(button):not(input):not(select) {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.9),
-    0 10px 28px -16px rgb(31 58 82 / 0.22);
-}
-button.bg-hub-card:hover:not(:disabled),
-button.rounded-lg.border:hover:not(:disabled) {
-  border-color: #0f7c86;
-  box-shadow: 0 8px 20px -8px rgb(var(--glow) / 0.6);
-}
-
-/* Secondary buttons written inline as bordered buttons. */
-button.border-slate-500:not(.bg-hub-teal):hover:not(:disabled) {
-  border-color: #0f7c86;
-  box-shadow: 0 6px 16px -8px rgb(var(--glow) / 0.7);
-}
-
-/* Controls keep a clearly visible edge, unless the page marks them as an error. */
-input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not(
-    [class*='border-red']
-  ),
-select:not([class*='border-red']),
-textarea:not([class*='border-red']) {
-  border-color: #64748b;
-}
-input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not(
-    [disabled]
-  ):hover,
-select:not([disabled]):hover,
-textarea:not([disabled]):hover {
-  border-color: #0b636b;
-}
-input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):focus,
-select:focus,
-textarea:focus {
-  border-color: #0f7c86;
-  box-shadow: 0 0 0 3px rgb(15 124 134 / 0.25);
-  outline: none;
-}
-input:disabled,
-select:disabled,
-textarea:disabled {
-  opacity: 0.55;
-}
-/* Controls inside dark regions (the organisation switcher) use light edges and text. */
-.on-dark select,
-.on-dark input:not([type='checkbox']):not([type='radio']) {
-  background-color: #2b4a66;
-  color: #fff;
-  border-color: #7d93a8;
-}
-
-/* Keyboard focus is always obvious (WCAG 2.2 AA focus appearance). */
-:focus-visible {
-  outline: 2px solid #0b636b;
-  outline-offset: 2px;
-  box-shadow: 0 0 0 5px rgb(15 124 134 / 0.22);
-}
-.on-dark :focus-visible {
-  outline-color: #bfe8ee;
-}
-
-/* Status rows and panels get a faint glow so they read as live signals (text + icon remain). */
-[data-status='RED'] {
-  box-shadow: 0 0 14px -6px rgb(220 38 38 / 0.5);
-}
-[data-status='AMBER'] {
-  box-shadow: 0 0 14px -6px rgb(217 119 6 / 0.5);
-}
-[data-status='GREEN'] {
-  box-shadow: 0 0 14px -6px rgb(22 163 74 / 0.5);
+button.bg-hub-teal:hover:not(:disabled) {
+  background-color: #3c88e6 !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -368,30 +327,6 @@ textarea:disabled {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* Printed records (reports, audits, evidence) stay legible on paper: back to ink on white. */
-@media print {
-  html,
-  body {
-    background: #fff !important;
-  }
-  body::before {
-    display: none;
-  }
-  * {
-    color: #000 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    text-shadow: none !important;
-    border-color: #888 !important;
-  }
-  .hud::before,
-  .hud::after {
-    display: none;
   }
 }

@@ -191,10 +191,16 @@ describe('draft dental and care-home packs with mock organisations', () => {
   });
 
   it('does not ask for a specialist on the ambulance pack', async () => {
-    const t = await templateId(
-      (m, u, b) => call(m, u, { sub: 'dev|manager', org: SEED_IDS.orgExample, body: b }),
-      'AMBULANCE_V1',
-    );
+    // The day-one starter configuration adopts most of the pack: pick one it has not adopted.
+    const all = (
+      await call('GET', '/api/v1/requirements/templates', {
+        sub: 'dev|manager',
+        org: SEED_IDS.orgExample,
+      })
+    ).body.data as J[];
+    const adopted = new Set(all.filter((x) => !x.isLibrary).map((x) => x.code as string));
+    const t = all.find((x) => x.isLibrary && x.pack === 'AMBULANCE_V1' && !adopted.has(x.code))!;
+    expect(t, 'an ambulance library template not adopted yet').toBeTruthy();
     const r = await call('POST', `/api/v1/requirements/templates/${t.id}/adopt`, {
       sub: 'dev|manager',
       org: SEED_IDS.orgExample,

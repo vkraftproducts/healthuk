@@ -1,25 +1,36 @@
 import { StatusBadge, type StatusKind } from '@hub/ui';
 import { addDays, formatDate, londonDate, londonDateTime, londonTime } from '@hub/rules';
 import { useQueries } from '@tanstack/react-query';
-import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from 'react';
+import { Alert, Button, Input, Modal, Select, Space } from 'antd';
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type DragEvent,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import {
   ActionDialog,
   Field,
   Section,
-  button,
+  Tabs,
   errText,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
+  PageHeader,
 } from '../../components.js';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useApp } from '../../shell/AppContext.js';
+import { NhsContracts } from '../compliance/Regulatory.js';
 import { useOne } from '../settings/hooks.js';
 import { CrewReadiness } from './CrewReadiness.js';
 import { ShiftActions } from './ShiftActions.js';
+import { BusinessContinuity } from '../registers/GovernanceRecords.js';
+import { Ms } from '../../v36/ui.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -54,7 +65,8 @@ const jobWord = (state: string) =>
 const span = (a: string, b: string) => `${londonTime(new Date(a))}–${londonTime(new Date(b))}`;
 
 /** Work planner (wireframe 04, JOB-02/03): the server decides; the screen explains. */
-export function Planner() {
+function PlannerDay({ nav }: { nav?: ReactNode }) {
+  const [dialog, setDialog] = useState<'shift' | 'journey' | null>(null);
   const { me, orgId } = useApp();
   const can = useCan();
   const canView = me.permissions.includes('jobs.job.view');
@@ -101,34 +113,57 @@ export function Planner() {
     }
   };
 
-  if (!orgId) return <p role="status">Select an organisation to continue.</p>;
-  if (!canView) return <p role="alert">You do not have permission to view the work planner.</p>;
+  if (!orgId)
+    return (
+      <Alert type="info" showIcon role="status" message="Select an organisation to continue." />
+    );
+  if (!canView)
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        role="alert"
+        message="You do not have permission to view the work planner."
+      />
+    );
   return (
-    <div className="space-y-6">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Work planner</h1>
-          <p className="text-slate-700">
-            Allocate journeys to vehicles and crews. Every assignment is checked by the server
-            before it is saved.
-          </p>
-        </div>
+        <PageHeader
+          title="Work planner"
+          description="Allocate journeys to vehicles and crews. Every assignment is checked by the server before it is saved."
+          extra={
+            <Space wrap>
+              {can('jobs.allocate') && (
+                <Button onClick={() => setDialog('shift')}>
+                  <Ms i="event_available" /> Plan a shift
+                </Button>
+              )}
+              {can('jobs.booking.manage') && (
+                <Button type="primary" onClick={() => setDialog('journey')}>
+                  <Ms i="add" /> Book a journey
+                </Button>
+              )}
+            </Space>
+          }
+        />
         <div className="flex flex-wrap items-end gap-3">
-          <div role="group" aria-label="View" className="flex gap-1">
+          <div className="wf-seg2" role="group" aria-label="View">
             {(['day', 'week'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
+                className={view === v ? 'on' : ''}
                 aria-pressed={view === v}
                 onClick={() => setView(v)}
-                className={`${smallButton} ${view === v ? '!bg-hub-navy !text-white' : ''}`}
               >
+                <Ms i={v === 'day' ? 'view_day' : 'view_week'} />
                 {v === 'day' ? 'Day' : 'Week'}
               </button>
             ))}
           </div>
           <Field label="Date">
-            <input
+            <Input
               type="date"
               value={date}
               onChange={(e) => {
@@ -137,25 +172,21 @@ export function Planner() {
                 setShiftId(null);
                 setManageId(null);
               }}
-              className={input}
             />
           </Field>
           <Field label="Location">
-            <select
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
-              className={input}
-            >
-              <option value="">All locations</option>
-              {(locations.data?.data ?? []).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              value={locationId || undefined}
+              allowClear
+              placeholder="All locations"
+              onChange={(v) => setLocationId(v ?? '')}
+              style={{ minWidth: 160 }}
+              options={(locations.data?.data ?? []).map((l) => ({ value: l.id, label: l.name }))}
+            />
           </Field>
         </div>
       </div>
+      {nav}
 
       {view === 'week' ? (
         <WeekView
@@ -171,141 +202,167 @@ export function Planner() {
           <strong>Source unavailable.</strong> The planner could not be loaded.
         </div>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-3">
+        <div className="wf-stack">
           <section
             aria-labelledby="grid-h"
             aria-busy={planner.isLoading}
-            className="rounded-lg border border-hub-line bg-hub-card p-4 xl:col-span-2"
+            className="wf-card ant-card ant-card-bordered"
           >
-            <h2 id="grid-h" className="mb-2 text-lg font-bold">
-              Vehicles and crews
-            </h2>
-            {!planner.isLoading && shifts.length === 0 && (
-              <p role="status">No shifts planned for this day.</p>
-            )}
-            {shifts.length > 0 && (
-              <div className="ml-[14.75rem] flex text-xs text-slate-700" aria-hidden="true">
-                {Array.from({ length: last - first }, (_, i) => (
-                  <span key={i} className="flex-1 border-l border-hub-line pl-0.5">
-                    {String(first + i).padStart(2, '0')}
-                  </span>
-                ))}
+            <div className="wf-ch ant-card-head">
+              <div className="ant-card-head-wrapper">
+                <div className="ant-card-head-title">
+                  <h2 id="grid-h">Timeline – {fmtDate(date)}</h2>
+                </div>
+                <div className="ant-card-extra">
+                  <span className="wf-mini">Drag a journey onto a vehicle’s row to assign it</span>
+                </div>
               </div>
-            )}
-            <ul className="space-y-2">
-              {shifts.map((s) => {
-                const blocked = UNAVAILABLE.includes(s.vehicleStatus);
-                const crew = (s.crew as Row[]).filter((c) => c.active);
-                const label = `${s.vehicleCallsign} / ${crew.map((c) => c.displayName).join(' + ') || 'no crew'}`;
-                return (
-                  <li
-                    key={s.id}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => onDrop(e, s.id)}
-                    className={`flex items-stretch gap-2 rounded border p-1 ${shiftId === s.id ? 'border-hub-teal ring-2 ring-hub-teal' : 'border-hub-line'}`}
-                  >
-                    <div className="w-56 shrink-0 text-sm">
-                      <div className="font-semibold">{label}</div>
-                      <div className="text-slate-700">
-                        {span(s.startsAt, s.endsAt)} · {words(s.state)}
-                      </div>
-                      {job && can('jobs.allocate') && (
-                        <button
-                          className={`${smallButton} mt-1`}
-                          aria-label={`Check ${job.code} on ${s.vehicleCallsign}`}
-                          onClick={() => choose(s.id)}
-                        >
-                          Assign here
-                        </button>
-                      )}
-                      {can('jobs.allocate') && ['PLANNED', 'STARTED'].includes(s.state) && (
-                        <button
-                          className={`${smallButton} mt-1 ml-1`}
-                          aria-label={`Manage shift for ${s.vehicleCallsign}`}
-                          aria-pressed={manageId === s.id}
-                          onClick={() => setManageId(manageId === s.id ? null : s.id)}
-                        >
-                          Manage shift
-                        </button>
-                      )}
-                    </div>
-                    <div
-                      className={`relative min-h-12 flex-1 rounded ${blocked ? 'bg-[repeating-linear-gradient(45deg,rgb(220_38_38/0.22),rgb(220_38_38/0.22)_6px,transparent_6px,transparent_12px)]' : 'bg-slate-50'}`}
-                    >
-                      <div
-                        className="absolute inset-y-0 rounded bg-green-50"
-                        style={pos(s.startsAt, s.endsAt)}
-                        aria-hidden="true"
-                      />
-                      {blocked && (
-                        <span className="absolute top-1 right-1 rounded bg-hub-card px-1 text-sm font-semibold text-red-900">
-                          BLOCKED – {words(s.vehicleStatus)}
-                        </span>
-                      )}
-                      {(s.jobs as Row[]).map((j) => (
-                        <span
-                          key={j.jobId}
-                          className="absolute top-5 truncate rounded border border-slate-500 bg-hub-card px-1 text-xs"
-                          style={pos(j.startsAt, j.endsAt)}
-                          title={`${j.code} ${jobWord(j.state)} ${span(j.startsAt, j.endsAt)}`}
-                        >
-                          {j.code} {jobWord(j.state)}
+            </div>
+            <div className="ant-card-body">
+              {!planner.isLoading && shifts.length === 0 && (
+                <p role="status">No shifts planned for this day.</p>
+              )}
+              {shifts.length > 0 && (
+                <div className="pl">
+                  <div className="pl-h" aria-hidden="true">
+                    <div className="pl-v" />
+                    <div className="pl-track">
+                      {Array.from({ length: Math.floor((last - first) / 2) + 1 }, (_, i) => (
+                        <span key={i} style={{ left: `${((i * 2) / (last - first)) * 100}%` }}>
+                          {String(first + i * 2).padStart(2, '0')}:00
                         </span>
                       ))}
-                      <ul className="sr-only">
-                        {(s.jobs as Row[]).map((j) => (
-                          <li key={j.jobId}>
-                            {j.code} {jobWord(j.state)} {span(j.startsAt, j.endsAt)}
-                          </li>
-                        ))}
-                      </ul>
                     </div>
-                  </li>
-                );
-              })}
-            </ul>
-            <p className="mt-2 text-sm text-slate-700">
-              Drag an unallocated job onto a row, or select the job and choose “Assign here”.
-            </p>
-            {managed && (
-              <div className="mt-4 border-t border-hub-line pt-4">
-                <ShiftActions
-                  shift={managed}
-                  otherShifts={shifts}
-                  onClose={() => setManageId(null)}
-                />
-              </div>
-            )}
+                  </div>
+                  {shifts.map((s) => {
+                    const blocked = UNAVAILABLE.includes(s.vehicleStatus) || !!s.vehicleBlockReason;
+                    const blockLabel = s.vehicleBlockReason
+                      ? s.vehicleBlockReason
+                      : words(s.vehicleStatus);
+                    const crew = (s.crew as Row[]).filter((c) => c.active);
+                    const crewText = crew.map((c) => c.displayName).join(' + ') || 'No crew';
+                    return (
+                      <div
+                        key={s.id}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => onDrop(e, s.id)}
+                        className={`pl-row${blocked ? ' blocked' : ''}${shiftId === s.id ? ' on' : ''}`}
+                      >
+                        <div className="pl-v">
+                          <Ms i="ambulance" />
+                          <div>
+                            <b>{s.vehicleCallsign}</b>
+                            <small>
+                              {blocked ? (
+                                <span style={{ color: 'var(--rd)' }}>Blocked – {blockLabel}</span>
+                              ) : (
+                                `${crewText} · ${span(s.startsAt, s.endsAt)}`
+                              )}
+                            </small>
+                            <span className="pl-act">
+                              {job && can('jobs.allocate') && (
+                                <Button
+                                  size="small"
+                                  aria-label={`Check ${job.code} on ${s.vehicleCallsign}`}
+                                  onClick={() => choose(s.id)}
+                                >
+                                  Assign here
+                                </Button>
+                              )}
+                              {can('jobs.allocate') && ['PLANNED', 'STARTED'].includes(s.state) && (
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  aria-label={`Manage shift for ${s.vehicleCallsign}`}
+                                  aria-pressed={manageId === s.id}
+                                  onClick={() => setManageId(manageId === s.id ? null : s.id)}
+                                >
+                                  <Ms i="more_horiz" />
+                                </Button>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="pl-track">
+                          <i
+                            className="pl-shift"
+                            style={pos(s.startsAt, s.endsAt)}
+                            aria-hidden="true"
+                          />
+                          {(s.jobs as Row[]).map((j) => (
+                            <span
+                              key={j.jobId}
+                              className={`pl-job${blocked ? ' bad' : ''}`}
+                              style={pos(j.startsAt, j.endsAt)}
+                              title={`${j.code} ${jobWord(j.state)} ${span(j.startsAt, j.endsAt)} · ${crewText}`}
+                            >
+                              <b>{j.code}</b>
+                              <small>
+                                {londonTime(new Date(j.startsAt))} · {jobWord(j.state)}
+                              </small>
+                            </span>
+                          ))}
+                          <ul className="sr-only">
+                            {(s.jobs as Row[]).map((j) => (
+                              <li key={j.jobId}>
+                                {j.code} {jobWord(j.state)} {span(j.startsAt, j.endsAt)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {managed && (
+                <div className="mt-4 border-t pt-4">
+                  <ShiftActions
+                    shift={managed}
+                    otherShifts={shifts}
+                    onClose={() => setManageId(null)}
+                  />
+                </div>
+              )}
+            </div>
           </section>
 
-          <div className="space-y-6">
-            <section
-              aria-labelledby="unalloc-h"
-              className="rounded-lg border border-hub-line bg-hub-card p-4"
-            >
-              <h2 id="unalloc-h" className="mb-2 text-lg font-bold">
-                Unallocated jobs ({unallocated.length})
-              </h2>
-              {unallocated.length === 0 && <p>Every job for this day has a crew.</p>}
-              <ul className="flex flex-wrap gap-2">
-                {unallocated.map((j) => (
-                  <li key={j.id}>
-                    <button
-                      draggable
-                      onDragStart={(e) => e.dataTransfer.setData('text/plain', j.id)}
-                      aria-pressed={jobId === j.id}
-                      onClick={() => {
-                        setJobId(jobId === j.id ? null : j.id);
-                        setShiftId(null);
-                      }}
-                      className={`rounded border px-2 py-1 text-sm ${jobId === j.id ? 'border-hub-navy bg-hub-navy text-white' : 'border-slate-500'}`}
-                    >
-                      {j.code} {londonTime(new Date(j.pickupFrom))} · {words(j.state)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {job && <JobCard job={job} />}
+          <div className="wf-stack">
+            <section aria-labelledby="unalloc-h" className="wf-card ant-card ant-card-bordered">
+              <div className="wf-ch ant-card-head">
+                <div className="ant-card-head-wrapper">
+                  <div className="ant-card-head-title">
+                    <h2 id="unalloc-h">Needs a vehicle ({unallocated.length})</h2>
+                  </div>
+                  <div className="ant-card-extra">
+                    <span className="wf-mini">
+                      Select a journey, then “Assign here” on a vehicle
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="ant-card-body">
+                {unallocated.length === 0 && <p>Every job for this day has a crew.</p>}
+                <ul className="flex flex-wrap gap-2">
+                  {unallocated.map((j) => (
+                    <li key={j.id}>
+                      <Button
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData('text/plain', j.id)}
+                        aria-pressed={jobId === j.id}
+                        onClick={() => {
+                          setJobId(jobId === j.id ? null : j.id);
+                          setShiftId(null);
+                        }}
+                        className={`rounded border px-2 py-1 text-sm ${jobId === j.id ? 'var(--ant-color-primary) var(--ant-color-primary) text-white' : 'border-slate-500'}`}
+                      >
+                        {j.code} {londonTime(new Date(j.pickupFrom))} · {words(j.state)}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+                {job && <JobCard job={job} />}
+              </div>
             </section>
             {job && shift && (
               <ValidatePanel
@@ -323,9 +380,23 @@ export function Planner() {
         </div>
       )}
       {can('allocation.exception.approve') && <ExceptionRequests />}
-      {can('jobs.booking.manage') && <BookJourney date={date} locations={locations.data?.data} />}
-      {can('jobs.allocate') && <PlanShift date={date} locations={locations.data?.data} />}
-    </div>
+      <Modal
+        open={dialog !== null}
+        title={dialog === 'shift' ? 'Plan a shift' : 'Book a journey'}
+        onCancel={() => setDialog(null)}
+        footer={null}
+        width={860}
+        className="hh-modal"
+        destroyOnHidden
+      >
+        {dialog === 'journey' && can('jobs.booking.manage') && (
+          <BookJourney date={date} locations={locations.data?.data} />
+        )}
+        {dialog === 'shift' && can('jobs.allocate') && (
+          <PlanShift date={date} locations={locations.data?.data} />
+        )}
+      </Modal>
+    </Space>
   );
 }
 
@@ -359,13 +430,13 @@ function WeekView(p: { from: string; locationId: string; onPick: (d: string) => 
       <h2 id="week-h" className="mb-2 text-lg font-bold">
         Week from {formatDate(p.from)}
       </h2>
-      <table className="w-full border-collapse bg-hub-card text-sm">
+      <table className="w-full border-collapse var(--ant-color-bg-container) text-sm">
         <caption className="sr-only">Shifts and jobs by vehicle and day</caption>
         <thead>
           <tr>
             <th
               scope="col"
-              className="border border-hub-line bg-hub-navy p-1.5 text-left text-white"
+              className="border var(--ant-color-border) var(--ant-color-primary) p-1.5 text-left text-white"
             >
               Vehicle
             </th>
@@ -373,11 +444,11 @@ function WeekView(p: { from: string; locationId: string; onPick: (d: string) => 
               <th
                 key={d}
                 scope="col"
-                className="border border-hub-line bg-hub-navy p-1.5 text-left text-white"
+                className="border var(--ant-color-border) var(--ant-color-primary) p-1.5 text-left text-white"
               >
-                <button className="text-white underline" onClick={() => p.onPick(d)}>
+                <Button className="text-white underline" onClick={() => p.onPick(d)}>
                   {formatDate(d)}
-                </button>
+                </Button>
                 <div className="font-normal text-slate-200">
                   {results[i]?.data?.unallocated.length ?? '…'} unallocated
                 </div>
@@ -397,22 +468,25 @@ function WeekView(p: { from: string; locationId: string; onPick: (d: string) => 
             <tr key={v}>
               <th
                 scope="row"
-                className="border border-hub-line bg-hub-row p-1.5 text-left text-hub-ink"
+                className="border var(--ant-color-border) bg-hub-row p-1.5 text-left text-hub-ink"
               >
                 {v}
               </th>
               {days.map((d, i) => {
                 const ss = (results[i]?.data?.shifts ?? []).filter((s) => s.vehicleCallsign === v);
                 return (
-                  <td key={d} className="border border-hub-line bg-hub-card p-1 align-top">
+                  <td
+                    key={d}
+                    className="border var(--ant-color-border) var(--ant-color-bg-container) p-1 align-top"
+                  >
                     {ss.length === 0
                       ? '—'
                       : ss.map((s) => (
                           <div key={s.id}>
                             {span(s.startsAt, s.endsAt)} · {(s.jobs as Row[]).length} jobs
-                            {UNAVAILABLE.includes(s.vehicleStatus) && (
+                            {(UNAVAILABLE.includes(s.vehicleStatus) || s.vehicleBlockReason) && (
                               <div className="font-semibold text-red-900">
-                                BLOCKED – {words(s.vehicleStatus)}
+                                BLOCKED – {s.vehicleBlockReason ?? words(s.vehicleStatus)}
                               </div>
                             )}
                           </div>
@@ -433,7 +507,7 @@ function JobCard({ job }: { job: Row }) {
   return (
     <dl
       aria-label={`Job ${job.code}`}
-      className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-hub-line pt-3 text-sm"
+      className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t var(--ant-color-border) pt-3 text-sm"
     >
       <dt className="font-semibold">Pickup window</dt>
       <dd>{span(job.pickupFrom, job.pickupTo)}</dd>
@@ -497,7 +571,10 @@ function ValidatePanel({
   }
 
   return (
-    <section aria-labelledby="val-h" className="rounded-lg border border-hub-line bg-hub-card p-4">
+    <section
+      aria-labelledby="val-h"
+      className="rounded-lg border var(--ant-color-border) var(--ant-color-bg-container) p-4"
+    >
       <h2 id="val-h" className="text-lg font-bold">
         Validate assignment
       </h2>
@@ -533,15 +610,16 @@ function ValidatePanel({
               <p className="mt-1 text-slate-800">
                 How to fix: {c.fix.text}{' '}
                 {c.fix.action === 'SHIFT_ACTIONS' ? (
-                  <button
-                    className={smallButton}
+                  <Button
+                    type="link"
+                    size="small"
                     aria-label={`Open shift ${shift.vehicleCallsign} to fix ${
                       CHECK_LABEL[c.code] ?? 'this check'
                     }`}
                     onClick={() => onManage(shift.id)}
                   >
                     Manage shift
-                  </button>
+                  </Button>
                 ) : c.fix.action === 'VEHICLE' ? (
                   <a className="underline" href={`/vehicles/${shift.vehicleId}`}>
                     Open {shift.vehicleCallsign}
@@ -567,15 +645,15 @@ function ValidatePanel({
               c.overridable &&
               latest(c.code)?.status !== 'REQUESTED' &&
               (can('allocation.exception.approve') || can('jobs.allocate')) && (
-                <button
-                  className={`${smallButton} mt-1`}
+                <Button
+                  className={`mt-1`}
                   aria-label={`${approver ? 'Approve an exception' : 'Ask for an exception'} for ${
                     CHECK_LABEL[c.code] ?? 'this check'
                   }`}
                   onClick={() => setExcepting(c.code)}
                 >
                   {approver ? 'Approve exception' : 'Ask for an exception'}
-                </button>
+                </Button>
               )}
             {excepting === c.code && (
               <ExceptionForm
@@ -593,14 +671,14 @@ function ValidatePanel({
           </li>
         ))}
       </ul>
-      <button
-        className={`${button} mt-3`}
+      <Button
+        className={`mt-3`}
         disabled={!allowed || v.loading}
         aria-describedby={!allowed ? 'alloc-why' : undefined}
         onClick={() => void allocate()}
       >
         Allocate and notify crew
-      </button>
+      </Button>
       {!allowed && !v.loading && (
         <p id="alloc-why" className="mt-1 text-sm text-slate-700">
           Unavailable until every failed check is resolved.
@@ -652,7 +730,10 @@ function ExceptionRequests() {
       {!res.isLoading && rows.length === 0 && <p role="status">No exceptions are waiting.</p>}
       <ul className="space-y-2">
         {rows.map((r) => (
-          <li key={r.id} className="rounded-lg border border-hub-line bg-hub-card p-3 text-sm">
+          <li
+            key={r.id}
+            className="rounded-lg border var(--ant-color-border) var(--ant-color-bg-container) p-3 text-sm"
+          >
             <p className="font-semibold">{name(r)}</p>
             <p>
               Asked by {r.requestedByName ?? 'a dispatcher'} on {fmtDateTime(r.requestedAt)}, to
@@ -663,20 +744,22 @@ function ExceptionRequests() {
               <p className="text-slate-700">You asked for this: someone else must decide.</p>
             ) : (
               <div className="mt-1 flex gap-2">
-                <button
-                  className={smallButton}
+                <Button
+                  type="link"
+                  size="small"
                   aria-label={`Approve exception for ${name(r)}`}
                   onClick={() => setDeciding({ r, d: 'APPROVED' })}
                 >
                   Approve
-                </button>
-                <button
-                  className={smallButton}
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
                   aria-label={`Refuse exception for ${name(r)}`}
                   onClick={() => setDeciding({ r, d: 'REJECTED' })}
                 >
                   Refuse
-                </button>
+                </Button>
               </div>
             )}
           </li>
@@ -774,10 +857,10 @@ function ExceptionForm(p: {
   return (
     <form
       onSubmit={submit}
-      className="mt-2 space-y-2 rounded-lg border border-hub-line bg-hub-card p-2"
+      className="mt-2 space-y-2 rounded-lg border var(--ant-color-border) var(--ant-color-bg-container) p-2"
     >
       <Field label="Reason (recorded in the audit trail)">
-        <textarea name="reason" required minLength={10} maxLength={1000} className={input} />
+        <textarea name="reason" required minLength={10} maxLength={1000} />
       </Field>
       <Field label="Valid until (at most 7 days)">
         <input
@@ -787,16 +870,15 @@ function ExceptionForm(p: {
           min={londonDate(new Date())}
           max={max}
           defaultValue={londonDate(new Date())}
-          className={input}
         />
       </Field>
       <div className="flex gap-2">
-        <button className={button}>
+        <Button htmlType="submit" type="primary">
           {p.mode === 'approve' ? 'Approve exception' : 'Send request'}
-        </button>
-        <button type="button" className={smallButton} onClick={p.onClose}>
+        </Button>
+        <Button type="link" size="small" onClick={p.onClose}>
           Cancel
-        </button>
+        </Button>
       </div>
       {msg}
     </form>
@@ -934,178 +1016,122 @@ function BookJourney({ date, locations }: { date: string; locations?: Row[] }) {
       setWithReturn(false);
     }
   }
+  const weightNeeded = mobility === 'STRETCHER' || mobility === 'BARIATRIC';
   return (
     <Section title="Book a journey">
-      <form
-        onSubmit={submit}
-        className="flex flex-wrap items-end gap-3"
-        aria-label="Book a journey"
-      >
-        <Field label="Customer">
-          <input name="customer" required minLength={2} className={input} />
-        </Field>
-        <Field label="Customer order number (optional)">
-          <input name="reference" maxLength={60} className={input} />
-        </Field>
-        <Field label="Booking reference (never a patient name)">
-          <input
-            name="ref"
-            required
-            pattern="[A-Za-z0-9\-]{2,30}"
-            title="Letters, numbers and hyphens only: use the booking reference, not a name"
-            aria-describedby="ref-help"
-            className={input}
-          />
-        </Field>
-        <p id="ref-help" className="w-full text-xs text-slate-700">
-          The reference is shown on the grid and to crews. Never type a patient&apos;s name here.
-        </p>
-        <Field label="Contract">
-          <select
-            name="contract"
-            className={input}
-            value={contract}
-            onChange={(e) => setContract(e.target.value)}
-          >
-            <option value="">Not stated</option>
-            <option value="NHS">NHS</option>
-            <option value="PRIVATE">Private</option>
-            <option value="INSURER">Insurer</option>
-          </select>
-        </Field>
-        {contract === 'NHS' && (
-          <fieldset className="flex flex-wrap items-end gap-3 text-sm">
-            <legend className="font-medium">NHS eligibility</legend>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" name="nhsMet" /> Eligibility criteria met
-            </label>
-            <Field label="Criteria applied">
-              <input name="nhsCriteria" required minLength={3} maxLength={500} className={input} />
+      <form onSubmit={submit} className="hh-form" aria-label="Book a journey">
+        <fieldset>
+          <legend>Journey</legend>
+          <div className="hh-grid">
+            <Field label="Journey date">
+              <input name="date" type="date" required defaultValue={date} />
             </Field>
-            <Field label="Assessed by">
+            <Field label="Pickup from">
+              <input name="from" type="time" required />
+            </Field>
+            <Field label="Pickup by">
+              <input name="to" type="time" required />
+            </Field>
+            <Field label="Minutes">
+              <input name="duration" type="number" min={10} max={720} defaultValue={60} />
+            </Field>
+            <Field label="Mobility">
+              <select
+                name="mobility"
+                value={mobility}
+                onChange={(e) => setMobility(e.target.value)}
+              >
+                {Object.entries(MOBILITY_LABEL).map(([m, label]) => (
+                  <option key={m} value={m}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Crew">
+              <input name="crew" type="number" min={1} max={4} defaultValue={2} />
+            </Field>
+            {weightNeeded && (
+              <Field label="Patient weight in kg (checked against stretcher and vehicle load)">
+                <input name="weight" type="number" min={1} max={500} required />
+              </Field>
+            )}
+            <Field label="Patient reference (never a name)">
               <input
-                name="nhsAssessedBy"
+                name="ref"
                 required
-                minLength={2}
-                maxLength={120}
-                className={input}
+                pattern="[A-Za-z0-9\-]{2,30}"
+                title="Letters, numbers and hyphens only: use the booking reference, not a name"
+                aria-describedby="ref-help"
               />
             </Field>
-          </fieldset>
-        )}
-        <Field label="Location">
-          <select name="location" required className={input}>
-            {(locations ?? []).map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Journey date">
-          <input name="date" type="date" required defaultValue={date} className={input} />
-        </Field>
-        <Field label="Pickup from">
-          <input name="from" type="time" required className={input} />
-        </Field>
-        <Field label="Pickup by">
-          <input name="to" type="time" required className={input} />
-        </Field>
-        <Field label="Appointment time (optional)">
-          <input name="appointment" type="time" className={input} />
-        </Field>
-        <Field label="Minutes">
-          <input
-            name="duration"
-            type="number"
-            min={10}
-            max={720}
-            defaultValue={60}
-            className={`${input} w-20`}
-          />
-        </Field>
-        <Field label="Pickup address">
-          <input name="pickup" required minLength={3} className={input} />
-        </Field>
-        <Field label="Destination">
-          <input name="destination" required minLength={3} className={input} />
-        </Field>
-        <Field label="Access notes (optional, no names)">
-          <input name="accessNotes" maxLength={500} className={input} />
-        </Field>
-        <Field label="Mobility">
-          <select
-            name="mobility"
-            className={input}
-            value={mobility}
-            onChange={(e) => setMobility(e.target.value)}
-          >
-            {Object.entries(MOBILITY_LABEL).map(([m, label]) => (
-              <option key={m} value={m}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={
-            mobility === 'STRETCHER' || mobility === 'BARIATRIC'
-              ? 'Patient weight in kg (checked against stretcher and vehicle load)'
-              : 'Patient weight in kg (optional)'
-          }
-        >
-          <input
-            name="weight"
-            type="number"
-            min={1}
-            max={500}
-            required={mobility === 'STRETCHER' || mobility === 'BARIATRIC'}
-            className={`${input} w-24`}
-          />
-        </Field>
-        <Field label="Escorts travelling">
-          <input
-            name="escorts"
-            type="number"
-            min={0}
-            max={4}
-            defaultValue={0}
-            className={`${input} w-16`}
-          />
-        </Field>
-        <Field label="Crew">
-          <input
-            name="crew"
-            type="number"
-            min={1}
-            max={4}
-            defaultValue={2}
-            className={`${input} w-16`}
-          />
-        </Field>
-        <Field label="Communication needs (optional)">
-          <input
-            name="comms"
-            maxLength={200}
-            placeholder="For example: British Sign Language"
-            className={input}
-          />
-        </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="stairs" /> Stairs at pickup or destination
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="infection" /> Infection precautions needed
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="access" /> Access plan reviewed
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="blueLights" /> Blue-light (emergency) journey
-        </label>
-        <fieldset className="flex flex-wrap items-end gap-3 text-sm">
-          <legend className="font-medium">Return journey</legend>
-          <label className="flex items-center gap-2">
+          </div>
+          <p id="ref-help" className="hh-help">
+            The reference is shown on the grid and to crews. Never type a patient&apos;s name here.
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Where</legend>
+          <div className="hh-grid">
+            <Field label="Location">
+              <select name="location" required>
+                {(locations ?? []).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Pickup address">
+              <input name="pickup" required minLength={3} />
+            </Field>
+            <Field label="Destination">
+              <input name="destination" required minLength={3} />
+            </Field>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Booking</legend>
+          <div className="hh-grid">
+            <Field label="Customer">
+              <input name="customer" required minLength={2} />
+            </Field>
+            <Field label="Contract">
+              <select
+                name="contract"
+                value={contract}
+                onChange={(e) => setContract(e.target.value)}
+              >
+                <option value="">Not stated</option>
+                <option value="NHS">NHS</option>
+                <option value="PRIVATE">Private</option>
+                <option value="INSURER">Insurer</option>
+              </select>
+            </Field>
+            <Field label="Customer order number (optional)">
+              <input name="reference" maxLength={60} />
+            </Field>
+          </div>
+          {contract === 'NHS' && (
+            <div className="hh-grid">
+              <label className="hh-check">
+                <input type="checkbox" name="nhsMet" /> NHS eligibility criteria met
+              </label>
+              <Field label="Criteria applied">
+                <input name="nhsCriteria" required minLength={3} maxLength={500} />
+              </Field>
+              <Field label="Assessed by">
+                <input name="nhsAssessedBy" required minLength={2} maxLength={120} />
+              </Field>
+            </div>
+          )}
+        </fieldset>
+
+        <fieldset>
+          <legend>Return journey</legend>
+          <label className="hh-check">
             <input
               type="checkbox"
               checked={withReturn}
@@ -1114,75 +1140,121 @@ function BookJourney({ date, locations }: { date: string; locations?: Row[] }) {
             Book a return journey (destination back to pickup)
           </label>
           {withReturn && (
-            <>
+            <div className="hh-grid">
               <Field label="Return pickup from">
-                <input name="returnFrom" type="time" required className={input} />
+                <input name="returnFrom" type="time" required />
               </Field>
               <Field label="Return pickup by">
-                <input name="returnTo" type="time" required className={input} />
+                <input name="returnTo" type="time" required />
               </Field>
-            </>
+            </div>
           )}
         </fieldset>
-        <fieldset className="flex flex-wrap gap-3 text-sm">
-          <legend className="font-medium">Equipment needed</legend>
-          {Object.entries(EQUIPMENT_NEEDS).map(([k, v]) => (
-            <label key={k} className="flex items-center gap-1">
-              <input type="checkbox" name="equipment" value={k} /> {v}
+
+        <details className="hh-more">
+          <summary>More details (optional)</summary>
+          <div className="hh-grid">
+            <Field label="Appointment time">
+              <input name="appointment" type="time" />
+            </Field>
+            {!weightNeeded && (
+              <Field label="Patient weight in kg">
+                <input name="weight" type="number" min={1} max={500} />
+              </Field>
+            )}
+            <Field label="Escorts travelling">
+              <input name="escorts" type="number" min={0} max={4} defaultValue={0} />
+            </Field>
+            <Field label="Access notes (no names)">
+              <input name="accessNotes" maxLength={500} />
+            </Field>
+            <Field label="Communication needs">
+              <input
+                name="comms"
+                maxLength={200}
+                placeholder="For example: British Sign Language"
+              />
+            </Field>
+          </div>
+          <div className="hh-checks">
+            <label className="hh-check">
+              <input type="checkbox" name="stairs" /> Stairs at pickup or destination
             </label>
-          ))}
-        </fieldset>
-        <fieldset className="flex flex-wrap gap-3 text-sm">
-          <legend className="font-medium">Crew skills needed</legend>
-          {Object.entries(SKILL_NEEDS).map(([k, v]) => (
-            <label key={k} className="flex items-center gap-1">
-              <input type="checkbox" name="skills" value={k} /> {v}
+            <label className="hh-check">
+              <input type="checkbox" name="infection" /> Infection precautions needed
             </label>
-          ))}
-        </fieldset>
-        <fieldset className="flex flex-wrap items-end gap-3 text-sm">
-          <legend className="font-medium">
-            Patient contact (kept separately, shown only to staff allowed to see it)
-          </legend>
-          <Field label="Contact name (optional)">
-            <input name="contactName" maxLength={120} autoComplete="off" className={input} />
-          </Field>
-          <Field label="Contact phone (optional)">
-            <input
-              name="contactPhone"
-              type="tel"
-              maxLength={30}
-              autoComplete="off"
-              className={input}
-            />
-          </Field>
-        </fieldset>
-        <fieldset className="flex flex-wrap items-end gap-3 text-sm">
-          <legend className="font-medium">Repeat</legend>
-          <Field label="Repeats">
-            <select className={input} value={repeat} onChange={(e) => setRepeat(e.target.value)}>
-              <option value="">Does not repeat</option>
-              <option value="DAILY">Every day</option>
-              <option value="WEEKLY">Every week</option>
-            </select>
-          </Field>
-          {repeat === 'WEEKLY' && (
-            <fieldset className="flex flex-wrap items-center gap-2">
-              <legend className="text-sm">On these days (leave blank for the booking day)</legend>
-              {WEEKDAYS.map((d, i) => (
-                <label key={d} className="flex items-center gap-1">
-                  <input type="checkbox" name="weekday" value={i + 1} /> {d}
+            <label className="hh-check">
+              <input type="checkbox" name="access" /> Access plan reviewed
+            </label>
+            <label className="hh-check">
+              <input type="checkbox" name="blueLights" /> Blue-light (emergency) journey
+            </label>
+          </div>
+          <fieldset>
+            <legend>Equipment needed</legend>
+            <div className="hh-checks">
+              {Object.entries(EQUIPMENT_NEEDS).map(([k, v]) => (
+                <label key={k} className="hh-check">
+                  <input type="checkbox" name="equipment" value={k} /> {v}
                 </label>
               ))}
-            </fieldset>
-          )}
-          {repeat && (
-            <Field label="Until">
-              <input name="until" type="date" required min={date} className={input} />
-            </Field>
-          )}
-        </fieldset>
-        <button className={button}>Book</button>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Crew skills needed</legend>
+            <div className="hh-checks">
+              {Object.entries(SKILL_NEEDS).map(([k, v]) => (
+                <label key={k} className="hh-check">
+                  <input type="checkbox" name="skills" value={k} /> {v}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>
+              Patient contact (kept separately, shown only to staff allowed to see it)
+            </legend>
+            <div className="hh-grid">
+              <Field label="Contact name">
+                <input name="contactName" maxLength={120} autoComplete="off" />
+              </Field>
+              <Field label="Contact phone">
+                <input name="contactPhone" type="tel" maxLength={30} autoComplete="off" />
+              </Field>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Repeat</legend>
+            <div className="hh-grid">
+              <Field label="Repeats">
+                <select value={repeat} onChange={(e) => setRepeat(e.target.value)}>
+                  <option value="">Does not repeat</option>
+                  <option value="DAILY">Every day</option>
+                  <option value="WEEKLY">Every week</option>
+                </select>
+              </Field>
+              {repeat && (
+                <Field label="Until">
+                  <input name="until" type="date" required min={date} />
+                </Field>
+              )}
+            </div>
+            {repeat === 'WEEKLY' && (
+              <div className="hh-checks" role="group" aria-label="On these days">
+                {WEEKDAYS.map((d, i) => (
+                  <label key={d} className="hh-check">
+                    <input type="checkbox" name="weekday" value={i + 1} /> {d}
+                  </label>
+                ))}
+              </div>
+            )}
+          </fieldset>
+        </details>
+        <div className="hh-actions">
+          <Button type="primary" htmlType="submit">
+            Book journey
+          </Button>
+        </div>
       </form>
       {msg}
       {warnings.length > 0 && (
@@ -1262,138 +1334,152 @@ function PlanShift({ date, locations }: { date: string; locations?: Row[] }) {
   const unusable = all.filter((v) => v.status !== 'AVAILABLE');
   return (
     <Section title="Plan a shift">
-      <form onSubmit={submit} className="flex flex-wrap items-end gap-3" aria-label="Plan a shift">
-        <Field label="Location">
-          <select name="location" required className={input}>
-            {(locations ?? []).map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Vehicle">
-          <select
-            name="vehicle"
-            required
-            className={input}
-            value={vehicleId || usable[0]?.id || ''}
-            onChange={(e) => setVehicleId(e.target.value)}
-          >
-            {usable.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.callsign}
-              </option>
-            ))}
-            {unusable.length > 0 && (
-              <optgroup label="Not available (cannot be planned)">
-                {unusable.map((v) => (
-                  <option key={v.id} value={v.id} disabled>
-                    {v.callsign} – {VEHICLE_WORD[v.status] ?? 'not available'}
-                    {v.statusReason ? `: ${v.statusReason}` : ''}
-                    {v.expectedReturnOn ? `; expected back ${fmtDate(v.expectedReturnOn)}` : ''}
+      <form onSubmit={submit} className="hh-form" aria-label="Plan a shift">
+        <fieldset>
+          <legend>When and where</legend>
+          <div className="hh-grid">
+            <Field label="Location">
+              <select name="location" required>
+                {(locations ?? []).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
                   </option>
                 ))}
-              </optgroup>
+              </select>
+            </Field>
+            <Field label="Vehicle">
+              <select
+                name="vehicle"
+                required
+
+                value={vehicleId || usable[0]?.id || ''}
+                onChange={(e) => setVehicleId(e.target.value)}
+              >
+                {usable.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.callsign}
+                  </option>
+                ))}
+                {unusable.length > 0 && (
+                  <optgroup label="Not available (cannot be planned)">
+                    {unusable.map((v) => (
+                      <option key={v.id} value={v.id} disabled>
+                        {v.callsign} – {VEHICLE_WORD[v.status] ?? 'not available'}
+                        {v.statusReason ? `: ${v.statusReason}` : ''}
+                        {v.expectedReturnOn ? `; expected back ${fmtDate(v.expectedReturnOn)}` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+            <Field label="Shift date">
+              <input
+                name="date"
+                type="date"
+                required
+                value={day}
+                onChange={(e) => setDay(e.target.value)}
+              />
+            </Field>
+            <Field label="Start">
+              <input
+                name="start"
+                type="time"
+                required
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+              />
+            </Field>
+            <Field label="End">
+              <input
+                name="end"
+                type="time"
+                required
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+              />
+            </Field>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Crew</legend>
+          <div className="hh-grid">
+            <Field label="Driver">
+              <select
+                name="driver"
+                required
+
+                value={driverId}
+                onChange={(e) => {
+                  setDriver(e.target.value);
+                  if (second === e.target.value) setSecond('');
+                }}
+              >
+                {drivers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.displayName} ({p.staffNo})
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Second crew member">
+              <select
+                name="second"
+
+                value={second}
+                onChange={(e) => setSecond(e.target.value)}
+              >
+                <option value="">None</option>
+                {people
+                  .filter((p) => p.id !== driverId)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.displayName} ({p.staffNo})
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <Field label="Second crew role">
+              <select
+                name="secondRole"
+
+                value={secondRole}
+                onChange={(e) => setSecondRole(e.target.value)}
+              >
+                {['CARE_ASSISTANT', 'EMERGENCY_CARE_ASSISTANT', 'TECHNICIAN', 'PARAMEDIC'].map(
+                  (r) => (
+                    <option key={r} value={r}>
+                      {words(r)}
+                    </option>
+                  ),
+                )}
+              </select>
+            </Field>
+          </div>
+        </fieldset>
+        <details className="hh-more">
+          <summary>Part-shift times (optional)</summary>
+          <div className="hh-grid">
+            <Field label="Driver from">
+              <input name="driverFrom" type="time" />
+            </Field>
+            <Field label="Driver to">
+              <input name="driverTo" type="time" />
+            </Field>
+            {second && (
+              <>
+                <Field label="Second crew from">
+                  <input name="secondFrom" type="time" />
+                </Field>
+                <Field label="Second crew to">
+                  <input name="secondTo" type="time" />
+                </Field>
+              </>
             )}
-          </select>
-        </Field>
-        <Field label="Shift date">
-          <input
-            name="date"
-            type="date"
-            required
-            value={day}
-            onChange={(e) => setDay(e.target.value)}
-            className={input}
-          />
-        </Field>
-        <Field label="Start">
-          <input
-            name="start"
-            type="time"
-            required
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className={input}
-          />
-        </Field>
-        <Field label="End">
-          <input
-            name="end"
-            type="time"
-            required
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            className={input}
-          />
-        </Field>
-        <Field label="Driver">
-          <select
-            name="driver"
-            required
-            className={input}
-            value={driverId}
-            onChange={(e) => {
-              setDriver(e.target.value);
-              if (second === e.target.value) setSecond('');
-            }}
-          >
-            {drivers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.displayName} ({p.staffNo})
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Driver from (optional)">
-          <input name="driverFrom" type="time" className={input} />
-        </Field>
-        <Field label="Driver to (optional)">
-          <input name="driverTo" type="time" className={input} />
-        </Field>
-        <Field label="Second crew member">
-          <select
-            name="second"
-            className={input}
-            value={second}
-            onChange={(e) => setSecond(e.target.value)}
-          >
-            <option value="">None</option>
-            {people
-              .filter((p) => p.id !== driverId)
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName} ({p.staffNo})
-                </option>
-              ))}
-          </select>
-        </Field>
-        <Field label="Second crew role">
-          <select
-            name="secondRole"
-            className={input}
-            value={secondRole}
-            onChange={(e) => setSecondRole(e.target.value)}
-          >
-            {['CARE_ASSISTANT', 'EMERGENCY_CARE_ASSISTANT', 'TECHNICIAN', 'PARAMEDIC'].map((r) => (
-              <option key={r} value={r}>
-                {words(r)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {second && (
-          <>
-            <Field label="Second crew from (optional)">
-              <input name="secondFrom" type="time" className={input} />
-            </Field>
-            <Field label="Second crew to (optional)">
-              <input name="secondTo" type="time" className={input} />
-            </Field>
-          </>
-        )}
-        <div className="w-full space-y-1">
+          </div>
+        </details>
+        <div className="hh-ready">
           {driverId && shiftWindow && (
             <CrewReadiness
               staffId={driverId}
@@ -1412,9 +1498,51 @@ function PlanShift({ date, locations }: { date: string; locations?: Row[] }) {
             />
           )}
         </div>
-        <button className={button}>Plan shift</button>
+        <div className="hh-actions">
+          <Button type="primary" htmlType="submit">
+            Plan shift
+          </Button>
+        </div>
       </form>
       {msg}
     </Section>
+  );
+}
+
+/** v36 Work planner: Planner · Contracts & continuity (commissioner contract measures). */
+export function Planner() {
+  const { me } = useApp();
+  const can = (p: string) => me.permissions.includes(p);
+  const { tab } = useSearch({ strict: false }) as { tab?: string };
+  const navigate = useNavigate();
+  const contracts = can('compliance.registration.manage') || can('compliance.audit.view');
+  const tabs = [
+    { id: 'planner', label: 'Planner' },
+    { id: 'contracts', label: 'Contracts & continuity', show: contracts },
+  ];
+  const current = tab === 'contracts' && contracts ? 'contracts' : 'planner';
+  const nav = contracts ? (
+    <Tabs
+      label="Work planner sections"
+      tabs={tabs}
+      current={current}
+      onChange={(id) =>
+        void navigate({ to: '/planner', search: id === 'planner' ? {} : { tab: id } })
+      }
+    >
+      {null}
+    </Tabs>
+  ) : null;
+  if (current === 'planner') return <PlannerDay nav={nav} />;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
+      <PageHeader
+        title="Work planner"
+        description="Commissioner contract measures and business continuity plans."
+      />
+      {nav}
+      <NhsContracts />
+      <BusinessContinuity />
+    </div>
   );
 }

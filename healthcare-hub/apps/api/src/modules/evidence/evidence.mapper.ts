@@ -30,6 +30,7 @@ type VersionRow = {
   mime: string | null;
   sizeBytes: bigint | null;
   sha256: string | null;
+  blobKey?: string;
   scanStatus: EvidenceVersionDto['scanStatus'];
   uploadedBy: string;
   uploadedAt: Date | null;
@@ -75,6 +76,10 @@ export function toEvidenceDto(v: VersionRow): EvidenceVersionDto {
     scanStatus: v.scanStatus,
     state,
     uploadedBy: v.uploadedBy,
+    channel: ((v as { channel?: string }).channel ?? 'OFFICE') as
+      | 'STAFF_APP'
+      | 'CANDIDATE_PORTAL'
+      | 'OFFICE',
     uploadedAt: iso(v.uploadedAt),
     validFrom: day(v.validFrom),
     validTo: day(v.verification?.confirmedValidTo ?? v.validTo),
@@ -83,7 +88,14 @@ export function toEvidenceDto(v: VersionRow): EvidenceVersionDto {
     reviewerId: v.verification?.reviewerId ?? null,
     decidedAt: iso(v.verification?.createdAt),
     linkedInstanceIds: v.item.links.map((l) => l.instanceId),
+    ...fileNameOf(v.blobKey),
   };
+}
+
+/** The original file name when the storage key keeps it ("…/DBS_Enhanced_JReed.pdf"). */
+function fileNameOf(key: string | undefined): { fileName?: string } {
+  const last = key?.split('/').pop();
+  return last && /\.[a-z0-9]{2,5}$/i.test(last) ? { fileName: last } : {};
 }
 
 /** Display names for user ids in this organisation (members only; others show as unknown). */

@@ -26,7 +26,7 @@ import { DB } from '../../db.provider.js';
 import { toVdiDto } from './fleet.mapper.js';
 
 type CleaningDtoT = z.infer<typeof CleaningDto>;
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const MAX_OFFLINE_MS = 7 * 86_400_000;
 const vdiInclude = {
   items: true,
@@ -215,12 +215,9 @@ export class InspectionsController {
           400,
           'Answer every checklist item (and only those)',
         );
-      if (input.results.some((r) => r.result !== 'PASS' && !r.reason))
-        throw new HubError(
-          'VALIDATION_FAILED',
-          400,
-          'A failed or not-applicable item needs a reason',
-        );
+      // Failed items need a reason. N/A does not (the crew app only prompts for FAIL).
+      if (input.results.some((r) => r.result === 'FAIL' && !r.reason))
+        throw new HubError('VALIDATION_FAILED', 400, 'A failed item needs a reason');
       for (const r of input.results)
         if (
           r.photoEvidenceItemId &&
@@ -267,7 +264,16 @@ export class InspectionsController {
       for (const i of items) {
         const r = byCode.get(i.code)!;
         if (r.result === 'FAIL')
-          await this.defectFromFailure(tx, hub, v, vdi.id, i, r.reason ?? '', captured);
+          await this.defectFromFailure(
+            tx,
+            hub,
+            v,
+            vdi.id,
+            i,
+            r.reason ?? '',
+            captured,
+            r.photoEvidenceItemId ?? null,
+          );
       }
       await refreshVehicleStatus(tx, v.id);
       await audit(this.db, tx, hub, {
@@ -281,7 +287,7 @@ export class InspectionsController {
     });
   }
 
-  /** A failed critical item is a CRITICAL stop-use defect at once (UAT-03); others need classifying. */
+  /** A failed critical item is a CRITICAL stop-use defect at once (UAT-03); others get a minor owned defect. */
   private async defectFromFailure(
     tx: TenantTx,
     hub: HubRequestContext,
@@ -290,17 +296,25 @@ export class InspectionsController {
     item: TemplateItem,
     reason: string,
     at: Date,
+    photoEvidenceItemId: string | null,
   ): Promise<void> {
+    const severity = item.critical ? 'CRITICAL' : 'MINOR';
+    const { defaultDefectOwnership } = await import('@hub/domain');
+    const ownership = await defaultDefectOwnership(tx, v.organisationId, severity, at);
     const d = await tx.defect.create({
       data: {
         organisationId: v.organisationId,
         vehicleId: v.id,
-        severity: item.critical ? 'CRITICAL' : 'MINOR',
+        severity,
         stopUse: item.critical,
         description: `VDI: ${item.label} failed – ${reason}`.slice(0, 1000),
         reportedBy: hub.user.id,
         discoveredAt: at,
         sourceVdiId: vdiId,
+        ownerUserId: ownership.ownerUserId,
+        reviewBy: ownership.reviewBy,
+        repairDeadline: ownership.repairDeadline,
+        photoEvidenceItemIds: photoEvidenceItemId ? [photoEvidenceItemId] : [],
       },
     });
     if (item.critical) {
@@ -372,7 +386,16 @@ export class InspectionsController {
           label: input.code,
           critical: item.critical,
         };
-        await this.defectFromFailure(tx, hub, v.vehicle, id, label, input.reason, new Date());
+        await this.defectFromFailure(
+          tx,
+          hub,
+          v.vehicle,
+          id,
+          label,
+          input.reason,
+          new Date(),
+          null,
+        );
         await refreshVehicleStatus(tx, v.vehicleId);
       }
       await audit(this.db, tx, hub, {
@@ -460,6 +483,7 @@ function tplDto(t: Prisma.VdiTemplateGetPayload<object>, names: Map<string, stri
     status: t.status as 'DRAFT' | 'PUBLISHED' | 'RETIRED',
     createdBy: t.createdBy,
     createdByName: name(t.createdBy),
+    createdAt: t.createdAt.toISOString(),
     publishedBy: t.publishedBy,
     publishedByName: name(t.publishedBy),
     publishedAt: t.publishedAt ? t.publishedAt.toISOString() : null,
@@ -472,8 +496,10 @@ function cleanDto(c: Prisma.CleaningRecordGetPayload<object>, duplicate: boolean
     vehicleId: c.vehicleId,
     type: c.type,
     cleanedBy: c.cleanedBy,
+    checkedBy: (c as { checkedBy?: string | null }).checkedBy ?? null,
     capturedAt: c.capturedAt.toISOString(),
     receivedAt: c.receivedAt.toISOString(),
+    notes: c.notes,
     duplicate,
   };
 }

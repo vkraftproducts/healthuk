@@ -4,7 +4,7 @@ import { LocalBlobStore, runPendingExports } from '@hub/domain';
 import { addDays, londonDate, londonDateTime } from '@hub/rules';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, SEED_USERS, makeApp, sign } from './harness.js';
+import { SEED_IDS, SEED_USERS, makeApp, sign, verifyVehicleDocuments } from './harness.js';
 
 // Workflow fix programme, tasks 16–27 (written 6 Nov 2026; not yet run).
 // Task 23 (stale organisation selection) is web-only: see apps/web/test/app.test.tsx.
@@ -957,9 +957,10 @@ describe('task 26: vehicle and planner operations', () => {
       sub: 'dev|fleet',
       body: {
         // D1: a current-format UK registration.
-        registration: `OP${10 + Math.floor(Math.random() * 90)}${
-          ['QXA', 'QXB', 'QXC', 'QXD'][Math.floor(Math.random() * 4)]!
-        }`,
+        registration: `OP${10 + Math.floor(Math.random() * 90)}${Array.from(
+          { length: 3 },
+          () => 'ABCDEFGHJKLMNPRSTUVWXYZ'[Math.floor(Math.random() * 23)],
+        ).join('')}`,
         callsign: `OPS-${tag()}`.toUpperCase(),
         type: 'PTS_VEHICLE',
         baseLocationId: SEED_IDS.locWatford,
@@ -968,6 +969,7 @@ describe('task 26: vehicle and planner operations', () => {
       },
     });
     expect(r.status).toBe(201);
+    await verifyVehicleDocuments(app, SEED_IDS.orgExample, r.body.id as string);
     return r.body as J;
   }
 

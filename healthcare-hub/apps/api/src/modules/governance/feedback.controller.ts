@@ -16,7 +16,7 @@ import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { toActionDto } from './audits.controller.js';
 
-export const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+export const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const VIEW = 'events.event.view';

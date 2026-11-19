@@ -29,7 +29,7 @@ const me = (orgId: string | null): MeResponse => ({
     },
   ],
   permissions: ['dashboard.view'],
-  activeOrganisationId: orgId,
+  activeOrganisationId: orgId ?? ORG_A,
   mfa: { required: false, satisfied: true },
 });
 
@@ -118,7 +118,11 @@ function setup() {
     if (p.startsWith('/api/v1/dashboard/summary')) return { ...summary, modules };
     if (p.startsWith('/api/v1/dashboard/group')) return group;
     if (p.startsWith('/api/v1/dashboard/actions')) return { data: rows };
+    if (p.startsWith('/api/v1/alerts/count')) return { open: 0, critical: 0 };
     if (p.includes('/locations')) return { data: [{ id: LOC, name: 'Watford' }] };
+    if (p.includes('/organisations/') && !p.includes('/locations')) {
+      return { sectorPacks: ['ambulance'] };
+    }
     if (p === '/api/v1/admin/people')
       return {
         data: [
@@ -145,10 +149,16 @@ function setup() {
   return get;
 }
 
+async function openOverview() {
+  await userEvent.click(await screen.findByRole('tab', { name: 'Overview' }));
+  await userEvent.click(await screen.findByRole('button', { name: /Detailed view/ }));
+  await screen.findByLabelText('Overdue tasks: 1');
+}
+
 describe('dashboard filters and group view (DASH-01)', () => {
   it('sends the chosen location and date range to the API', async () => {
     const get = setup();
-    await screen.findByLabelText('Overdue tasks: 1');
+    await openOverview();
     await userEvent.selectOptions(screen.getByLabelText('Location'), LOC);
     await userEvent.type(screen.getByLabelText('Deadline from'), '2026-11-01');
     await userEvent.type(screen.getByLabelText('Deadline to'), '2026-11-30');
@@ -166,7 +176,7 @@ describe('dashboard filters and group view (DASH-01)', () => {
 
   it('does not apply an end date before the start date and says so', async () => {
     setup();
-    await screen.findByLabelText('Overdue tasks: 1');
+    await openOverview();
     await userEvent.type(screen.getByLabelText('Deadline from'), '2026-11-10');
     await userEvent.type(screen.getByLabelText('Deadline to'), '2026-11-01');
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -176,6 +186,7 @@ describe('dashboard filters and group view (DASH-01)', () => {
 
   it('names owners, shows UK dates, and lists owners by name for anyone (task 8)', async () => {
     setup();
+    await openOverview();
     const row = await screen.findByRole('row', { name: /Fix the sluice/ });
     expect(row).toHaveTextContent('Priya Governance');
     expect(row).toHaveTextContent('4 Nov 2026');
@@ -189,6 +200,7 @@ describe('dashboard filters and group view (DASH-01)', () => {
 
   it('a module filter narrows the action list only and keeps module statuses (task 8)', async () => {
     const get = setup();
+    await openOverview();
     await userEvent.click(await screen.findByRole('button', { name: /Fleet \(1 blocked\)/ }));
     await waitFor(() => {
       const calls = get.mock.calls.map((c) => String(c[0]));
@@ -205,6 +217,7 @@ describe('dashboard filters and group view (DASH-01)', () => {
 
   it('shows counts per organisation, with an unavailable organisation shown as such, not as zero', async () => {
     setup();
+    await openOverview();
     const region = await screen.findByRole('region', { name: 'All my organisations' });
     await within(region).findByText('Alpha Transport');
     expect(region).toHaveTextContent('Alpha Transport');

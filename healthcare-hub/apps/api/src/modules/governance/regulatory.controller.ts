@@ -66,7 +66,7 @@ import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { toActionDto } from './audits.controller.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const REG = 'compliance.registration.manage';
 const VIEW = 'compliance.audit.view';
 const MEETINGS = 'governance.meeting.manage';

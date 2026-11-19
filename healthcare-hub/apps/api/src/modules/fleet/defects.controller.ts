@@ -48,7 +48,7 @@ import { DB } from '../../db.provider.js';
 import { userNames } from '../evidence/evidence.mapper.js';
 import { day, defectDto, defectDtos, toExpenseDto } from './fleet.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 
 /**
  * Defects (FLT-06): a stop-use or critical defect blocks the vehicle immediately and alerts
@@ -110,6 +110,13 @@ export class DefectsController {
       }
       await ownEvidence(tx, hub, input.photoEvidenceItemIds);
       const subject = await subjectOf(tx, input.vehicleId, input.assetId);
+      const { defaultDefectOwnership } = await import('@hub/domain');
+      const ownership = await defaultDefectOwnership(
+        tx,
+        hub.orgId as string,
+        input.severity,
+        discovered,
+      );
       const d = await tx.defect.create({
         data: {
           organisationId: hub.orgId as string,
@@ -122,6 +129,9 @@ export class DefectsController {
           discoveredAt: discovered,
           clientSubmissionId: input.clientSubmissionId ?? null,
           photoEvidenceItemIds: input.photoEvidenceItemIds,
+          ownerUserId: ownership.ownerUserId,
+          reviewBy: ownership.reviewBy,
+          repairDeadline: ownership.repairDeadline,
         },
         include: { release: true },
       });
@@ -176,11 +186,20 @@ export class DefectsController {
         !(await tx.evidenceItem.count({ where: { id: input.repairJobSheetEvidenceItemId } }))
       )
         throw new HubError('VALIDATION_FAILED', 400, 'Upload the job sheet first');
+      if (
+        input.ownerUserId &&
+        !(await tx.membership.count({
+          where: { userId: input.ownerUserId, validTo: null, user: { status: 'ACTIVE' } },
+        }))
+      )
+        throw new HubError('VALIDATION_FAILED', 400, 'The owner is not an active member');
       const escalationOnly =
         input.status === undefined &&
         input.repairNotes === undefined &&
         input.repairDeadline === undefined &&
         input.repairJobSheetEvidenceItemId === undefined &&
+        input.jobSheetRef === undefined &&
+        // Owner and review date can change at any stage before release (v36 "Owner / review date").
         (input.severity === undefined || input.severity === 'CRITICAL');
       // A signed-off repair is a record: only making it more serious is allowed afterwards.
       if (d.status === 'REPAIRED' && !escalationOnly)
@@ -220,6 +239,17 @@ export class DefectsController {
             ? { repairJobSheetEvidenceItemId: input.repairJobSheetEvidenceItemId }
             : {}),
           ...(input.status ? { status: input.status } : {}),
+          // v36 detail: the first move into repair records the plan, when and by whom.
+          ...(input.status === 'REPAIRING' && d.status === 'OPEN'
+            ? {
+                repairStartedAt: now,
+                repairStartedBy: hub.user.id,
+                ...(input.repairNotes ? { repairPlan: input.repairNotes } : {}),
+              }
+            : {}),
+          ...(input.jobSheetRef ? { jobSheetRef: input.jobSheetRef } : {}),
+          ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
+          ...(input.reviewBy ? { reviewBy: day(input.reviewBy) } : {}),
           ...(input.status === 'REPAIRED' ? { repairedAt: now, repairedBy: hub.user.id } : {}),
         },
       });

@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ApiClient } from '../src/api.js';
@@ -46,31 +46,34 @@ const data: Record<string, unknown[]> = {
     },
   ],
 };
-function renderAt(permissions: string[]) {
+function renderAt(permissions: string[], at = '/settings') {
   const api: ApiClient = {
     me: async () => me(permissions),
     readyz: async () => ({ status: 'ready' }),
     get: async (path: string) => ({ data: data[path] ?? [] }),
     send: async () => ({}),
   };
-  render(<App api={api} history={createMemoryHistory({ initialEntries: ['/settings'] })} />);
+  render(<App api={api} history={createMemoryHistory({ initialEntries: [at] })} />);
 }
 beforeEach(() => sessionStorage.clear());
 
 describe('data protection settings', () => {
   it('shows placeholder rules as requiring approval (no approve until a basis is recorded) and the ICO clock in words', async () => {
-    renderAt(['privacy.manage']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Data protection' }));
+    // v36: data protection lives under Compliance › Notifications & data; old links still open it.
+    renderAt(['privacy.manage'], '/settings?tab=privacy');
     expect(await screen.findByText('3 (1 on hold)')).toBeInTheDocument();
     const rules = screen.getByRole('table', { name: 'Retention rules' });
     expect(within(rules).getByText(/Requires approval/)).toBeInTheDocument();
     expect(within(rules).queryByRole('button', { name: 'Approve' })).toBeNull();
-    expect(await screen.findByText(/ICO deadline within 24 hours/)).toBeInTheDocument();
+    await waitFor(
+      () => expect(screen.getByText(/ICO deadline within 24 hours/)).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
   });
 
   it('is hidden without the privacy permission', async () => {
     renderAt(['admin.audit.view']);
-    await screen.findByRole('tab', { name: 'Audit log' });
-    expect(screen.queryByRole('tab', { name: 'Data protection' })).toBeNull();
+    await screen.findByRole('heading', { name: 'Settings' });
+    expect(screen.queryByRole('radio', { name: 'Data protection' })).toBeNull();
   });
 });

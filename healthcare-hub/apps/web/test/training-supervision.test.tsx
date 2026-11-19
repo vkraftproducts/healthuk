@@ -5,6 +5,12 @@ import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
+import {
+  chooseAntOption,
+  openAntSelect,
+  selectAntByLabel,
+  visibleAntOptions,
+} from './ant-testing.js';
 
 const ORG = '01900000-0000-7000-8000-000000000001';
 const ME = '01900000-0000-7000-8000-000000000101';
@@ -34,6 +40,7 @@ function renderAt(
   permissions: string[],
   get: (p: string) => unknown,
   send = vi.fn(async (..._a: unknown[]) => ({}) as unknown),
+  url = '/staff?tab=training&view=matrix',
 ) {
   const api: ApiClient = {
     me: async () => me(permissions),
@@ -41,7 +48,7 @@ function renderAt(
     get: async (p) => get(p),
     send: send as ApiClient['send'],
   };
-  render(<App api={api} history={createMemoryHistory({ initialEntries: ['/staff'] })} />);
+  render(<App api={api} history={createMemoryHistory({ initialEntries: [url] })} />);
   return { send };
 }
 beforeEach(() => sessionStorage.clear());
@@ -100,14 +107,14 @@ describe('training matrix drill-down [C1]', () => {
     columns: [
       {
         templateId: T1,
-        code: 'STF-10',
+        code: 'AMB-STF-05',
         title: 'Manual handling',
         roles: ['DRIVER'],
         summary: { required: 2, met: 1, dueSoon: 0, overdue: 1, missing: 0, percentMet: 50 },
       },
       {
         templateId: T2,
-        code: 'STF-11',
+        code: 'AMB-STF-07',
         title: 'Safeguarding level 2',
         roles: ['CARE_ASSISTANT'],
         summary: { required: 0, met: 0, dueSoon: 0, overdue: 0, missing: 0, percentMet: null },
@@ -152,20 +159,16 @@ describe('training matrix drill-down [C1]', () => {
         ? { data: [] }
         : common(p);
 
-  it('opens the people behind a requirement, worst first, and the record behind a cell', async () => {
+  // v36 matrix: fixed course columns, a chip per cell; the cell opens the record behind it.
+  it('opens the record behind a cell, with its documents', async () => {
     renderAt(['staff.profile.view_basic'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Training matrix' }));
+    const table = await screen.findByRole('table', { name: 'Training matrix' });
+    await within(table).findByText('Alex Morgan');
+    expect(within(table).getByText('Expired 1 Oct')).toBeInTheDocument();
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Show people: Manual handling' }),
-    );
-    const people = await screen.findByRole('table', { name: 'People who need Manual handling' });
-    const rows = within(people).getAllByRole('row').slice(1);
-    expect(rows[0]).toHaveTextContent('Alex Morgan');
-    expect(rows[0]).toHaveTextContent('Red – Overdue (next 1 Oct 2026)');
-    expect(rows[1]).toHaveTextContent('Green – Met (next 12 Mar 2027)');
-
-    await userEvent.click(
-      within(rows[0]!).getByRole('button', { name: 'Open Manual handling for Alex Morgan' }),
+      within(table).getByRole('button', {
+        name: 'Manual handling for Alex Morgan: Overdue (next 1 Oct 2026)',
+      }),
     );
     const detail = await screen.findByRole('region', { name: 'Manual handling: Alex Morgan' });
     expect(detail).toHaveTextContent('Expired on 1 Oct 2026');
@@ -178,9 +181,8 @@ describe('training matrix drill-down [C1]', () => {
 
   it('a matrix cell is a button named for the person and requirement', async () => {
     renderAt(['staff.profile.view_basic'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Training matrix' }));
     const btn = await screen.findByRole('button', {
-      name: 'Open Safeguarding level 2 for Alex Morgan: Not required',
+      name: 'Safeguarding adults & children (level 2) for Alex Morgan: Not required',
     });
     await userEvent.click(btn);
     const detail = await screen.findByRole('region', { name: 'Safeguarding level 2: Alex Morgan' });
@@ -209,12 +211,11 @@ describe('group training [C1]', () => {
   it('records one entry for everyone ticked; the recorder and leavers cannot be ticked', async () => {
     const send = vi.fn(async (..._a: unknown[]) => ({ created: 1, recordIds: ['r1'] }) as unknown);
     renderAt(['staff.profile.view_basic', 'staff.profile.manage'], get, send);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Group training' }));
+    await userEvent.click(await screen.findByRole('button', { name: /Record a group session/ }));
     const form = await screen.findByRole('form', { name: 'Record group training' });
-    const course = within(form).getByLabelText('Course');
-    await waitFor(() => expect(within(course).getAllByRole('option')).toHaveLength(2));
-    expect(course).not.toHaveTextContent('Old fire course');
-    await userEvent.selectOptions(course, 'c1');
+    await openAntSelect('Course');
+    await waitFor(() => expect(visibleAntOptions()).toEqual(['Moving and handling']));
+    await chooseAntOption('Moving and handling');
     expect(form).toHaveTextContent('every 12 months');
     await userEvent.type(within(form).getByLabelText('Register reference'), 'REG-2026-11');
     const attendees = within(form).getByRole('list', { name: 'Attendees' });
@@ -240,8 +241,8 @@ describe('group training [C1]', () => {
 
   it('is not offered without permission to manage staff records', async () => {
     renderAt(['staff.profile.view_basic'], get);
-    expect(await screen.findByRole('tab', { name: 'Supervision bookings' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Group training' })).toBeNull();
+    expect(await screen.findByRole('table', { name: 'Training matrix' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Record a group session/ })).toBeNull();
   });
 });
 
@@ -287,27 +288,32 @@ describe('supervision bookings [C2]', () => {
     p.startsWith('/api/v1/supervision-bookings') ? { data: bookings } : common(p);
 
   it('shows bookings in words and lets the supervisor record a missed session with a reason', async () => {
-    const { send } = renderAt(['staff.profile.view_basic'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Supervision bookings' }));
+    const { send } = renderAt(
+      ['staff.profile.view_basic'],
+      get,
+      undefined,
+      '/staff?tab=training&view=supervision',
+    );
     const table = await screen.findByRole('table', { name: 'Supervision bookings' });
     const alex = await within(table).findByRole('row', { name: /Alex Morgan/ });
-    expect(alex).toHaveTextContent('3 Nov 2026, 10:00');
+    expect(alex).toHaveTextContent('3 Nov 2026');
     expect(alex).toHaveTextContent('One to one');
-    expect(alex).toHaveTextContent('Booked, date has passed: record what happened');
+    expect(alex).toHaveTextContent('Booked – record what happened');
     expect(alex).not.toHaveTextContent('ONE_TO_ONE');
     const mine = within(table).getByRole('row', { name: /Hana Hr/ });
     expect(mine).toHaveTextContent('Clinical supervision');
     expect(mine).toHaveTextContent('Your supervisor records this.');
     expect(within(mine).queryByRole('button')).toBeNull();
     const cancelled = within(table).getByRole('row', { name: /Chris Other/ });
-    expect(cancelled).toHaveTextContent('Cancelled: Sickness (rebooked)');
-    expect(screen.queryByRole('form', { name: 'Book a supervision' })).toBeNull();
+    expect(cancelled).toHaveTextContent('Cancelled');
+    expect(cancelled).toHaveTextContent('Reason: Sickness');
+    expect(screen.queryByRole('button', { name: /Book supervision/ })).toBeNull();
 
     await userEvent.click(
-      within(alex).getByRole('button', { name: 'Record outcome: Alex Morgan' }),
+      within(alex).getByRole('button', { name: 'Record outcome – Alex Morgan' }),
     );
-    const dialog = screen.getByRole('dialog');
-    await userEvent.selectOptions(within(dialog).getByLabelText('What happened?'), 'MISSED');
+    const dialog = await screen.findByRole('dialog', { name: 'Record outcome: Alex Morgan' });
+    await selectAntByLabel('What happened?', 'It was missed');
     const save = within(dialog).getByRole('button', { name: 'Save outcome' });
     expect(save).toBeDisabled();
     await userEvent.type(
@@ -327,12 +333,16 @@ describe('supervision bookings [C2]', () => {
   });
 
   it('records a held supervision with the wellbeing check', async () => {
-    const { send } = renderAt(['staff.profile.view_basic'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Supervision bookings' }));
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Record outcome: Alex Morgan' }),
+    const { send } = renderAt(
+      ['staff.profile.view_basic'],
+      get,
+      undefined,
+      '/staff?tab=training&view=supervision',
     );
-    const dialog = screen.getByRole('dialog');
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Record outcome – Alex Morgan' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Record outcome: Alex Morgan' });
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Wellbeing check done' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save outcome' }));
     await waitFor(() =>
@@ -347,20 +357,23 @@ describe('supervision bookings [C2]', () => {
   });
 
   it('HR books a supervision for someone else', async () => {
-    const { send } = renderAt(['staff.profile.view_basic', 'staff.profile.manage'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Supervision bookings' }));
-    const form = await screen.findByRole('form', { name: 'Book a supervision' });
-    const person = within(form).getByLabelText('Person');
-    await waitFor(() =>
-      expect(within(person).getByRole('option', { name: 'Alex Morgan' })).toBeInTheDocument(),
+    const { send } = renderAt(
+      ['staff.profile.view_basic', 'staff.profile.manage'],
+      get,
+      undefined,
+      '/staff?tab=training&view=supervision',
     );
-    expect(within(person).queryByRole('option', { name: 'Hana Hr' })).toBeNull();
-    await userEvent.selectOptions(person, ALEX);
+    await userEvent.click(await screen.findByRole('button', { name: /Book supervision/ }));
+    const form = await screen.findByRole('form', { name: 'Book a supervision' });
+    await openAntSelect('Person');
+    await waitFor(() => expect(visibleAntOptions()).toContain('Alex Morgan'));
+    expect(visibleAntOptions()).not.toContain('Hana Hr');
+    await chooseAntOption('Alex Morgan');
     await userEvent.selectOptions(within(form).getByLabelText('Supervisor'), 'u-sam');
     fireEvent.change(within(form).getByLabelText('Date and time'), {
       target: { value: '2026-11-20T10:00' },
     });
-    await userEvent.selectOptions(within(form).getByLabelText('Type'), 'PROBATION_REVIEW');
+    await selectAntByLabel('Type', 'Probation review');
     await userEvent.click(within(form).getByRole('button', { name: 'Book supervision' }));
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith('POST', `/api/v1/staff/${ALEX}/supervision-bookings`, ORG, {

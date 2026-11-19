@@ -1,3 +1,4 @@
+import { Tag } from 'antd';
 import type { ReactElement } from 'react';
 
 /** Mirrors RagStatus in @hub/contracts. Colour is never the only signal (CLAUDE.md #8, WCAG 2.2 AA). */
@@ -5,7 +6,7 @@ export type StatusKind = 'RED' | 'AMBER' | 'GREEN' | 'GREY' | 'NOT_APPLICABLE';
 
 interface Style {
   word: string;
-  classes: string;
+  color: string;
   icon: ReactElement;
 }
 
@@ -20,8 +21,7 @@ const stroke = {
 const STYLES: Record<StatusKind, Style> = {
   RED: {
     word: 'Red',
-    classes: 'bg-red-50 text-red-900 border-red-700',
-    // octagon with exclamation
+    color: 'error',
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -38,8 +38,7 @@ const STYLES: Record<StatusKind, Style> = {
   },
   AMBER: {
     word: 'Amber',
-    classes: 'bg-amber-50 text-amber-900 border-amber-700',
-    // triangle with exclamation
+    color: 'warning',
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -56,8 +55,7 @@ const STYLES: Record<StatusKind, Style> = {
   },
   GREEN: {
     word: 'Green',
-    classes: 'bg-green-50 text-green-900 border-green-700',
-    // check in circle
+    color: 'success',
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -74,8 +72,7 @@ const STYLES: Record<StatusKind, Style> = {
   },
   GREY: {
     word: 'Grey',
-    classes: 'bg-slate-400/10 text-slate-800 border-slate-500',
-    // question mark in circle
+    color: 'default',
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -92,8 +89,7 @@ const STYLES: Record<StatusKind, Style> = {
   },
   NOT_APPLICABLE: {
     word: 'N/A',
-    classes: 'bg-hub-card text-slate-700 border-slate-400 border-dashed',
-    // minus in circle
+    color: 'default',
     icon: (
       <svg
         viewBox="0 0 24 24"
@@ -120,15 +116,20 @@ export interface StatusBadgeProps {
 export function StatusBadge({ status, reason }: StatusBadgeProps) {
   const s = STYLES[status];
   return (
-    <span
+    <Tag
       data-status={status}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold leading-5 ${s.classes}`}
+      color={s.color}
+      icon={s.icon}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        marginInlineEnd: 0,
+        borderStyle: status === 'NOT_APPLICABLE' ? 'dashed' : undefined,
+      }}
     >
-      {s.icon}
-      <span>
-        {s.word}
-        {reason ? ` – ${reason}` : ''}
-      </span>
-    </span>
+      {s.word}
+      {reason ? ` – ${reason}` : ''}
+    </Tag>
   );
 }

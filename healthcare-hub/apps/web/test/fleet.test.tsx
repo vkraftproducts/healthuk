@@ -5,6 +5,7 @@ import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
+import { selectAntByLabel } from './ant-testing.js';
 
 const ORG = '01900000-0000-7000-8000-000000000001';
 const VEH = '01900000-0000-7000-8000-000000000301';
@@ -63,10 +64,18 @@ function renderAt(
   get: (p: string) => unknown,
   send = vi.fn(async () => ({})),
 ) {
+  const getWithDefaults = async (p: string) => {
+    if (p.includes('/locations')) return { data: [] };
+    if (p.includes('/organisations/') && !p.includes('/locations')) {
+      return { sectorPacks: ['ambulance'] };
+    }
+    if (p.startsWith('/api/v1/alerts/count')) return { open: 0, critical: 0 };
+    return get(p);
+  };
   const api: ApiClient = {
     me: async () => me(permissions),
     readyz: async () => ({ status: 'ready' }),
-    get: async (p) => get(p),
+    get: getWithDefaults,
     send,
   };
   render(<App api={api} history={createMemoryHistory({ initialEntries: [path] })} />);
@@ -74,21 +83,30 @@ function renderAt(
 }
 beforeEach(() => sessionStorage.clear());
 
+/** v36: defects live under Checks & defects › Defects. */
+async function openDefects() {
+  await userEvent.click(await screen.findByRole('tab', { name: 'Checks & defects' }));
+  await userEvent.click(
+    await screen.findByRole('radio', { name: 'Defects' }),
+  );
+}
+
 describe('vehicles and assets', () => {
   it('shows a blocked vehicle with its reason in words', async () => {
     renderAt('/vehicles', ['fleet.vehicle.view'], (p) =>
       p.startsWith('/api/v1/vehicles') ? { data: [vehicle], nextCursor: null } : { data: [] },
     );
-    const row = await screen.findByRole('row', { name: /AMB-03/ });
-    expect(row).toHaveTextContent('Red – Blocked – 1 open stop-use defect');
-    expect(screen.queryByRole('heading', { name: 'Add a vehicle' })).toBeNull();
+    // v36 fleet cards: status in words with the reason (text + icon + colour).
+    const card = await screen.findByLabelText(/AMB-03, Blocked/);
+    expect(card).toHaveTextContent('Blocked – 1 open stop-use defect');
+    expect(screen.queryByRole('button', { name: 'Add a vehicle' })).toBeNull();
   });
 
   it('repaired defects offer return to service only to people allowed to release', async () => {
     const get = (p: string) =>
       p.startsWith('/api/v1/defects') ? { data: [defect] } : { data: [] };
     renderAt('/vehicles', ['fleet.vehicle.view'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     const row = await screen.findByRole('row', { name: /Ramp hinge/ });
     expect(row).toHaveTextContent('Critical – stop use');
     expect(within(row).queryByRole('button', { name: 'Return to service' })).toBeNull();
@@ -98,7 +116,7 @@ describe('vehicles and assets', () => {
     const get = (p: string) =>
       p.startsWith('/api/v1/defects') ? { data: [defect] } : { data: [] };
     const { send } = renderAt('/vehicles', ['fleet.vehicle.view', 'fleet.return_to_service'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     await userEvent.click(await screen.findByRole('button', { name: /Return to service/ }));
     const dialog = await screen.findByRole('dialog', {
       name: /^Return to service: .*Ramp hinge cracked$/,
@@ -125,7 +143,7 @@ describe('vehicles and assets', () => {
     renderAt('/vehicles', ['fleet.vehicle.view', 'fleet.return_to_service'], (p) =>
       p.startsWith('/api/v1/defects') ? { data: [mine] } : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     const row = await screen.findByRole('row', { name: /Ramp hinge/ });
     expect(row).toHaveTextContent('Repaired – awaiting return to service');
     expect(row).toHaveTextContent('Signed off by Dev, 31 Oct 2026');
@@ -146,7 +164,7 @@ describe('vehicles and assets', () => {
     const { send } = renderAt('/vehicles', ['fleet.vehicle.view', 'fleet.defect.manage'], (p) =>
       p.startsWith('/api/v1/defects') ? { data: [open] } : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     const row = await screen.findByRole('row', { name: /Ramp hinge/ });
     expect(row).toHaveTextContent('Being repaired');
     expect(row).toHaveTextContent('Repair before use');
@@ -181,7 +199,7 @@ describe('vehicles and assets', () => {
     const { send } = renderAt('/vehicles', ['fleet.vehicle.view', 'fleet.defect.manage'], (p) =>
       p.startsWith('/api/v1/defects') ? { data: [minor] } : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     const row = await screen.findByRole('row', { name: /Ramp hinge/ });
     expect(row).toHaveTextContent('Grey – Not classified – needs a repair deadline');
     expect(within(row).queryByRole('button', { name: /Sign off repair/ })).toBeNull();
@@ -218,7 +236,7 @@ describe('vehicles and assets', () => {
     renderAt('/vehicles', ['fleet.vehicle.view'], (p) =>
       p.startsWith('/api/v1/defects') ? { data: [late] } : { data: [] },
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     const row = await screen.findByRole('row', { name: /Ramp hinge/ });
     expect(row).toHaveTextContent('Red – Overdue – was due 1 Nov 2026');
     expect(row).toHaveTextContent('AMB-03');
@@ -230,7 +248,7 @@ describe('vehicles and assets', () => {
       ['fleet.vehicle.view', 'fleet.return_to_service'],
       (p) => (p.startsWith('/api/v1/defects') ? { data: [defect] } : { data: [] }),
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     await userEvent.click(await screen.findByRole('button', { name: /Send back for repair/ }));
     const dialog = await screen.findByRole('dialog', { name: /Send back for repair/ });
     await userEvent.type(within(dialog).getByLabelText(/What is still wrong/), 'Ramp still drops');
@@ -259,7 +277,7 @@ describe('vehicles and assets', () => {
       p.includes('status=RELEASED') ? { data: [released] } : { data: [] },
     );
     renderAt('/vehicles', ['fleet.vehicle.view'], get);
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
+    await openDefects();
     await userEvent.selectOptions(await screen.findByLabelText('Show'), 'RELEASED');
     const row = await screen.findByRole('row', { name: /Ramp hinge/ });
     expect(row).toHaveTextContent('Returned to service');
@@ -322,12 +340,11 @@ describe('vehicles and assets', () => {
       (p) => (p.startsWith('/api/v1/vehicles') ? { data: [vehicle] } : { data: [] }),
       send,
     );
-    await userEvent.click(await screen.findByRole('tab', { name: 'Defects' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Report a defect' }));
+    // v36: "Report a defect" is the page's primary action.
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Report a defect' }))[0]!);
     const dialog = await screen.findByRole('dialog', { name: 'Report a defect' });
-    await within(dialog).findByRole('option', { name: 'AMB-03' });
-    await userEvent.selectOptions(within(dialog).getByLabelText('Vehicle'), VEH);
-    await userEvent.selectOptions(within(dialog).getByLabelText('Severity'), 'CRITICAL');
+    await selectAntByLabel('Vehicle', 'AMB-03');
+    await selectAntByLabel('Severity', /^Critical/);
     expect(within(dialog).getByRole('checkbox', { name: /Stop use now/ })).toBeChecked();
     await userEvent.type(within(dialog).getByLabelText('What is wrong?'), 'Ramp hinge cracked');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Report defect' }));

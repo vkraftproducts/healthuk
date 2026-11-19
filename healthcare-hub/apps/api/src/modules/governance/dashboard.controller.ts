@@ -33,7 +33,7 @@ import { BLOB_STORE } from '../../storage/blob-store.js';
 import { signBlobToken, verifyBlobToken } from '../../storage/tokens.js';
 import { SYSTEM_USER_ID } from '@hub/db';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const LINK_TTL_S = 5 * 60;
 
 /**

@@ -1,4 +1,8 @@
-import type { ReactNode } from 'react';
+import { Alert, Table } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import type React from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 
 export interface Column<T> {
   key: string;
@@ -6,10 +10,8 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
 }
 
-export type RowTone = 'red' | 'amber' | 'purple';
-
 export interface DataTableProps<T> {
-  /** Accessible name for the table (rendered as a visually hidden caption). */
+  /** Accessible name for the table (caption + aria-label). */
   caption: string;
   columns: readonly Column<T>[];
   rows: readonly T[];
@@ -18,21 +20,46 @@ export interface DataTableProps<T> {
   /** Message shown when the source could not be read (never show stale data as current). */
   error?: string | null;
   emptyMessage?: string;
-  /** Optional row highlight for overdue / blocked / attention states. */
-  rowTone?: (row: T) => RowTone | null | undefined;
+  /** Accessible name for each data row (not the header row). */
+  rowName?: (row: T) => string;
+  /** v36 row flag: a coloured bar on the left of the row (`s-red`, `s-amber`, `s-purple`). */
+  rowTone?: (row: T) => 'red' | 'amber' | 'purple' | 'blue' | null | undefined;
+  /** Makes the whole row open something (v36 `tr.click`). */
+  onRowClick?: (row: T) => void;
 }
 
-// Neon Forest style: glowing header bar, each row a dark glass strip (alternate rows tinted, hover lit).
-const CELL =
-  'border-y border-hub-line bg-hub-card px-3 py-2.5 align-top transition-colors first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-even:bg-hub-row group-hover:bg-sky-50 group-hover:border-teal-600/50';
-const EMPTY = 'rounded-lg border border-hub-line bg-hub-card px-3 py-4';
-const TONE_ROW: Record<RowTone, string> = {
-  red: '[&>td:first-child]:border-l-red-600 [&>td:first-child]:border-l-4',
-  amber: '[&>td:first-child]:border-l-amber-500 [&>td:first-child]:border-l-4',
-  purple: '[&>td:first-child]:border-l-violet-600 [&>td:first-child]:border-l-4',
-};
+// The <table> element is defined once, outside render: a component created inline would be a new
+// type on every render, so React would rebuild the whole table (losing focus and in-cell state).
+const CaptionContext = createContext<string>('');
+function CaptionTable({
+  children,
+  ...props
+}: HTMLAttributes<HTMLTableElement> & { children?: ReactNode }) {
+  const caption = useContext(CaptionContext);
+  return (
+    <table {...props} className={`${props.className ?? ''} wf-t ant-t`} aria-label={caption}>
+      <caption
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: 'hidden',
+          clip: 'rect(0, 0, 0, 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {caption}
+      </caption>
+      {children}
+    </table>
+  );
+}
+const TABLE_COMPONENTS = { table: CaptionTable };
 
-/** Plain, keyboard- and screen-reader-friendly table with explicit loading/error/empty states. */
+/** Ant Design table wrapper — same props API as the previous plain table. */
 export function DataTable<T>({
   caption,
   columns,
@@ -41,61 +68,66 @@ export function DataTable<T>({
   loading,
   error,
   emptyMessage = 'Nothing to show.',
+  rowName,
   rowTone,
+  onRowClick,
 }: DataTableProps<T>) {
   if (error) {
     return (
-      <div role="alert" className="rounded-lg border border-red-700 bg-red-50 p-3 text-red-900">
-        <strong>Source unavailable.</strong> {error}
-      </div>
+      <Alert type="error" showIcon role="alert" message="Source unavailable." description={error} />
     );
   }
+
+  const cols: ColumnsType<T> = columns.map((c) => ({
+    key: c.key,
+    title: c.header,
+    render: (_: unknown, row: T) => c.cell(row),
+  }));
+
   return (
-    <div className="overflow-x-auto" aria-busy={loading ? 'true' : 'false'}>
-      <table className="w-full border-separate border-spacing-y-1.5 text-left text-sm">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                className="border-y border-hub-navy bg-hub-navy px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-white first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r"
-              >
-                {c.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr>
-              <td colSpan={columns.length} className={`${EMPTY} text-slate-600`}>
-                Loading…
-              </td>
-            </tr>
-          ) : rows.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length} className={`${EMPTY} text-slate-600`}>
-                {emptyMessage}
-              </td>
-            </tr>
-          ) : (
-            rows.map((row) => {
-              const tone = rowTone?.(row) ?? null;
-              return (
-                <tr key={rowKey(row)} className={`group${tone ? ` ${TONE_ROW[tone]}` : ''}`}>
-                  {columns.map((c) => (
-                    <td key={c.key} className={CELL}>
-                      {c.cell(row)}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
+    <CaptionContext.Provider value={caption}>
+      <Table<T>
+        size="middle"
+        className="wf-tw"
+        pagination={false}
+        loading={!!loading && rows.length > 0}
+        rowKey={rowKey}
+        dataSource={[...rows]}
+        columns={cols}
+        locale={{
+          emptyText: loading && rows.length === 0 ? 'Loading…' : emptyMessage,
+        }}
+        rowClassName={(r) => {
+          const t = rowTone?.(r);
+          return `${t ? `s-${t}` : ''}${onRowClick ? ' click' : ''}`;
+        }}
+        onRow={
+          rowName || onRowClick
+            ? (record) =>
+                ({
+                  ...(rowName ? { 'aria-label': rowName(record) } : {}),
+                  ...(onRowClick
+                    ? {
+                        tabIndex: 0,
+                        role: 'button',
+                        onClick: (e: React.MouseEvent) => {
+                          if ((e.target as HTMLElement).closest('button,a,input,select')) return;
+                          onRowClick(record);
+                        },
+                        onKeyDown: (e: React.KeyboardEvent) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onRowClick(record);
+                          }
+                        },
+                      }
+                    : {}),
+                }) as HTMLAttributes<HTMLElement>
+            : undefined
+        }
+        components={TABLE_COMPONENTS}
+      />
+    </CaptionContext.Provider>
   );
 }

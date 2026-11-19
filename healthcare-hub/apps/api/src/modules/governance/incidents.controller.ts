@@ -19,7 +19,7 @@ import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 import { complaintDates, EventsController } from './events.controller.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const REPORT = 'events.event.report';
 const MANAGE = 'events.event.manage';

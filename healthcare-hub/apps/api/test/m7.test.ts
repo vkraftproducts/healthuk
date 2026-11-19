@@ -5,7 +5,14 @@ import { SYSTEM_USER_ID, type Db } from '@hub/db';
 import { ExpoPushSender, MemoryPushSender, sendPendingPush } from '@hub/domain';
 import { londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  addVerifiedLicence,
+  makeApp,
+  sign,
+  verifyVehicleDocuments,
+} from './harness.js';
 
 const urls = inject('urls');
 let app: NestFastifyApplication;
@@ -113,6 +120,7 @@ async function vehicle(): Promise<string> {
     },
   });
   expect(r.status).toBe(201);
+  await verifyVehicleDocuments(app, SEED_IDS.orgExample, r.body.id as string);
   return r.body.id as string;
 }
 async function shift(

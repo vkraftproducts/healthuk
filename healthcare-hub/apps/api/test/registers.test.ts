@@ -3,7 +3,14 @@ import pg from 'pg';
 import type { Db } from '@hub/db';
 import { addDays, londonDate } from '@hub/rules';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  addVerifiedLicence,
+  makeApp,
+  sign,
+  verifyVehicleDocuments,
+} from './harness.js';
 
 // Task 15 (registers and forms) and task 26 fleet follow-ups. Written 6 Nov 2026; not yet run.
 const urls = inject('urls');
@@ -112,6 +119,7 @@ async function vehicle(extra: Record<string, unknown> = {}) {
     },
   });
   expect(r.status).toBe(201);
+  await verifyVehicleDocuments(app, SEED_IDS.orgExample, r.body.id as string);
   return r.body as J;
 }
 

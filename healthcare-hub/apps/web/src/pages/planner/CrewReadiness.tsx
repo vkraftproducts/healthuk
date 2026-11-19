@@ -1,4 +1,5 @@
 import { StatusBadge, type StatusKind } from '@hub/ui';
+import { Typography } from 'antd';
 import { words } from '../../components.js';
 import { useOne } from '../settings/hooks.js';
 
@@ -26,13 +27,18 @@ export function CrewReadiness(p: {
     ...(p.vehicleId ? { vehicleId: p.vehicleId } : {}),
   });
   const res = useOne<Row>(`/api/v1/shifts/crew-readiness?${q}`);
-  if (res.isLoading) return <p className="text-sm">Checking {p.name}…</p>;
+  if (res.isLoading)
+    return (
+      <Typography.Text type="secondary">Checking {p.name}…</Typography.Text>
+    );
   if (res.isError || !res.data)
-    return <p className="text-sm">Readiness for {p.name} could not be checked.</p>;
+    return (
+      <Typography.Text type="secondary">Readiness for {p.name} could not be checked.</Typography.Text>
+    );
   const state = READINESS[res.data.state as string] ?? { status: 'GREY', word: 'Unknown' };
   const problems = ((res.data.checks ?? []) as Row[]).filter((c) => c.result !== 'PASS');
   return (
-    <div className="text-sm" role="group" aria-label={`Readiness of ${p.name}`}>
+    <div role="group" aria-label={`Readiness of ${p.name}`}>
       {p.name} ({words(p.role)}): <StatusBadge status={state.status} reason={state.word} />
       {problems.length > 0 && (
         <ul className="ml-4 list-disc">

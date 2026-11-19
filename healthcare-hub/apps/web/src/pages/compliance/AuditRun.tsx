@@ -1,4 +1,5 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Button, Space } from 'antd';
 import { Link, useParams } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
 import {
@@ -6,11 +7,8 @@ import {
   Field,
   PersonSelect,
   Section,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -128,20 +126,20 @@ function SampleForm({
     <form onSubmit={submit} className="space-y-3" aria-label="Record the sample">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Population (what you sampled from)">
-          <input name="populationDesc" required minLength={3} maxLength={500} className={input} />
+          <input name="populationDesc" required minLength={3} maxLength={500} />
         </Field>
         <Field label="How the sample was chosen">
-          <input name="selectionMethod" required minLength={3} maxLength={300} className={input} />
+          <input name="selectionMethod" required minLength={3} maxLength={300} />
         </Field>
         <Field label="Records from">
-          <input type="date" name="dateFrom" required className={input} />
+          <input type="date" name="dateFrom" required />
         </Field>
         <Field label="Records to">
-          <input type="date" name="dateTo" required className={input} />
+          <input type="date" name="dateTo" required />
         </Field>
         <Field label="What was sampled">
           <select
-            className={input}
+           
             value={type}
             onChange={(e) => {
               setType(e.target.value);
@@ -156,7 +154,7 @@ function SampleForm({
           </select>
         </Field>
       </div>
-      <fieldset className="rounded border border-hub-line p-2">
+      <fieldset className="">
         <legend className="px-1 text-sm font-semibold">Sampled items ({picked.length})</legend>
         {subjects.length === 0 ? (
           <p className="text-sm">Nothing of this type is available to you.</p>
@@ -180,11 +178,11 @@ function SampleForm({
         )}
       </fieldset>
       <Field label="Reason for sampling the same items again (needed if they were in a recent audit of this template)">
-        <input name="repeatReason" maxLength={300} className={input} />
+        <input name="repeatReason" maxLength={300} />
       </Field>
-      <button className={button} disabled={picked.length === 0}>
+      <Button htmlType="submit" type="primary" disabled={picked.length === 0}>
         Record sample
-      </button>
+      </Button>
       {msg}
     </form>
   );
@@ -225,7 +223,7 @@ function ResponseForm({ a, subjects }: { a: Row; subjects: Subject[] }) {
     <form onSubmit={submit} className="space-y-3" aria-label="Record a response">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Control">
-          <select name="controlCode" required className={input}>
+          <select name="controlCode" required>
             {(a.controls as Row[]).map((c) => (
               <option key={c.code} value={c.code}>
                 {c.code}: {c.question}
@@ -234,7 +232,7 @@ function ResponseForm({ a, subjects }: { a: Row; subjects: Subject[] }) {
           </select>
         </Field>
         <Field label="Sampled item (optional)">
-          <select name="subjectId" className={input}>
+          <select name="subjectId">
             <option value="">Not about one item</option>
             {subjects.map((s) => (
               <option key={s.id} value={s.id}>
@@ -244,7 +242,7 @@ function ResponseForm({ a, subjects }: { a: Row; subjects: Subject[] }) {
           </select>
         </Field>
         <Field label="Result">
-          <select className={input} value={result} onChange={(e) => setResult(e.target.value)}>
+          <select value={result} onChange={(e) => setResult(e.target.value)}>
             {RESULTS.map((r) => (
               <option key={r} value={r}>
                 {RESULT_LABEL[r] ?? words(r)}
@@ -253,7 +251,7 @@ function ResponseForm({ a, subjects }: { a: Row; subjects: Subject[] }) {
           </select>
         </Field>
         <Field label="How it was checked">
-          <select name="method" required className={input}>
+          <select name="method" required>
             {methods.map((m) => (
               <option key={m} value={m}>
                 {words(m)}
@@ -270,10 +268,10 @@ function ResponseForm({ a, subjects }: { a: Row; subjects: Subject[] }) {
           rows={2}
           maxLength={2000}
           required={NOTE_NEEDED.has(result)}
-          className={input}
+         
         />
       </Field>
-      <button className={button}>Save response</button>
+      <Button htmlType="submit" type="primary">Save response</Button>
       {msg}
     </form>
   );
@@ -420,15 +418,15 @@ export function AuditRun() {
   })();
 
   return (
-    <div className="space-y-4">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <nav aria-label="Breadcrumb" className="text-sm">
-        <Link to="/compliance" className="font-medium text-hub-teal-dark underline">
+        <Link to="/compliance" className="font-medium ">
           Compliance
         </Link>{' '}
         / {words(a.domain)} / {a.templateCode} / {a.code}
       </nav>
       <div className="grid gap-4 lg:grid-cols-3">
-        <header className="rounded-lg border border-hub-line bg-hub-card p-4 lg:col-span-2">
+        <header className=" p-4 lg:col-span-2">
           <h1 className="text-2xl font-bold">
             {a.code} {a.title}
           </h1>
@@ -489,7 +487,7 @@ export function AuditRun() {
         </header>
         <section
           aria-labelledby="outcome-h"
-          className="rounded-lg border border-hub-line bg-hub-card p-4"
+          className=" p-4"
         >
           <h2 id="outcome-h" className="font-semibold">
             Outcome
@@ -521,12 +519,9 @@ export function AuditRun() {
           {open &&
             can('compliance.audit.run') &&
             (responses.length && unanswered === 0 ? (
-              <button
-                className={`${smallButton} mt-2`}
-                onClick={() => setDialog({ kind: 'submit' })}
-              >
+              <Button size="small" style={{ marginTop: 8 }} onClick={() => setDialog({ kind: 'submit' })}>
                 Submit for review
-              </button>
+              </Button>
             ) : responses.length ? (
               <p className="mt-2 text-sm">
                 Answer every control before submitting ({unanswered} still to answer).
@@ -536,18 +531,16 @@ export function AuditRun() {
             ))}
           {canReview && (
             <div className="mt-2 flex gap-2">
-              <button
-                className={smallButton}
+              <Button size="small"
                 onClick={() => setDialog({ kind: 'review', decision: 'ACCEPTED' })}
               >
                 Accept
-              </button>
-              <button
-                className={smallButton}
+              </Button>
+              <Button size="small"
                 onClick={() => setDialog({ kind: 'review', decision: 'RETURNED' })}
               >
                 Return with reason
-              </button>
+              </Button>
             </div>
           )}
           {((a.reviews as Row[] | undefined) ?? []).length > 0 && (
@@ -612,9 +605,9 @@ export function AuditRun() {
         title="Findings and controls"
         actions={
           reviewing && can('compliance.audit.run') ? (
-            <button className={smallButton} onClick={beginObservation}>
+            <Button size="small" onClick={beginObservation}>
               Add an observation
-            </button>
+            </Button>
           ) : undefined
         }
       >
@@ -656,13 +649,12 @@ export function AuditRun() {
                     {reviewing &&
                       NEEDS_FOLLOW_UP.has(r.result) &&
                       can('compliance.action.manage') && (
-                        <button
-                          className={smallButton}
+                        <Button size="small"
                           aria-label={`Raise an action: ${r.controlCode}`}
                           onClick={() => beginAction(r)}
                         >
                           Raise action
-                        </button>
+                        </Button>
                       )}
                   </div>
                 );
@@ -704,7 +696,7 @@ export function AuditRun() {
             <>
               <Field label="Control it relates to">
                 <select
-                  className={input}
+                 
                   value={control}
                   onChange={(e) => setControl(e.target.value)}
                 >
@@ -717,7 +709,7 @@ export function AuditRun() {
               </Field>
               <Field label="What was observed">
                 <textarea
-                  className={input}
+                 
                   rows={3}
                   maxLength={1000}
                   value={summary}
@@ -726,7 +718,7 @@ export function AuditRun() {
               </Field>
               <Field label="Severity">
                 <select
-                  className={input}
+                 
                   value={severity}
                   onChange={(e) => setSeverity(e.target.value)}
                 >
@@ -742,7 +734,7 @@ export function AuditRun() {
             <>
               <Field label="Type">
                 <select
-                  className={input}
+                 
                   value={kind}
                   onChange={(e) => setKind(e.target.value as 'ACTION' | 'REAUDIT')}
                 >
@@ -752,7 +744,7 @@ export function AuditRun() {
               </Field>
               <Field label="What needs to happen">
                 <input
-                  className={input}
+                 
                   maxLength={300}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -768,14 +760,14 @@ export function AuditRun() {
               <Field label="Deadline">
                 <input
                   type="date"
-                  className={input}
+                 
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
                 />
               </Field>
               <Field label="Severity">
                 <select
-                  className={input}
+                 
                   value={severity}
                   onChange={(e) => setSeverity(e.target.value)}
                 >
@@ -793,6 +785,6 @@ export function AuditRun() {
       >
         {dialogProps?.body}
       </ActionDialog>
-    </div>
+    </Space>
   );
 }

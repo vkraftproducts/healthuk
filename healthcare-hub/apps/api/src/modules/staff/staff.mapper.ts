@@ -11,6 +11,7 @@ export interface Summary {
   overall: StaffDto['overallStatus'];
   setUp: boolean;
   roles: string[];
+  issue?: string;
 }
 
 export function toStaffDto(
@@ -38,6 +39,7 @@ export function toStaffDto(
     overallStatus: sum.overall,
     checksSetUp: sum.setUp,
     counts: sum.counts,
+    ...(sum.issue ? { issue: sum.issue } : {}),
     version: s.version,
   };
 }
@@ -61,8 +63,17 @@ export function toClearanceDto(
 type RecordRow = Prisma.StaffRecordGetPayload<{
   include: { supersededBy: { select: { id: true } } };
 }>;
+type RecordVerification = {
+  verifiedBy: string;
+  verifiedAt: Date;
+  registerRef: string | null;
+};
 
-export function toRecordDto(r: RecordRow, key: Buffer): StaffRecordDto {
+export function toRecordDto(
+  r: RecordRow,
+  key: Buffer,
+  verification?: RecordVerification | null,
+): StaffRecordDto {
   const data = { ...(r.data as Record<string, unknown>) };
   if (r.kind === 'DBS' && typeof data.certificateNumber === 'string') {
     data.certificateNumber = decryptField(data.certificateNumber, key) ?? '[unreadable]';
@@ -83,6 +94,15 @@ export function toRecordDto(r: RecordRow, key: Buffer): StaffRecordDto {
     current: !r.supersededBy,
     createdAt: r.createdAt.toISOString(),
     createdBy: r.createdBy,
+    ...(verification
+      ? {
+          verification: {
+            verifiedBy: verification.verifiedBy,
+            verifiedAt: verification.verifiedAt.toISOString(),
+            registerRef: verification.registerRef,
+          },
+        }
+      : {}),
   };
 }
 

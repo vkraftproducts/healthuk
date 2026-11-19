@@ -4,7 +4,14 @@ import type { Db } from '@hub/db';
 import { addDays, londonDate } from '@hub/rules';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  addVerifiedLicence,
+  makeApp,
+  sign,
+  verifyVehicleDocuments,
+} from './harness.js';
 
 // Workflow pass D (vehicles and equipment), E (planning and dispatch) and J1 (premises).
 // Written 6 Nov 2026; not yet run.
@@ -112,6 +119,7 @@ async function vehicle(extra: Record<string, unknown> = {}) {
     },
   });
   expect(r.status).toBe(201);
+  await verifyVehicleDocuments(app, SEED_IDS.orgExample, r.body.id as string);
   return r.body as J;
 }
 

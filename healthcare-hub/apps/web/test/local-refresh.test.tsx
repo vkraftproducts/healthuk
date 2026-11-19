@@ -140,7 +140,7 @@ describe('app start with local sign-in', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Checking your sign-in…');
     expect(await screen.findByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
     expect(
-      screen.queryByRole('heading', { name: 'Sign in with your organisation account' }),
+      screen.queryByRole('heading', { name: 'Sign in' }),
     ).toBeNull();
   });
 
@@ -148,7 +148,7 @@ describe('app start with local sign-in', () => {
     fakeApi([ended]);
     renderApp(new LocalAuthClient(''));
     expect(
-      await screen.findByRole('heading', { name: 'Sign in with your organisation account' }),
+      await screen.findByRole('heading', { name: 'Sign in' }),
     ).toBeInTheDocument();
   });
 });

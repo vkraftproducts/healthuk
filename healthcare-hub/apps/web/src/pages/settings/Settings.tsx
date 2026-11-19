@@ -12,27 +12,41 @@ import {
   type ItemKind,
   type PermissionKey,
 } from '@hub/contracts';
+import { Alert, Button, Modal } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
   Field,
   Section,
-  button,
+  Tabs,
   fmtDate,
   fmtDateTime,
-  input,
   saveBlob,
-  smallButton,
   useCan,
   useRun,
   words,
+  PageHeader,
 } from '../../components.js';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useApp } from '../../shell/AppContext.js';
+import { Views, Who } from '../../v36/kit.js';
+import { Deeper, Ms, WfTag } from '../../v36/ui.js';
 import { DataPanel } from './DataPanel.js';
 import { PrivacyPanel } from './PrivacyPanel.js';
 import { IntegrationsPanel } from './IntegrationsPanel.js';
 import { LibraryPanel } from './LibraryPanel.js';
 import { useList, useOne, usePeople } from './hooks.js';
+import { Retention } from './PrivacyPanel.js';
+import {
+  Deputies,
+  EscalatingNow,
+  EscalationRules,
+  LocationsV36,
+  RulesDecisions,
+  SecondPersonRules,
+  SecurityCard,
+} from './SettingsV36.js';
+import { StatementOfPurpose } from '../registers/GovernanceRecords.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -44,7 +58,11 @@ const TABS = [
     label: 'Requirement library',
     perm: ['admin.settings.manage', 'admin.requirements.publish', 'compliance.requirement.manage'],
   },
-  { id: 'notifications', label: 'Notifications', perm: 'admin.settings.manage' },
+  {
+    id: 'notifications',
+    label: 'Escalation and deputies',
+    perm: 'admin.settings.manage',
+  },
   { id: 'support', label: 'Support access', perm: 'admin.support.approve' },
   { id: 'audit', label: 'Audit log', perm: 'admin.audit.view' },
   {
@@ -54,12 +72,60 @@ const TABS = [
   },
   { id: 'privacy', label: 'Data protection', perm: 'privacy.manage' },
   { id: 'integrations', label: 'Integrations', perm: 'admin.settings.manage' },
+  { id: 'accounts', label: 'Accounts & security', perm: 'admin.users.manage' },
+  { id: 'rules', label: 'Rules & decisions', perm: null },
 ] as const;
+
+/** v36 Settings: three tabs with views. The URL names the section (?tab=users). */
+const GROUPS: {
+  id: string;
+  label: string;
+  subs: { id: string; label: string; views: string[] }[];
+}[] = [
+  {
+    id: 'g-access',
+    label: 'Access & escalation',
+    subs: [
+      { id: 's-users', label: 'Users & access', views: ['users', 'support'] },
+      { id: 's-escalation', label: 'Escalation & deputies', views: ['notifications'] },
+    ],
+  },
+  {
+    id: 'g-org',
+    label: 'Organisation',
+    subs: [
+      {
+        id: 's-org',
+        label: 'Organisation',
+        views: ['org', 'accounts', 'rules', 'data', 'library', 'integrations'],
+      },
+    ],
+  },
+];
+const VIEW_LABEL: Record<string, string> = {
+  users: 'Accounts & roles',
+  support: 'Support & retention',
+  audit: 'Audit log',
+  notifications: 'Escalation & deputies',
+  org: 'Locations & purpose',
+  library: 'Requirement library',
+  accounts: 'Accounts & security',
+  rules: 'Rules & decisions',
+  data: 'Data & sector packs',
+  privacy: 'Data protection',
+  integrations: 'Integrations',
+};
+/** Navigation links from before the v36 grouping. */
+const ALIAS: Record<string, string> = { escalation: 'notifications', organisation: 'org' };
 
 export function Settings() {
   const { me, orgId } = useApp();
-  const [tab, setTab] = useState<(typeof TABS)[number]['id']>('org');
-  if (!orgId) return <p role="status">Select an organisation to continue.</p>;
+  const { tab: linked } = useSearch({ strict: false }) as { tab?: string };
+  const navigate = useNavigate();
+  if (!orgId)
+    return (
+      <Alert type="info" showIcon role="status" message="Select an organisation to continue." />
+    );
   const tabs = TABS.filter(
     (t) =>
       !t.perm ||
@@ -67,44 +133,93 @@ export function Settings() {
         ? t.perm.some((p: string) => me.permissions.includes(p))
         : me.permissions.includes(t.perm as string)),
   );
+  const allowed = new Set<string>(tabs.map((t) => t.id));
+  const groups = GROUPS.map((g) => {
+    const subs = g.subs
+      .map((x) => ({ ...x, views: x.views.filter((v) => allowed.has(v)) }))
+      .filter((x) => x.views.length > 0);
+    return { ...g, subs, views: subs.flatMap((x) => x.views) };
+  }).filter((g) => g.views.length > 0);
+  const want = linked ? (ALIAS[linked] ?? linked) : undefined;
+  // With no section in the URL, open Organisation (every member may see the locations).
+  const tab = (want && allowed.has(want) ? want : 'org') as (typeof TABS)[number]['id'];
+  const group = groups.find((g) => g.views.includes(tab));
+  const sub = group?.subs.find((x) => x.views.includes(tab));
+  const setTab = (id: string) => void navigate({ to: '/settings', search: { tab: id } });
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Settings</h1>
-      <div
-        role="tablist"
-        aria-label="Settings sections"
-        className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-hub-card p-1.5"
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+      <PageHeader
+        title="Settings"
+        description="Your organisation, locations, who can use the system and how alerts reach people."
+      />
+      <Tabs
+        label="Settings sections"
+        tabs={groups.map((g) => ({ id: g.id, label: g.label, show: true }))}
+        current={group?.id ?? ''}
+        onChange={(id) => setTab(groups.find((g) => g.id === id)!.views[0]!)}
       >
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls="settings-panel"
-            onClick={() => setTab(t.id)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-ink hover:bg-hub-row'}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" id="settings-panel" aria-labelledby={`tab-${tab}`}>
-        {tab === 'org' && <OrgPanel />}
-        {tab === 'users' && <UsersPanel />}
-        {tab === 'library' && <LibraryPanel />}
-        {tab === 'notifications' && (
-          <div className="space-y-4">
-            <NotificationsPanel />
-            <AlertRoutingPanel />
-          </div>
+        {group && group.subs.length > 1 && (
+          <Views
+            label={`${group.label} sections`}
+            value={sub?.id ?? ''}
+            onChange={(id) => setTab(group.subs.find((x) => x.id === id)!.views[0]!)}
+            options={group.subs.map((x) => ({ value: x.id, label: x.label }))}
+          />
         )}
-        {tab === 'support' && <SupportPanel />}
-        {tab === 'audit' && <AuditPanel />}
-        {tab === 'data' && <DataPanel />}
-        {tab === 'privacy' && <PrivacyPanel />}
-        {tab === 'integrations' && <IntegrationsPanel />}
-      </div>
+        {sub && sub.views.length > 1 && (
+          <Deeper>
+            <Views
+              label={`${sub.label} view`}
+              value={tab}
+              onChange={setTab}
+              options={sub.views.map((v) => ({ value: v, label: VIEW_LABEL[v] ?? v }))}
+            />
+          </Deeper>
+        )}
+        <div id="settings-panel">
+          {tab === 'org' && <OrgPanel />}
+          {tab === 'users' && <UsersPanel />}
+          {tab === 'accounts' && (
+            <div className="wf-stack">
+              <UsersPanel />
+              <SecurityCard />
+            </div>
+          )}
+          {tab === 'rules' && <RulesDecisions />}
+          {tab === 'library' && <LibraryPanel />}
+          {tab === 'notifications' && (
+            <div className="wf-stack">
+              <EscalationRules />
+              <EscalatingNow />
+              <Deputies />
+              <SecondPersonRules />
+              <details className="hh-more">
+                <summary>Who else is told, channels and warning days</summary>
+                <div className="wf-stack">
+                  <NotificationsPanel />
+                  <AlertRoutingPanel compact />
+                </div>
+              </details>
+            </div>
+          )}
+          {tab === 'support' && (
+            <div className="wf-stack">
+              <SupportPanel />
+              {me.permissions.includes('privacy.manage') && <Retention />}
+            </div>
+          )}
+          {tab === 'audit' && <AuditPanel />}
+          {tab === 'data' && (
+            <div className="wf-stack">
+              <OrgDetails />
+              <ServicesCard />
+              <DataPanel />
+            </div>
+          )}
+          {tab === 'privacy' && <PrivacyPanel />}
+          {tab === 'integrations' && <IntegrationsPanel />}
+        </div>
+      </Tabs>
     </div>
   );
 }
@@ -125,12 +240,13 @@ function OrgDetails() {
       title="Organisation details"
       actions={
         can('admin.org.manage') && (
-          <button
-            className={smallButton}
+          <Button
+            type="link"
+            size="small"
             onClick={() => setEdit({ name: o.name, packs: [...current] })}
           >
             Edit details
-          </button>
+          </Button>
         )
       }
     >
@@ -167,7 +283,6 @@ function OrgDetails() {
             <div className="grid gap-3">
               <Field label="Organisation name">
                 <input
-                  className={input}
                   maxLength={120}
                   value={edit.name}
                   onChange={(e) => setEdit({ ...edit, name: e.target.value })}
@@ -209,106 +324,12 @@ function OrgDetails() {
 
 function OrgPanel() {
   const { api, orgId } = useApp();
-  const can = useCan();
-  const canEdit = can('admin.org.manage');
-  const loc = useList(`/api/v1/organisations/${orgId}/locations`);
-  const svc = useList(`/api/v1/organisations/${orgId}/services`);
-  const act = useList(`/api/v1/organisations/${orgId}/registered-activities`);
-  const { run, msg } = useRun();
-  const [name, setName] = useState('');
-  const [registered, setRegistered] = useState(true);
   const [archiving, setArchiving] = useState<Row | null>(null);
-  const locName = new Map(((loc.data ?? []) as Row[]).map((l) => [l.id, l.name]));
-
-  const add = async (e: FormEvent) => {
-    e.preventDefault();
-    const ok = await run(
-      () =>
-        api.send('POST', `/api/v1/organisations/${orgId}/locations`, orgId, { name, registered }),
-      'Location added.',
-    );
-    if (ok) setName('');
-  };
-
+  const loc = useList(`/api/v1/organisations/${orgId}/locations`);
   return (
-    <div className="space-y-6">
-      <OrgDetails />
-      {msg}
-      <Section title="Locations">
-        {loc.isError ? (
-          <p role="alert">Locations could not be loaded.</p>
-        ) : (
-          <DataTable
-            caption="Locations"
-            rows={(loc.data ?? []) as Row[]}
-            rowKey={(r: Row) => r.id}
-            emptyMessage="No locations yet."
-            columns={[
-              { key: 'name', header: 'Name', cell: (r: Row) => r.name },
-              {
-                key: 'reg',
-                header: 'CQC registered',
-                cell: (r: Row) => (r.registered ? 'Yes' : 'No'),
-              },
-              {
-                key: 'state',
-                header: 'State',
-                cell: (r: Row) => (
-                  <StatusBadge
-                    status={r.archived ? 'GREY' : 'GREEN'}
-                    reason={
-                      r.archived
-                        ? `Archived${r.archiveReason ? `: ${r.archiveReason}` : ''}`
-                        : 'Active'
-                    }
-                  />
-                ),
-              },
-              ...(canEdit
-                ? [
-                    {
-                      key: 'a',
-                      header: 'Action',
-                      cell: (r: Row) => (
-                        <button
-                          className={smallButton}
-                          onClick={() => setArchiving(r)}
-                          aria-label={`${r.archived ? 'Restore' : 'Archive'} ${r.name}`}
-                        >
-                          {r.archived ? 'Restore' : 'Archive'}
-                        </button>
-                      ),
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        )}
-        {canEdit && (
-          <form onSubmit={add} className="flex flex-wrap items-end gap-3" aria-label="Add location">
-            <Field label="Location name">
-              <input
-                className={input}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                maxLength={120}
-              />
-            </Field>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={registered}
-                onChange={(e) => setRegistered(e.target.checked)}
-              />{' '}
-              Registered with CQC
-            </label>
-            <button className={button} type="submit">
-              Add location
-            </button>
-          </form>
-        )}
-      </Section>
+    <div className="wf-stack">
+      <LocationsV36 onArchive={setArchiving} />
+      <StatementOfPurpose />
       <ActionDialog
         open={archiving !== null}
         title={`${archiving?.archived ? 'Restore' : 'Archive'} ${archiving?.name ?? ''}`}
@@ -316,15 +337,16 @@ function OrgPanel() {
         danger={!archiving?.archived}
         reasonLabel={archiving?.archived ? undefined : 'Why is it being archived?'}
         onCancel={() => setArchiving(null)}
-        onConfirm={(reason) =>
-          api.send(
+        onConfirm={async (reason) => {
+          await api.send(
             'PATCH',
             `/api/v1/organisations/${orgId}/locations/${archiving!.id}`,
             orgId,
             archiving!.archived ? { archived: false } : { archived: true, archiveReason: reason },
             archiving!.version,
-          )
-        }
+          );
+          await loc.refetch();
+        }}
       >
         <p>
           {archiving?.archived
@@ -332,35 +354,27 @@ function OrgPanel() {
             : 'The location is hidden from new records. Its history stays on record.'}
         </p>
       </ActionDialog>
-      <Section title="Services">
-        <DataTable
-          caption="Services"
-          rows={(svc.data ?? []) as Row[]}
-          rowKey={(r: Row) => r.id}
-          emptyMessage="No services yet."
-          columns={[
-            { key: 'n', header: 'Name', cell: (r: Row) => r.name },
-            { key: 'c', header: 'Reference', cell: (r: Row) => r.code },
-          ]}
-        />
-      </Section>
-      <Section title="Registered activities">
-        <DataTable
-          caption="Registered activities"
-          rows={(act.data ?? []) as Row[]}
-          rowKey={(r: Row) => r.id}
-          emptyMessage="No registered activities yet."
-          columns={[
-            { key: 'n', header: 'Activity', cell: (r: Row) => r.name },
-            {
-              key: 'l',
-              header: 'Location',
-              cell: (r: Row) => locName.get(r.locationId) ?? 'Unknown location',
-            },
-          ]}
-        />
-      </Section>
     </div>
+  );
+}
+
+/** Services the organisation provides (shown with the organisation's details). */
+function ServicesCard() {
+  const { orgId } = useApp();
+  const svc = useList(`/api/v1/organisations/${orgId}/services`);
+  return (
+    <Section title="Services">
+      <DataTable
+        caption="Services"
+        rows={(svc.data ?? []) as Row[]}
+        rowKey={(r: Row) => r.id}
+        emptyMessage="No services yet."
+        columns={[
+          { key: 'n', header: 'Name', cell: (r: Row) => r.name },
+          { key: 'c', header: 'Reference', cell: (r: Row) => r.code },
+        ]}
+      />
+    </Section>
   );
 }
 
@@ -424,7 +438,7 @@ function UsersPanel() {
 
   const locationSelect = (value: string, onChange: (v: string) => void) => (
     <Field label="Location">
-      <select className={input} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">All locations</option>
         {activeLocs.map((l) => (
           <option key={l.id} value={l.id}>
@@ -446,13 +460,17 @@ function UsersPanel() {
         columns={[
           {
             key: 'n',
-            header: 'Name',
-            cell: (r: Row) => (r.id === me.user.id ? `${r.displayName} (you)` : r.displayName),
+            header: 'Person',
+            cell: (r: Row) => (
+              <Who
+                name={r.id === me.user.id ? `${r.displayName} (you)` : r.displayName}
+                sub={r.email}
+              />
+            ),
           },
-          { key: 'e', header: 'Email', cell: (r: Row) => r.email },
           {
             key: 'r',
-            header: 'Role and location',
+            header: 'Role',
             cell: (r: Row) =>
               current(r).length === 0 ? (
                 'No current access'
@@ -460,13 +478,16 @@ function UsersPanel() {
                 <ul className="space-y-1">
                   {current(r).map((m) => (
                     <li key={m.membershipId} className="flex flex-wrap items-center gap-2">
-                      {m.roleName} –{' '}
-                      {m.locationId
-                        ? (locName.get(m.locationId) ?? 'One location')
-                        : 'All locations'}
+                      {m.roleName}
+                      <span className="wf-mut">
+                        {m.locationId
+                          ? (locName.get(m.locationId) ?? 'One location')
+                          : 'All locations'}
+                      </span>
                       {r.id !== me.user.id && (
-                        <button
-                          className={smallButton}
+                        <Button
+                          type="link"
+                          size="small"
                           aria-label={`Change role or location for ${r.displayName}: ${m.roleName}`}
                           onClick={() =>
                             setChanging({
@@ -478,7 +499,7 @@ function UsersPanel() {
                           }
                         >
                           Change
-                        </button>
+                        </Button>
                       )}
                     </li>
                   ))}
@@ -487,13 +508,43 @@ function UsersPanel() {
           },
           {
             key: 's',
-            header: 'Status',
-            cell: (r: Row) => (
-              <StatusBadge
-                status={USER_STATUS[r.status]?.kind ?? 'GREY'}
-                reason={USER_STATUS[r.status]?.text ?? words(r.status)}
-              />
-            ),
+            header: 'Sign-in',
+            cell: (r: Row) => {
+              if (r.status !== 'ACTIVE') {
+                const k = USER_STATUS[r.status]?.kind ?? 'GREY';
+                const tone = k === 'RED' ? 'red' : k === 'AMBER' ? 'amber' : 'grey';
+                return (
+                  <WfTag tone={tone} icon={tone === 'red' ? 'block' : 'schedule'}>
+                    {USER_STATUS[r.status]?.text ?? words(r.status)}
+                  </WfTag>
+                );
+              }
+              const si = r.signIn as
+                { mfaRequired: boolean; mfaEnabled: boolean | null } | undefined;
+              if (si?.mfaEnabled)
+                return (
+                  <WfTag tone="green" icon="verified_user">
+                    MFA on
+                  </WfTag>
+                );
+              if (si && si.mfaEnabled === null)
+                return (
+                  <WfTag tone="green" icon="verified_user">
+                    Single sign-on
+                  </WfTag>
+                );
+              if (si?.mfaRequired)
+                return (
+                  <WfTag tone="amber" icon="schedule">
+                    MFA required – not set up
+                  </WfTag>
+                );
+              return (
+                <WfTag tone="grey" icon="key">
+                  Password only
+                </WfTag>
+              );
+            },
           },
           {
             key: 'l',
@@ -508,16 +559,18 @@ function UsersPanel() {
                 'You cannot revoke your own access'
               ) : r.status === 'LEAVER' || r.status === 'SUSPENDED' || !current(r).length ? null : (
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    className={smallButton}
+                  <Button
+                    type="link"
+                    size="small"
                     onClick={() => setRevoking(r)}
                     aria-label={`Revoke access for ${r.displayName}`}
                   >
                     Revoke access
-                  </button>
+                  </Button>
                   {localSignIn && (
-                    <button
-                      className={smallButton}
+                    <Button
+                      type="link"
+                      size="small"
                       onClick={() => {
                         setMfaResetDone(null);
                         setResettingMfa(r);
@@ -525,7 +578,7 @@ function UsersPanel() {
                       aria-label={`Reset MFA: ${r.displayName}`}
                     >
                       Reset MFA
-                    </button>
+                    </Button>
                   )}
                 </div>
               ),
@@ -601,7 +654,6 @@ function UsersPanel() {
             <div className="grid gap-3">
               <Field label="Role">
                 <select
-                  className={input}
                   value={changing.roleId}
                   onChange={(e) => setChanging({ ...changing, roleId: e.target.value })}
                 >
@@ -627,17 +679,10 @@ function UsersPanel() {
       <Section title="Invite someone">
         <form onSubmit={invite} aria-label="Invite user" className="flex flex-wrap items-end gap-3">
           <Field label="Email">
-            <input
-              className={input}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </Field>
           <Field label="Full name">
             <input
-              className={input}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               required
@@ -645,12 +690,7 @@ function UsersPanel() {
             />
           </Field>
           <Field label="Role">
-            <select
-              className={input}
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
-              required
-            >
+            <select value={roleId} onChange={(e) => setRoleId(e.target.value)} required>
               <option value="">Select a role</option>
               {invitable.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -662,11 +702,7 @@ function UsersPanel() {
           {locationSelect(locationId, setLocationId)}
           {linkable.length > 0 && (
             <Field label="Link to staff record (optional)">
-              <select
-                className={input}
-                value={staffId}
-                onChange={(e) => setStaffId(e.target.value)}
-              >
+              <select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
                 <option value="">Do not link</option>
                 {linkable.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -676,9 +712,9 @@ function UsersPanel() {
               </select>
             </Field>
           )}
-          <button className={button} type="submit">
+          <Button type="primary" htmlType="submit">
             Send invitation
-          </button>
+          </Button>
         </form>
         <p className="text-sm">
           Someone who already has access cannot be invited again: use Change next to their role to
@@ -765,7 +801,7 @@ function NotificationsPanel() {
             type="number"
             min={1}
             max={365}
-            className={input}
+
             value={draft?.dueSoonDays ?? s.dueSoonDays}
             onChange={(e) => setDraft({ ...start(), dueSoonDays: Number(e.target.value) })}
           />
@@ -832,8 +868,8 @@ function NotificationsPanel() {
           },
         ]}
       />
-      <button
-        className={button}
+      <Button
+        type="primary"
         disabled={!draft || saving}
         onClick={async () => {
           if (!draft) return;
@@ -858,7 +894,7 @@ function NotificationsPanel() {
         }}
       >
         {saving ? 'Saving…' : 'Save notification settings'}
-      </button>
+      </Button>
     </Section>
   );
 }
@@ -874,7 +910,7 @@ interface Routing {
 type Recipient = (typeof RECIPIENTS)[number];
 
 /** A6: warning days, who is told for each kind of item, escalation, deputies and channels. */
-function AlertRoutingPanel() {
+function AlertRoutingPanel({ compact = false }: { compact?: boolean } = {}) {
   const { api, orgId } = useApp();
   const { run, msg } = useRun();
   const settings = useOne<{ settings: Row; version: number }>('/api/v1/admin/settings');
@@ -925,57 +961,55 @@ function AlertRoutingPanel() {
     <Section title="Warnings, escalation and deputies">
       {msg}
       <Field label="Warn this many days before a date (product defaults, not CQC rules)">
-        <input
-          className={input}
-          value={current.warningDays}
-          onChange={(e) => set({ warningDays: e.target.value })}
-        />
+        <input value={current.warningDays} onChange={(e) => set({ warningDays: e.target.value })} />
       </Field>
-      <DataTable<Routing['itemRules'][number]>
-        caption="Who is told for each kind of item"
-        rows={current.itemRules}
-        rowKey={(r) => r.kind}
-        emptyMessage="No kinds of item."
-        columns={[
-          { key: 'k', header: 'Item', cell: (r) => ITEM_KIND_LABELS[r.kind] },
-          {
-            key: 'r',
-            header: 'Tell',
-            cell: (r) => (
-              <fieldset className="flex flex-wrap gap-x-3 text-sm">
-                <legend className="sr-only">Who is told: {ITEM_KIND_LABELS[r.kind]}</legend>
-                {RECIPIENTS.map((who) => (
-                  <label key={who} className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={r.recipients.includes(who)}
-                      onChange={(e) => {
-                        const recipients = e.target.checked
-                          ? [...r.recipients, who]
-                          : r.recipients.filter((x) => x !== who);
-                        if (recipients.length === 0) return;
-                        set({
-                          itemRules: current.itemRules.map((x) =>
-                            x.kind === r.kind ? { ...x, recipients } : x,
-                          ),
-                        });
-                      }}
-                    />
-                    {RECIPIENT_LABELS[who]}
-                  </label>
-                ))}
-              </fieldset>
-            ),
-          },
-        ]}
-      />
+      {!compact && (
+        <DataTable<Routing['itemRules'][number]>
+          caption="Who is told for each kind of item"
+          rows={current.itemRules}
+          rowKey={(r) => r.kind}
+          emptyMessage="No kinds of item."
+          columns={[
+            { key: 'k', header: 'Item', cell: (r) => ITEM_KIND_LABELS[r.kind] },
+            {
+              key: 'r',
+              header: 'Tell',
+              cell: (r) => (
+                <fieldset className="flex flex-wrap gap-x-3 text-sm">
+                  <legend className="sr-only">Who is told: {ITEM_KIND_LABELS[r.kind]}</legend>
+                  {RECIPIENTS.map((who) => (
+                    <label key={who} className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={r.recipients.includes(who)}
+                        onChange={(e) => {
+                          const recipients = e.target.checked
+                            ? [...r.recipients, who]
+                            : r.recipients.filter((x) => x !== who);
+                          if (recipients.length === 0) return;
+                          set({
+                            itemRules: current.itemRules.map((x) =>
+                              x.kind === r.kind ? { ...x, recipients } : x,
+                            ),
+                          });
+                        }}
+                      />
+                      {RECIPIENT_LABELS[who]}
+                    </label>
+                  ))}
+                </fieldset>
+              ),
+            },
+          ]}
+        />
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Overdue days before the lead is told">
           <input
             type="number"
             min={0}
             max={90}
-            className={input}
+
             value={current.escalation.leadAfterDays}
             onChange={(e) =>
               set({
@@ -989,7 +1023,7 @@ function AlertRoutingPanel() {
             type="number"
             min={1}
             max={180}
-            className={input}
+
             value={current.escalation.managerAfterDays}
             onChange={(e) =>
               set({
@@ -1017,7 +1051,6 @@ function AlertRoutingPanel() {
       </div>
       <Field label="Freedom to Speak Up guardian">
         <select
-          className={input}
           value={current.speakUpGuardianUserId ?? ''}
           onChange={(e) => set({ speakUpGuardianUserId: e.target.value || null })}
         >
@@ -1029,90 +1062,89 @@ function AlertRoutingPanel() {
           ))}
         </select>
       </Field>
-      <DataTable<Routing['deputies'][number] & { i: number }>
-        caption="Deputies (cover for a lead between two dates)"
-        rows={current.deputies.map((d, i) => ({ ...d, i }))}
-        rowKey={(d) => String(d.i)}
-        emptyMessage="No deputies are set."
-        columns={[
-          { key: 'l', header: 'Lead', cell: (d) => nameOf(d.leadUserId) },
-          { key: 'd', header: 'Deputy', cell: (d) => nameOf(d.deputyUserId) },
-          {
-            key: 'w',
-            header: 'Covers',
-            cell: (d) => `${fmtDate(d.from)} to ${fmtDate(d.to)}`,
-          },
-          {
-            key: 'x',
-            header: 'Actions',
-            cell: (d) => (
-              <button
-                type="button"
-                className={smallButton}
-                aria-label={`Remove ${nameOf(d.deputyUserId)} as deputy for ${nameOf(
-                  d.leadUserId,
-                )}`}
-                onClick={() => set({ deputies: current.deputies.filter((_, i) => i !== d.i) })}
-              >
-                Remove
-              </button>
-            ),
-          },
-        ]}
-      />
-      <form
-        aria-label="Add a deputy"
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const f = new FormData(e.currentTarget);
-          const d = {
-            leadUserId: String(f.get('lead')),
-            deputyUserId: String(f.get('deputy')),
-            from: String(f.get('from')),
-            to: String(f.get('to')),
-          };
-          if (d.leadUserId === d.deputyUserId || d.to < d.from) return;
-          set({ deputies: [...current.deputies, d] });
-          e.currentTarget.reset();
-        }}
-      >
-        <Field label="Lead">
-          <select name="lead" className={input} required>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.displayName}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Deputy">
-          <select name="deputy" className={input} required>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.displayName}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="From">
-          <input name="from" type="date" className={input} required />
-        </Field>
-        <Field label="To">
-          <input name="to" type="date" className={input} required />
-        </Field>
-        <button className={smallButton} type="submit">
-          Add deputy
-        </button>
-      </form>
-      <button
-        className={button}
-        disabled={!draft || days.length === 0}
-        onClick={save}
-        type="button"
-      >
+      {!compact && (
+        <>
+          <DataTable<Routing['deputies'][number] & { i: number }>
+            caption="Deputies (cover for a lead between two dates)"
+            rows={current.deputies.map((d, i) => ({ ...d, i }))}
+            rowKey={(d) => String(d.i)}
+            emptyMessage="No deputies are set."
+            columns={[
+              { key: 'l', header: 'Lead', cell: (d) => nameOf(d.leadUserId) },
+              { key: 'd', header: 'Deputy', cell: (d) => nameOf(d.deputyUserId) },
+              {
+                key: 'w',
+                header: 'Covers',
+                cell: (d) => `${fmtDate(d.from)} to ${fmtDate(d.to)}`,
+              },
+              {
+                key: 'x',
+                header: 'Actions',
+                cell: (d) => (
+                  <Button
+                    type="link"
+                    size="small"
+                    aria-label={`Remove ${nameOf(d.deputyUserId)} as deputy for ${nameOf(
+                      d.leadUserId,
+                    )}`}
+                    onClick={() => set({ deputies: current.deputies.filter((_, i) => i !== d.i) })}
+                  >
+                    Remove
+                  </Button>
+                ),
+              },
+            ]}
+          />
+          <form
+            aria-label="Add a deputy"
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              const d = {
+                leadUserId: String(f.get('lead')),
+                deputyUserId: String(f.get('deputy')),
+                from: String(f.get('from')),
+                to: String(f.get('to')),
+              };
+              if (d.leadUserId === d.deputyUserId || d.to < d.from) return;
+              set({ deputies: [...current.deputies, d] });
+              e.currentTarget.reset();
+            }}
+          >
+            <Field label="Lead">
+              <select name="lead" required>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.displayName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Deputy">
+              <select name="deputy" required>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.displayName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="From">
+              <input name="from" type="date" required />
+            </Field>
+            <Field label="To">
+              <input name="to" type="date" required />
+            </Field>
+            <Button type="primary" htmlType="submit">
+              Add deputy
+            </Button>
+          </form>
+        </>
+      )}
+      <Button type="primary" disabled={!draft || days.length === 0} onClick={save}>
         Save alert settings
-      </button>
+      </Button>
     </Section>
   );
 }
@@ -1126,6 +1158,7 @@ function SupportPanel() {
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState(2);
   const [ending, setEnding] = useState<Row | null>(null);
+  const [granting, setGranting] = useState(false);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void run(
@@ -1136,12 +1169,21 @@ function SupportPanel() {
           hours,
         }),
       'Support access granted. Every action they take is recorded in the audit log.',
-    );
+    ).then((ok) => {
+      if (ok) setGranting(false);
+    });
   };
   return (
-    <div className="space-y-4">
+    <Section
+      title="Support access"
+      actions={
+        <Button type="primary" size="small" onClick={() => setGranting(true)}>
+          <Ms i="support_agent" /> Grant access
+        </Button>
+      }
+    >
       {msg}
-      <p>
+      <p className="wf-mini" style={{ margin: 0 }}>
         Support staff have no access unless you grant it here. Access is read-only, time-limited
         (maximum 8 hours) and fully audited. While it is active every page shows a banner, and you
         can end it early at any time.
@@ -1161,10 +1203,10 @@ function SupportPanel() {
               }`,
           },
           { key: 'r', header: 'Reason', cell: (r: Row) => r.reason },
-          { key: 's', header: 'Starts', cell: (r: Row) => fmtDateTime(r.startsAt) },
+          { key: 's', header: 'From', cell: (r: Row) => fmtDateTime(r.startsAt) },
           {
             key: 'e',
-            header: 'Ends',
+            header: 'Until',
             cell: (r: Row) =>
               r.endedEarlyAt
                 ? `Ended early ${fmtDateTime(r.endedEarlyAt)}: ${r.endedEarlyReason ?? ''}`
@@ -1185,14 +1227,14 @@ function SupportPanel() {
             header: 'Actions',
             cell: (r: Row) =>
               r.active ? (
-                <button
-                  type="button"
-                  className={smallButton}
+                <Button
+                  type="link"
+                  size="small"
                   aria-label={`End support access early: ${r.reason}`}
                   onClick={() => setEnding(r)}
                 >
                   End access now
-                </button>
+                </Button>
               ) : (
                 ''
               ),
@@ -1216,46 +1258,52 @@ function SupportPanel() {
       >
         <p>{ending?.reason}</p>
       </ActionDialog>
-      <form
-        onSubmit={submit}
-        aria-label="Grant support access"
-        className="flex flex-wrap items-end gap-3"
+      <Modal
+        open={granting}
+        title="Grant support access"
+        onCancel={() => setGranting(false)}
+        footer={null}
+        className="hh-modal"
+        destroyOnHidden
       >
-        <Field label="Support user email">
-          <input
-            className={input}
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </Field>
-        <Field label="Reason">
-          <input
-            className={input}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            required
-            minLength={10}
-            maxLength={500}
-          />
-        </Field>
-        <Field label="Hours (1–8)">
-          <input
-            className={input}
-            type="number"
-            min={1}
-            max={8}
-            value={hours}
-            onChange={(e) => setHours(Number(e.target.value))}
-            required
-          />
-        </Field>
-        <button className={button} type="submit">
-          Grant access
-        </button>
-      </form>
-    </div>
+        <form onSubmit={submit} aria-label="Grant support access" className="hh-form">
+          <div className="hh-grid">
+            <Field label="Support user email">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Reason">
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                required
+                minLength={10}
+                maxLength={500}
+              />
+            </Field>
+            <Field label="Hours (1–8)">
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={hours}
+                onChange={(e) => setHours(Number(e.target.value))}
+                required
+              />
+            </Field>
+          </div>
+          <div className="hh-actions">
+            <Button type="primary" htmlType="submit">
+              Grant access
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </Section>
   );
 }
 
@@ -1306,7 +1354,7 @@ export function auditActionText(action: string): string {
     .join(' ')}`;
 }
 
-function AuditPanel() {
+export function AuditPanel() {
   const { api, me, orgId } = useApp();
   const { run, msg } = useRun();
   const [area, setArea] = useState('');
@@ -1361,9 +1409,9 @@ function AuditPanel() {
       {msg}
       {me.permissions.includes('admin.audit.verify') && (
         <div className="space-y-1">
-          <button className={button} onClick={() => void verify()}>
+          <Button type="primary" onClick={() => void verify()}>
             Check the audit trail
-          </button>
+          </Button>
           {result && (
             <p role="status">
               <StatusBadge status={result.ok ? 'GREEN' : 'RED'} reason={result.text} />
@@ -1377,7 +1425,7 @@ function AuditPanel() {
         onSubmit={(e) => e.preventDefault()}
       >
         <Field label="Area">
-          <select className={input} value={area} onChange={(e) => setArea(e.target.value)}>
+          <select value={area} onChange={(e) => setArea(e.target.value)}>
             <option value="">All areas</option>
             {Object.entries(AREA).map(([k, v]) => (
               <option key={k} value={k}>
@@ -1387,7 +1435,7 @@ function AuditPanel() {
           </select>
         </Field>
         <Field label="Who">
-          <select className={input} value={actor} onChange={(e) => setActor(e.target.value)}>
+          <select value={actor} onChange={(e) => setActor(e.target.value)}>
             <option value="">Anyone</option>
             {people.map((p) => (
               <option key={p.id} value={p.id}>
@@ -1399,25 +1447,20 @@ function AuditPanel() {
         <Field label="From">
           <input
             type="date"
-            className={input}
+
             value={from}
             onChange={(e) => setFrom(e.target.value)}
           />
         </Field>
         <Field label="To">
-          <input type="date" className={input} value={to} onChange={(e) => setTo(e.target.value)} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
         <Field label="Record reference (optional)">
-          <input
-            className={input}
-            value={recordId}
-            maxLength={100}
-            onChange={(e) => setRecordId(e.target.value)}
-          />
+          <input value={recordId} maxLength={100} onChange={(e) => setRecordId(e.target.value)} />
         </Field>
-        <button type="button" className={smallButton} onClick={exportCsv}>
+        <Button type="link" size="small" onClick={exportCsv}>
           Export to CSV
-        </button>
+        </Button>
       </form>
       <DataTable
         caption="Audit log (most recent 100 matching, UK time)"

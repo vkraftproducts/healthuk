@@ -1,6 +1,7 @@
 import { DataTable, StatusBadge } from '@hub/ui';
+import { Alert, Select } from 'antd';
 import { useState } from 'react';
-import { Field, Section, fmtDate, input } from '../../components.js';
+import { Field, Section, fmtDate } from '../../components.js';
 import { useOne } from '../settings/hooks.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -82,17 +83,12 @@ export function DriverEligibilityPanel({ staffId }: { staffId: string }) {
   return (
     <Section title="Driver eligibility">
       <Field label="Vehicle needs licence category">
-        <select
-          className={`${input} w-40`}
+        <Select
+          style={{ width: 160 }}
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        >
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+          onChange={setCategory}
+          options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+        />
       </Field>
       {d && (
         <p role="status">
@@ -106,7 +102,7 @@ export function DriverEligibilityPanel({ staffId }: { staffId: string }) {
           />
         </p>
       )}
-      {res.isError && <p role="alert">Could not load driver eligibility.</p>}
+      {res.isError && <Alert type="error" showIcon message="Could not load driver eligibility." />}
       <ul className="space-y-1 text-sm" aria-label="Driver checks">
         {((d?.checks ?? []) as Row[]).map((c) => (
           <li key={c.code} className="flex flex-wrap items-center gap-2">

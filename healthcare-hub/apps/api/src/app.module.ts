@@ -50,6 +50,33 @@ import { SpeakUpController } from './modules/speakup/speakup.controller.js';
 import { JobsController, ShiftsController } from './modules/dispatch/jobs.controller.js';
 import { CrewController } from './modules/crew/crew.controller.js';
 import { LiveController } from './modules/live/live.controller.js';
+import {
+  ControlledDrugChecksController,
+  SafeguardingReferralsController,
+  VehicleAccidentsController,
+  VehicleStockController,
+} from './modules/v36/safety-registers.controller.js';
+import {
+  LeaversController,
+  StaffAbsencesController,
+  StaffReviewsController,
+} from './modules/v36/people-records.controller.js';
+import {
+  OpenShiftsController,
+  ShiftPatternsController,
+  ShiftSwapsController,
+  ShiftTimeController,
+} from './modules/v36/rota.controller.js';
+import {
+  ContinuityPlansController,
+  DsptController,
+  StatementOfPurposeController,
+} from './modules/v36/governance-records.controller.js';
+import { RecordsController } from './modules/v36/records.controller.js';
+import { CqcSelfAuditController } from './modules/v36/cqc-self-audit.controller.js';
+import { WorkforceChecksController } from './modules/v36/workforce-checks.controller.js';
+import { TrainingPlansController } from './modules/v36/training-plans.controller.js';
+import { FleetCareController } from './modules/v36/fleet-care.controller.js';
 import { LiveChanges } from './modules/live/live.service.js';
 import { BLOB_STORE, LocalBlobStore, type BlobStore } from './storage/blob-store.js';
 import { BasicScanner, SCANNER, type Scanner } from './storage/scanner.js';
@@ -93,6 +120,26 @@ export const CONTROLLERS = [
   LiveController,
   LocalAuthController,
   LocalAuthAdminController,
+  // v36 registers (17 Nov 2026)
+  RecordsController,
+  CqcSelfAuditController,
+  WorkforceChecksController,
+  TrainingPlansController,
+  FleetCareController,
+  SafeguardingReferralsController,
+  VehicleAccidentsController,
+  VehicleStockController,
+  ControlledDrugChecksController,
+  StaffReviewsController,
+  StaffAbsencesController,
+  LeaversController,
+  OpenShiftsController,
+  ShiftSwapsController,
+  ShiftTimeController,
+  ShiftPatternsController,
+  ContinuityPlansController,
+  StatementOfPurposeController,
+  DsptController,
 ] as const;
 
 export interface AppDeps {

@@ -136,24 +136,20 @@ describe('compliance actions list', () => {
   });
   it('switches tab when a link names another tab on the same page, and keeps tabs in the URL', async () => {
     open();
+    const risksOn = () =>
+      expect(screen.getByRole('radio', { name: 'Risks' })).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(await screen.findByRole('link', { name: 'Open the risk' }));
+    await waitFor(risksOn);
+    await userEvent.click(screen.getByRole('radio', { name: 'Audits & actions' }));
+    await userEvent.click(await screen.findByRole('radio', { name: 'Actions' }));
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Risk register' })).toHaveAttribute(
-        'aria-selected',
+      expect(screen.getByRole('radio', { name: 'Actions' })).toHaveAttribute(
+        'aria-checked',
         'true',
       ),
     );
-    await userEvent.click(screen.getByRole('tab', { name: 'Actions' }));
-    await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Actions' })).toHaveAttribute('aria-selected', 'true'),
-    );
     await userEvent.click(await screen.findByRole('link', { name: 'Open the risk' }));
-    await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Risk register' })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      ),
-    );
+    await waitFor(risksOn);
   });
 });
 
@@ -395,9 +391,9 @@ describe('audit schedule and templates [task 9]', () => {
   it('lists audits with names, an overdue warning in words, and the stage', async () => {
     renderWith('/compliance?tab=audits', perms, get);
     const row = await screen.findByRole('row', { name: /AUD-102/ });
-    expect(row).toHaveTextContent('Auditor: Priya Governance');
-    expect(row).toHaveTextContent('Owner: Sam Manager');
-    expect(row).toHaveTextContent('Red – Overdue – was due 21 Oct 2026');
+    expect(row).toHaveTextContent('Priya Governance');
+    expect(row).toHaveTextContent('Sam Manager');
+    expect(row).toHaveTextContent('Overdue – was due 21 Oct 2026');
     expect(row).toHaveTextContent('In progress');
   });
 
@@ -427,7 +423,7 @@ describe('audit schedule and templates [task 9]', () => {
   });
 
   it('the author cannot publish their own draft; activation is confirmed in a dialog', async () => {
-    const { send } = renderWith('/compliance?tab=audits', perms, get);
+    const { send } = renderWith('/compliance?tab=templates', perms, get);
     const own = await screen.findByRole('row', { name: /AC-08 Medicines/ });
     expect(own).toHaveTextContent('You wrote this version, so someone else must publish it.');
     expect(within(own).queryByRole('button', { name: /Publish/ })).toBeNull();
@@ -446,14 +442,14 @@ describe('audit schedule and templates [task 9]', () => {
   });
 
   it('shows the controls of a template without changing anything', async () => {
-    const { send } = renderWith('/compliance?tab=audits', ['compliance.audit.view'], get);
+    const { send } = renderWith('/compliance?tab=templates', ['compliance.audit.view'], get);
     await userEvent.click(
       await screen.findByRole('button', { name: 'View controls: AC-07 Vehicle cleaning' }),
     );
     const dialog = screen.getByRole('dialog', { name: 'Controls: AC-07 Vehicle cleaning' });
     expect(dialog).toHaveTextContent('published by Sam Manager, 1 Oct 2026, 10:00');
     expect(screen.queryByRole('heading', { name: 'Schedule an audit' })).toBeNull();
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await userEvent.click(within(dialog).getAllByRole('button', { name: 'Close' }).at(-1)!);
     expect(send).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,8 @@
 import { DataTable, StatusBadge } from '@hub/ui';
 import { londonDate } from '@hub/rules';
+import { Alert, Button, Checkbox, Input, Select, Space, Typography } from 'antd';
 import { useState, type FormEvent } from 'react';
-import { Field, Section, button, fmtDateTime, input, useRun, words } from '../../components.js';
+import { Field, Section, fmtDateTime, useRun, words } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useList } from '../settings/hooks.js';
 
@@ -30,6 +31,10 @@ export function ReportIncident() {
   const mine = useList('/api/v1/incidents/mine');
   const [kind, setKind] = useState('INCIDENT');
   const [receipt, setReceipt] = useState<Row | null>(null);
+  const [stillAtRisk, setStillAtRisk] = useState(false);
+  const [nhsFunded, setNhsFunded] = useState(false);
+  const [consentToShare, setConsentToShare] = useState(false);
+  const [complaintChannel, setComplaintChannel] = useState('PHONE');
   const kinds = (types.data as string[] | undefined) ?? ['INCIDENT', 'NEAR_MISS'];
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -49,14 +54,14 @@ export function ReportIncident() {
       ...(text('place') ? { place: text('place') } : {}),
       peopleRefs: refs,
       ...(text('immediateActions') ? { immediateActions: text('immediateActions') } : {}),
-      stillAtRisk: f.get('stillAtRisk') === 'on',
-      nhsFunded: f.get('nhsFunded') === 'on',
+      stillAtRisk,
+      nhsFunded,
       ...(kind === 'COMPLAINT'
         ? {
             complaint: {
               receivedOn: text('receivedOn') || londonDate(new Date()),
-              channel: text('channel') || 'PHONE',
-              consentToShare: f.get('consentToShare') === 'on',
+              channel: complaintChannel,
+              consentToShare,
             },
           }
         : {}),
@@ -69,92 +74,99 @@ export function ReportIncident() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Report an incident</h1>
-      <p className="text-sm">
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Typography.Title level={2} style={{ margin: 0 }}>
+        Report an incident
+      </Typography.Title>
+      <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
         Tell us what happened. Do not write anyone&apos;s name: refer to people by job or booking
         reference (for example J-1234).
-      </p>
+      </Typography.Paragraph>
       {receipt && (
-        <div role="status" className="rounded border border-green-700 bg-green-50 p-3 text-sm">
-          <p className="font-semibold">Your reference number is {receipt.code}.</p>
-          <p>{receipt.message}</p>
-          <p>Triage is due by {fmtDateTime(receipt.triageDueAt)}.</p>
-        </div>
+        <Alert
+          type="success"
+          showIcon
+          role="status"
+          message={<Typography.Text strong>Your reference number is {receipt.code}.</Typography.Text>}
+          description={
+            <>
+              <p>{receipt.message}</p>
+              <p>Triage is due by {fmtDateTime(receipt.triageDueAt)}.</p>
+            </>
+          }
+        />
       )}
       {msg}
-      <form
-        aria-label="Report an incident"
-        className="grid gap-3 rounded-lg border border-hub-line bg-hub-card p-4 sm:grid-cols-2"
-        onSubmit={(e) => void submit(e)}
-      >
-        <Field label="What are you reporting?">
-          <select className={input} value={kind} onChange={(e) => setKind(e.target.value)}>
-            {kinds.map((k) => (
-              <option key={k} value={k}>
-                {REPORT_KIND_LABEL[k] ?? words(k)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="When did it happen?">
-          <input name="occurredAt" type="datetime-local" className={input} />
-        </Field>
-        <Field label="Short title">
-          <input name="title" required minLength={3} maxLength={200} className={input} />
-        </Field>
-        <Field label="Where (place)">
-          <input name="place" maxLength={200} className={input} />
-        </Field>
-        <div className="sm:col-span-2">
-          <Field label="What happened">
-            <textarea
-              name="description"
-              required
-              minLength={10}
-              maxLength={4000}
-              rows={4}
-              className={input}
+      <form aria-label="Report an incident" onSubmit={(e) => void submit(e)}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="What are you reporting?">
+            <Select
+              value={kind}
+              onChange={setKind}
+              options={kinds.map((k) => ({
+                value: k,
+                label: REPORT_KIND_LABEL[k] ?? words(k),
+              }))}
+              style={{ width: '100%' }}
             />
           </Field>
-        </div>
-        <Field label="Job or booking references (not names)">
-          <input name="peopleRefs" placeholder="J-1234, BK-5678" className={input} />
-        </Field>
-        <Field label="What was done straight away">
-          <input name="immediateActions" maxLength={2000} className={input} />
-        </Field>
-        {kind === 'COMPLAINT' && (
-          <>
-            <Field label="Date received">
-              <input name="receivedOn" type="date" className={input} />
+          <Field label="When did it happen?">
+            <Input name="occurredAt" type="datetime-local" />
+          </Field>
+          <Field label="Short title">
+            <Input name="title" required minLength={3} maxLength={200} />
+          </Field>
+          <Field label="Where (place)">
+            <Input name="place" maxLength={200} />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="What happened">
+              <Input.TextArea name="description" required minLength={10} maxLength={4000} rows={4} />
             </Field>
-            <Field label="How it was received">
-              <select name="channel" className={input} defaultValue="PHONE">
-                {CHANNELS.map((c) => (
-                  <option key={c} value={c}>
-                    {words(c)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="consentToShare" /> The person agreed we can share details
-              to investigate
-            </label>
-          </>
-        )}
-        <label className="flex items-center gap-2 text-sm font-semibold">
-          <input type="checkbox" name="stillAtRisk" /> Someone is still at risk now (alerts the
-          registered manager and governance lead)
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="nhsFunded" /> This was NHS-funded care
-        </label>
-        <div className="sm:col-span-2">
-          <button type="submit" className={button}>
-            Send report
-          </button>
+          </div>
+          <Field label="Job or booking references (not names)">
+            <Input name="peopleRefs" placeholder="J-1234, BK-5678" />
+          </Field>
+          <Field label="What was done straight away">
+            <Input name="immediateActions" maxLength={2000} />
+          </Field>
+          {kind === 'COMPLAINT' && (
+            <>
+              <Field label="Date received">
+                <Input name="receivedOn" type="date" />
+              </Field>
+              <Field label="How it was received">
+                <Select
+                  value={complaintChannel}
+                  onChange={setComplaintChannel}
+                  options={CHANNELS.map((c) => ({ value: c, label: words(c) }))}
+                  style={{ width: '100%' }}
+                />
+              </Field>
+              <Field label="Consent">
+                <Checkbox checked={consentToShare} onChange={(e) => setConsentToShare(e.target.checked)}>
+                  The person agreed we can share details to investigate
+                </Checkbox>
+              </Field>
+            </>
+          )}
+          <Field label="Risk">
+            <Checkbox checked={stillAtRisk} onChange={(e) => setStillAtRisk(e.target.checked)}>
+              <Typography.Text strong>
+                Someone is still at risk now (alerts the registered manager and governance lead)
+              </Typography.Text>
+            </Checkbox>
+          </Field>
+          <Field label="Funding">
+            <Checkbox checked={nhsFunded} onChange={(e) => setNhsFunded(e.target.checked)}>
+              This was NHS-funded care
+            </Checkbox>
+          </Field>
+          <div className="sm:col-span-2">
+            <Button type="primary" htmlType="submit">
+              Send report
+            </Button>
+          </div>
         </div>
       </form>
       <Section title="Reports you have made">
@@ -181,6 +193,6 @@ export function ReportIncident() {
           ]}
         />
       </Section>
-    </div>
+    </Space>
   );
 }

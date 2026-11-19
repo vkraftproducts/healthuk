@@ -3,7 +3,14 @@ import pg from 'pg';
 import type { Db } from '@hub/db';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { bookCrewDay, type Call, type DemoIds } from '../scripts/crew-demo-lib.js';
-import { SEED_IDS, activateStaff, addVerifiedLicence, makeApp, sign } from './harness.js';
+import {
+  SEED_IDS,
+  activateStaff,
+  addVerifiedLicence,
+  makeApp,
+  sign,
+  verifyVehicleDocuments,
+} from './harness.js';
 
 // Other test files change the seeded crew (ST-0042) in the shared test database, so this test
 // runs the demo against its own fresh crew and vehicle; the script's steps are the same.
@@ -78,6 +85,8 @@ describe('dev crew demo script', () => {
       wheelchairCapacity: 1,
     });
     expect(v.status).toBe(201);
+    // Like the seeded demo vehicle, it needs verified MOT and insurance before it can go on a shift.
+    await verifyVehicleDocuments(app, SEED_IDS.orgExample, v.body.id as string);
     const ids: DemoIds = {
       orgId: SEED_IDS.orgExample,
       locationId: SEED_IDS.locWatford,

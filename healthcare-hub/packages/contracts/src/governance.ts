@@ -186,6 +186,7 @@ export const ActionSourceType = z.enum([
   'FEEDBACK',
   'MEETING',
   'PREMISES',
+  'CONTINUITY',
 ]);
 export const ActionDto = z.object({
   id: uuid,
@@ -1145,6 +1146,8 @@ export const PremisesDto = z.object({
   assessedOn: isoDate.nullable(),
   /** Evidence items attached to the linked requirement. */
   evidenceCount: z.number().int(),
+  /** v36 register: the date of the most recent verified evidence (when it was last done). */
+  lastDone: z.string().nullable().optional(),
   status: RagStatus,
   reasonText: z.string(),
   nextDue: isoDate.nullable(),

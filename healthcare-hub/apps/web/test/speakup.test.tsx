@@ -5,6 +5,7 @@ import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../src/api.js';
 import { App } from '../src/App.js';
+import { selectAntByLabel } from './ant-testing.js';
 
 const ORG = '01900000-0000-7000-8000-000000000001';
 const ME = '01900000-0000-7000-8000-000000000102';
@@ -73,11 +74,11 @@ beforeEach(() => sessionStorage.clear());
 describe('speak up [task 20]', () => {
   it('anyone can raise an anonymous concern and is told nobody can see who raised it', async () => {
     const { send } = renderAt(['speakup.raise'], () => ({ data: [] }));
-    expect(await screen.findByRole('tab', { name: 'Raise a concern' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Concerns' })).toBeNull();
-    expect(screen.queryByRole('tab', { name: 'Harassment prevention' })).toBeNull();
+    expect(await screen.findByRole('tab', { name: 'Raise & track' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Guardian queue' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Insight' })).toBeNull();
     const form = screen.getByRole('form', { name: 'Raise a concern' });
-    await userEvent.selectOptions(within(form).getByLabelText('What is it about?'), 'BULLYING');
+    await selectAntByLabel('What is it about?', 'Bullying');
     await userEvent.type(
       within(form).getByLabelText('What happened, and what worries you?'),
       'Synthetic: shouting at handover',

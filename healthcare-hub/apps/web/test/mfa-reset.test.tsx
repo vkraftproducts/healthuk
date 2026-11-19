@@ -1,5 +1,6 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { openSettingsView } from './ant-testing.js';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type MeResponse } from '@hub/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,7 +64,7 @@ describe('Reset MFA (local sign-in, ADR 0006)', () => {
     const confirmSpy = vi.spyOn(window, 'confirm');
     const promptSpy = vi.spyOn(window, 'prompt');
     renderUsers();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Users and roles' }));
+    await openSettingsView('Users and roles');
     const button = await screen.findByRole('button', { name: 'Reset MFA: Hana Rowe' });
     // Never for yourself.
     expect(screen.queryByRole('button', { name: 'Reset MFA: Olu Adeyemi' })).toBeNull();
@@ -95,7 +96,7 @@ describe('Reset MFA (local sign-in, ADR 0006)', () => {
   it('can be cancelled without sending anything', async () => {
     vi.stubEnv('VITE_AUTH_MODE', 'local');
     renderUsers();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Users and roles' }));
+    await openSettingsView('Users and roles');
     await userEvent.click(await screen.findByRole('button', { name: 'Reset MFA: Hana Rowe' }));
     await userEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }),
@@ -107,7 +108,7 @@ describe('Reset MFA (local sign-in, ADR 0006)', () => {
   it('is not offered when sign-in is not local (the authenticator is held elsewhere)', async () => {
     vi.stubEnv('VITE_AUTH_MODE', 'dev');
     renderUsers();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Users and roles' }));
+    await openSettingsView('Users and roles');
     expect(await screen.findByRole('button', { name: 'Revoke access for Hana Rowe' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Reset MFA/ })).toBeNull();
   });

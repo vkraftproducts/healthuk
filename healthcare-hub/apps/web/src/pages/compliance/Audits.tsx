@@ -1,4 +1,7 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import {
+  Button,
+} from 'antd';
 import { Link } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
 import {
@@ -6,17 +9,15 @@ import {
   Field,
   PersonSelect,
   Section,
-  button,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
   useRun,
   words,
 } from '../../components.js';
 import { useApp } from '../../shell/AppContext.js';
 import { useOne, usePeople } from '../settings/hooks.js';
+import { WfTag } from '../../v36/ui.js';
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -47,6 +48,99 @@ function TemplateState({ t }: { t: Row }) {
   if (t.active) return <StatusBadge status="GREEN" reason="Active – can be scheduled" />;
   if (published(t)) return <StatusBadge status="AMBER" reason="Published – awaiting activation" />;
   return <StatusBadge status="GREY" reason="Draft – awaiting a second person to publish" />;
+}
+
+function CreateTemplateForm() {
+  const { api, orgId } = useApp();
+  const { run, msg } = useRun();
+  const [code, setCode] = useState('');
+  const [title, setTitle] = useState('');
+  const [domain, setDomain] = useState('SAFE');
+  const [question, setQuestion] = useState('');
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const ok = await run(
+      () =>
+        api.send('POST', '/api/v1/audit-templates', orgId, {
+          code: code.trim().toUpperCase(),
+          title: title.trim(),
+          domain,
+          version: {
+            controls: [{ code: 'C1', question: question.trim(), critical: false }],
+            methods: ['RECORDS'],
+          },
+        }),
+      'Draft template created. A second person must publish it before it can be activated.',
+    );
+    if (ok) {
+      setCode('');
+      setTitle('');
+      setQuestion('');
+    }
+  }
+  return (
+    <Section title="Create an audit template">
+      <p className="text-sm">
+        New templates start as a draft. Publish, activate and schedule them using the table below.
+      </p>
+      <form onSubmit={(e) => void submit(e)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Field label="Template code">
+          <input
+            aria-label="Template code"
+            value={code}
+            maxLength={20}
+            required
+            onChange={(e) => setCode(e.target.value)}
+          />
+        </Field>
+        <Field label="Title">
+          <input
+            aria-label="Title"
+            value={title}
+            minLength={2}
+            maxLength={200}
+            required
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </Field>
+        <Field label="Key question domain">
+          <select
+            aria-label="Key question domain"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+          >
+            {['SAFE', 'EFFECTIVE', 'CARING', 'RESPONSIVE', 'WELL_LED'].map((d) => (
+              <option key={d} value={d}>
+                {words(d)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="sm:col-span-2">
+          <Field label="First control question">
+            <input
+              aria-label="First control question"
+              value={question}
+              minLength={3}
+              maxLength={500}
+              required
+              onChange={(e) => setQuestion(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="flex items-end">
+          <Button
+            type="primary"
+            htmlType="submit"
+            disabled={!code.trim() || !title.trim() || question.trim().length < 3}
+          >
+            Create draft
+          </Button>
+        </div>
+      </form>
+      {msg}
+    </Section>
+  );
 }
 
 function ScheduleForm({ templates }: { templates: Row[] }) {
@@ -102,7 +196,7 @@ function ScheduleForm({ templates }: { templates: Row[] }) {
       ) : (
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Template">
-            <select name="template" required className={input}>
+            <select name="template" required>
               {active.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.code} {t.title} (v{published(t)?.version})
@@ -111,10 +205,10 @@ function ScheduleForm({ templates }: { templates: Row[] }) {
             </select>
           </Field>
           <Field label="Audit title">
-            <input name="title" required minLength={2} maxLength={200} className={input} />
+            <input name="title" required minLength={2} maxLength={200} />
           </Field>
           <Field label="Location (optional)">
-            <select name="locationId" className={input}>
+            <select name="locationId">
               <option value="">Whole organisation</option>
               {(locations.data?.data ?? [])
                 .filter((l) => !l.archived)
@@ -126,13 +220,13 @@ function ScheduleForm({ templates }: { templates: Row[] }) {
             </select>
           </Field>
           <Field label="Period from (optional)">
-            <input type="date" name="periodFrom" className={input} />
+            <input type="date" name="periodFrom" />
           </Field>
           <Field label="Period to (optional)">
-            <input type="date" name="periodTo" className={input} />
+            <input type="date" name="periodTo" />
           </Field>
           <Field label="Due date">
-            <input type="date" name="dueDate" required className={input} />
+            <input type="date" name="dueDate" required />
           </Field>
           <PersonSelect
             label="Auditor"
@@ -157,7 +251,7 @@ function ScheduleForm({ templates }: { templates: Row[] }) {
             optional
           />
           <Field label="Service (optional)">
-            <select name="serviceId" className={input}>
+            <select name="serviceId">
               <option value="">All services</option>
               {(services.data?.data ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
@@ -167,7 +261,7 @@ function ScheduleForm({ templates }: { templates: Row[] }) {
             </select>
           </Field>
           <Field label="Repeat (optional)">
-            <select name="recurrenceMonths" className={input} defaultValue="">
+            <select name="recurrenceMonths" defaultValue="">
               <option value="">Does not repeat</option>
               <option value="1">Every month</option>
               <option value="3">Every 3 months</option>
@@ -176,7 +270,7 @@ function ScheduleForm({ templates }: { templates: Row[] }) {
             </select>
           </Field>
           <div className="flex items-end">
-            <button className={button}>Schedule audit</button>
+            <Button htmlType="submit" type="primary">Schedule audit</Button>
           </div>
         </form>
       )}
@@ -229,19 +323,19 @@ function AuditCalendar({ runs }: { runs: Row[] }) {
       title="Audit calendar"
       actions={
         <div className="flex gap-2">
-          <button className={smallButton} onClick={() => move(-1)}>
+          <Button size="small" onClick={() => move(-1)}>
             Previous {mode}
-          </button>
-          <button className={smallButton} onClick={() => move(1)}>
+          </Button>
+          <Button size="small" onClick={() => move(1)}>
             Next {mode}
-          </button>
-          <button
-            className={smallButton}
+          </Button>
+          <Button
+            size="small"
             aria-pressed={mode === 'week'}
             onClick={() => setMode(mode === 'month' ? 'week' : 'month')}
           >
             {mode === 'month' ? 'Week view' : 'Month view'}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -267,7 +361,7 @@ function AuditCalendar({ runs }: { runs: Row[] }) {
   );
 }
 
-export function Audits() {
+export function Audits({ part = 'audits' }: { part?: 'programme' | 'audits' | 'templates' }) {
   const runs = useOne<{ data: Row[] }>('/api/v1/audit-runs');
   const templates = useOne<{ data: Row[] }>('/api/v1/audit-templates');
   const { api, orgId, me } = useApp();
@@ -280,14 +374,14 @@ export function Audits() {
 
   function templateActions(t: Row) {
     const out = [
-      <button
+      <Button
+        size="small"
         key="view"
-        className={smallButton}
         aria-label={`View controls: ${t.code} ${t.title}`}
         onClick={() => setStep({ kind: 'view', t })}
       >
         View controls
-      </button>,
+      </Button>,
     ];
     const d = draft(t);
     if (d && can('compliance.audit.run')) {
@@ -297,14 +391,14 @@ export function Audits() {
             You wrote this version, so someone else must publish it.
           </span>
         ) : (
-          <button
+          <Button
+            size="small"
             key="pub"
-            className={smallButton}
             aria-label={`Publish v${d.version}: ${t.code} ${t.title}`}
             onClick={() => setStep({ kind: 'publish', t })}
           >
             Publish v{d.version}
-          </button>
+          </Button>
         ),
       );
     }
@@ -316,22 +410,22 @@ export function Audits() {
             You wrote the published version, so someone else must activate it.
           </span>
         ) : (
-          <button
+          <Button
+            size="small"
             key="act"
-            className={smallButton}
             aria-label={`Activate: ${t.code} ${t.title}`}
             onClick={() => setStep({ kind: 'activate', t })}
           >
             Activate
-          </button>
+          </Button>
         ),
       );
     }
     if (can('compliance.audit.run') && !t.retiredAt)
       out.push(
-        <button
+        <Button
+          size="small"
           key="clone"
-          className={smallButton}
           aria-label={`Copy as a new draft: ${t.code} ${t.title}`}
           onClick={() => {
             setForm({});
@@ -339,18 +433,18 @@ export function Audits() {
           }}
         >
           Copy
-        </button>,
+        </Button>,
       );
     if (can('compliance.requirement.manage') && !t.retiredAt)
       out.push(
-        <button
+        <Button
+          size="small"
           key="retire"
-          className={smallButton}
           aria-label={`Retire: ${t.code} ${t.title}`}
           onClick={() => setStep({ kind: 'retire', t })}
         >
           Retire
-        </button>,
+        </Button>,
       );
     return <div className="flex flex-wrap items-center gap-2">{out}</div>;
   }
@@ -359,97 +453,124 @@ export function Audits() {
   const shown = t ? (step?.kind === 'publish' ? draft(t) : (published(t) ?? t.versions[0])) : null;
   return (
     <>
-      <DataTable<Row>
-        caption="Audit schedule"
-        rows={runs.data?.data ?? []}
-        rowKey={(r) => r.id}
-        loading={runs.isLoading}
-        error={runs.isError ? 'Could not load audits.' : null}
-        emptyMessage="No audits scheduled."
-        columns={[
-          {
-            key: 'c',
-            header: 'Audit',
-            cell: (r) => (
-              <Link
-                to="/compliance/audits/$id"
-                params={{ id: r.id }}
-                className="font-medium text-hub-teal-dark underline"
-              >{`${r.code} ${r.title}`}</Link>
-            ),
-          },
-          { key: 't', header: 'Template', cell: (r) => `${r.templateCode} (${words(r.domain)})` },
-          {
-            key: 'p',
-            header: 'People',
-            cell: (r) => (
-              <>
-                Auditor: {r.auditorName ?? 'Not a current member'}
-                <span className="block">Owner: {r.ownerName ?? 'Not a current member'}</span>
-              </>
-            ),
-          },
-          {
-            key: 'd',
-            header: 'Due',
-            cell: (r) =>
-              r.overdue ? (
-                <StatusBadge status="RED" reason={`Overdue – was due ${fmtDate(r.dueDate)}`} />
-              ) : (
-                fmtDate(r.dueDate)
-              ),
-          },
-          { key: 's', header: 'Stage', cell: (r) => RUN_STAGE[r.status] ?? words(r.status) },
-          {
-            key: 'o',
-            header: 'Outcome',
-            cell: (r) =>
-              r.outcome ? (
-                <StatusBadge status={r.outcome as StatusKind} reason={r.outcomeReason} />
-              ) : (
-                'Not submitted'
-              ),
-          },
-        ]}
-      />
-      <AuditCalendar runs={runs.data?.data ?? []} />
-      {can('compliance.audit.run') && <ScheduleForm templates={tpls} />}
-      <DataTable<Row>
-        caption="Audit templates"
-        rows={tpls}
-        rowKey={(r) => r.id}
-        loading={templates.isLoading}
-        error={templates.isError ? 'Could not load templates.' : null}
-        emptyMessage="No templates."
-        columns={[
-          {
-            key: 'c',
-            header: 'Template',
-            cell: (r) => (
-              <>
-                {`${r.code} ${r.title}`}
-                {r.validationNote && (
-                  <span className="block text-xs text-amber-900">
-                    {r.validationNote}
-                    {r.proposedCadence ? ` Proposed cadence: ${r.proposedCadence}.` : ''}
+      {part === 'audits' && (
+        <DataTable<Row>
+          caption="Audit schedule"
+          rows={runs.data?.data ?? []}
+          rowKey={(r) => r.id}
+          loading={runs.isLoading}
+          error={runs.isError ? 'Could not load audits.' : null}
+          emptyMessage="No audits scheduled."
+          columns={[
+            {
+              key: 'c',
+              header: 'Audit',
+              cell: (r) => (
+                <>
+                  <Link to="/compliance/audits/$id" params={{ id: r.id }} className="font-medium">
+                    {`${r.code} ${r.title}`}
+                  </Link>
+                  <span className="block wf-mut text-xs">
+                    {r.templateCode} · {words(r.domain)}
                   </span>
-                )}
-              </>
-            ),
-          },
-          { key: 'k', header: 'Key question', cell: (r) => words(r.domain) },
-          {
-            key: 'v',
-            header: 'Versions',
-            cell: (r) =>
-              (r.versions as Row[])
-                .map((v) => `v${v.version} ${words(v.status).toLowerCase()}`)
-                .join(', '),
-          },
-          { key: 'a', header: 'State', cell: (r) => <TemplateState t={r} /> },
-          { key: 'x', header: 'Action', cell: (r) => templateActions(r) },
-        ]}
-      />
+                </>
+              ),
+            },
+            { key: 'au', header: 'Auditor', cell: (r) => r.auditorName ?? 'Not a current member' },
+            { key: 'ow', header: 'Area owner', cell: (r) => r.ownerName ?? 'Not a current member' },
+            {
+              key: 'd',
+              header: 'Due',
+              cell: (r) => {
+                const days = Math.round(
+                  (new Date(`${String(r.dueDate).slice(0, 10)}T00:00:00Z`).getTime() -
+                    new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`).getTime()) /
+                    86_400_000,
+                );
+                const done = r.status === 'CLOSED' || r.status === 'SUBMITTED';
+                return done ? (
+                  fmtDate(r.dueDate)
+                ) : r.overdue ? (
+                  <WfTag tone="red" icon="error">
+                    Overdue – was due {fmtDate(r.dueDate)}
+                  </WfTag>
+                ) : days <= 14 ? (
+                  <WfTag tone="amber" icon="schedule">
+                    Due in {days} day{days === 1 ? '' : 's'}
+                  </WfTag>
+                ) : (
+                  <WfTag tone="grey" icon="event">
+                    Due {fmtDate(r.dueDate)}
+                  </WfTag>
+                );
+              },
+            },
+            {
+              key: 's',
+              header: 'Stage',
+              cell: (r) => (
+                <WfTag
+                  tone={r.status === 'CLOSED' ? 'green' : 'grey'}
+                  icon="radio_button_unchecked"
+                >
+                  {RUN_STAGE[r.status] ?? words(r.status)}
+                </WfTag>
+              ),
+            },
+            {
+              key: 'o',
+              header: 'Result',
+              cell: (r) =>
+                r.outcome ? (
+                  <StatusBadge status={r.outcome as StatusKind} reason={r.outcomeReason} />
+                ) : (
+                  '—'
+                ),
+            },
+          ]}
+        />
+      )}
+      {part === 'programme' && <AuditCalendar runs={runs.data?.data ?? []} />}
+      {part === 'audits' && can('compliance.audit.run') && <ScheduleForm templates={tpls} />}
+      {part === 'templates' && can('compliance.audit.run') && <CreateTemplateForm />}
+      {part === 'templates' && (
+        <DataTable<Row>
+          caption="Audit templates"
+          rows={tpls}
+          rowKey={(r) => r.id}
+          loading={templates.isLoading}
+          error={templates.isError ? 'Could not load templates.' : null}
+          emptyMessage="No templates."
+          columns={[
+            {
+              key: 'c',
+              header: 'Template',
+              cell: (r) => (
+                <>
+                  {`${r.code} ${r.title}`}
+                  {r.validationNote && (
+                    <span className="block text-xs text-amber-900">
+                      {r.validationNote}
+                      {r.proposedCadence ? ` Proposed cadence: ${r.proposedCadence}.` : ''}
+                    </span>
+                  )}
+                </>
+              ),
+            },
+            { key: 'k', header: 'Key question', cell: (r) => words(r.domain) },
+            {
+              key: 'v',
+              header: 'Versions',
+              cell: (r) =>
+                (r.versions as Row[])
+                  .map((v) => `v${v.version} ${words(v.status).toLowerCase()}`)
+                  .join(', '),
+            },
+            { key: 'a', header: 'State', cell: (r) => <TemplateState t={r} /> },
+            { key: 'x', header: 'Action', cell: (r) => templateActions(r) },
+          ]}
+        />
+      )}
       <ActionDialog
         open={step !== null}
         title={t && step ? `${STEP_TITLE[step.kind]}: ${t.code} ${t.title}` : ''}
@@ -495,7 +616,6 @@ export function Audits() {
             <>
               <Field label="New template code">
                 <input
-                  className={input}
                   value={fv('code')}
                   maxLength={20}
                   onChange={(e) => setFv('code')(e.target.value)}
@@ -503,7 +623,6 @@ export function Audits() {
               </Field>
               <Field label="New title">
                 <input
-                  className={input}
                   value={fv('title')}
                   maxLength={200}
                   onChange={(e) => setFv('title')(e.target.value)}
@@ -518,7 +637,6 @@ export function Audits() {
               </p>
               <Field label="Specialist who validated it">
                 <input
-                  className={input}
                   value={fv('specialistName')}
                   maxLength={120}
                   onChange={(e) => setFv('specialistName')(e.target.value)}
@@ -526,7 +644,6 @@ export function Audits() {
               </Field>
               <Field label="Specialist role or qualification">
                 <input
-                  className={input}
                   value={fv('specialistRole')}
                   maxLength={120}
                   onChange={(e) => setFv('specialistRole')(e.target.value)}

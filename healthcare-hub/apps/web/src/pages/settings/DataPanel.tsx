@@ -1,12 +1,10 @@
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
+import { Button } from 'antd';
 import { useState, type FormEvent } from 'react';
 import {
   ActionDialog,
-  button,
   Field,
-  input,
   Section,
-  smallButton,
   useCan,
   useRun,
   words,
@@ -78,15 +76,15 @@ function CsvImport() {
       </p>
       <form onSubmit={upload} className="flex flex-wrap items-end gap-3">
         <Field label="Records">
-          <select name="kind" className={input}>
+          <select name="kind">
             <option value="STAFF">Staff</option>
             <option value="VEHICLES">Vehicles</option>
           </select>
         </Field>
         <Field label="CSV file">
-          <input type="file" name="file" accept=".csv,text/csv" className={input} />
+          <input type="file" name="file" accept=".csv,text/csv" />
         </Field>
-        <button className={button}>Preview</button>
+        <Button htmlType="submit" type="primary">Preview</Button>
       </form>
       {msg}
       {current && (
@@ -99,24 +97,21 @@ function CsvImport() {
           <div className="flex gap-2">
             {current.status === 'PREVIEWED' && (
               <>
-                <button
-                  className={button}
+                <Button                   type="primary"
                   disabled={current.validCount === 0}
                   onClick={() => act('commit', 'Import finished. See each row below.')}
                 >
                   Import {current.validCount} ready rows
-                </button>
-                <button
-                  className={smallButton}
+                </Button>
+                <Button                   type="link" size="small"
                   onClick={() => act('discard', 'Preview discarded.')}
                 >
                   Discard
-                </button>
+                </Button>
               </>
             )}
             {(current.status === 'COMMITTED' || current.status === 'PARTIAL') && (
-              <button
-                className={smallButton}
+              <Button                 type="link" size="small"
                 onClick={() =>
                   act(
                     'rollback',
@@ -125,7 +120,7 @@ function CsvImport() {
                 }
               >
                 Roll back this import
-              </button>
+              </Button>
             )}
           </div>
           <DataTable<Row>
@@ -171,8 +166,7 @@ function CsvImport() {
             key: 'o',
             header: 'Open',
             cell: (b) => (
-              <button
-                className={smallButton}
+              <Button                 type="link" size="small"
                 onClick={() =>
                   void run(
                     async () =>
@@ -182,7 +176,7 @@ function CsvImport() {
                 }
               >
                 Open
-              </button>
+              </Button>
             ),
           },
         ]}
@@ -237,24 +231,24 @@ function Workbook() {
       {can('admin.import.manage') && (
         <form onSubmit={stage} className="flex flex-wrap items-end gap-3">
           <Field label="Sheet saved as CSV">
-            <input type="file" name="file" accept=".csv,text/csv" className={input} />
+            <input type="file" name="file" accept=".csv,text/csv" />
           </Field>
           <Field label="Sheet name">
-            <input name="sheet" required className={input} />
+            <input name="sheet" required />
           </Field>
           <Field label="Prompt code column">
-            <input name="code" required defaultValue="Ref" className={input} />
+            <input name="code" required defaultValue="Ref" />
           </Field>
           <Field label="Prompt text column">
-            <input name="text" required defaultValue="Prompt" className={input} />
+            <input name="text" required defaultValue="Prompt" />
           </Field>
           <Field label="Status column (optional)">
-            <input name="status" className={input} />
+            <input name="status" />
           </Field>
           <Field label="KLOE column (optional)">
-            <input name="kloe" className={input} />
+            <input name="kloe" />
           </Field>
-          <button className={button}>Stage sheet</button>
+          <Button htmlType="submit" type="primary">Stage sheet</Button>
         </form>
       )}
       {msg}
@@ -311,8 +305,7 @@ function Workbook() {
               <span className="flex flex-wrap gap-1">
                 {can('admin.import.manage') &&
                   ['UNMAPPED', 'PROPOSED', 'REJECTED'].includes(i.mappingStatus) && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Propose mapping: ${label(i)}`}
                       onClick={() =>
                         setProposing({
@@ -325,7 +318,7 @@ function Workbook() {
                       }
                     >
                       {i.mappingStatus === 'UNMAPPED' ? 'Propose' : 'Re-propose'}
-                    </button>
+                    </Button>
                   )}
                 {can('admin.requirements.publish') &&
                   i.mappingStatus === 'PROPOSED' &&
@@ -333,32 +326,29 @@ function Workbook() {
                     <span className="text-xs">You proposed this; someone else decides.</span>
                   ) : (
                     <>
-                      <button
-                        className={smallButton}
+                      <Button                         type="link" size="small"
                         aria-label={`Approve mapping: ${label(i)}`}
                         onClick={() => setDeciding({ i, d: 'APPROVED' })}
                       >
                         Approve
-                      </button>
-                      <button
-                        className={smallButton}
+                      </Button>
+                      <Button                         type="link" size="small"
                         aria-label={`Reject mapping: ${label(i)}`}
                         onClick={() => setDeciding({ i, d: 'REJECTED' })}
                       >
                         Reject
-                      </button>
+                      </Button>
                     </>
                   ))}
                 {can('admin.requirements.publish') &&
                   can('admin.settings.manage') &&
                   i.mappingStatus === 'APPROVED' && (
-                    <button
-                      className={smallButton}
+                    <Button                       type="link" size="small"
                       aria-label={`Publish as draft: ${label(i)}`}
                       onClick={() => setPublishing(i)}
                     >
                       Publish as draft
-                    </button>
+                    </Button>
                   )}
               </span>
             ),
@@ -391,7 +381,7 @@ function Workbook() {
             <div className="grid gap-3">
               <Field label="Applies to">
                 <select
-                  className={input}
+                 
                   value={proposing.classification}
                   onChange={(e) => setProposing({ ...proposing, classification: e.target.value })}
                 >
@@ -406,7 +396,7 @@ function Workbook() {
                 <>
                   <Field label="Requirement code (capitals, digits, - or _)">
                     <input
-                      className={input}
+                     
                       value={proposing.code}
                       onChange={(e) =>
                         setProposing({ ...proposing, code: e.target.value.toUpperCase() })
@@ -415,7 +405,7 @@ function Workbook() {
                   </Field>
                   <Field label="Requirement title">
                     <input
-                      className={input}
+                     
                       maxLength={200}
                       value={proposing.title}
                       onChange={(e) => setProposing({ ...proposing, title: e.target.value })}
@@ -423,7 +413,7 @@ function Workbook() {
                   </Field>
                   <Field label="Checked for">
                     <select
-                      className={input}
+                     
                       value={proposing.subject}
                       onChange={(e) => setProposing({ ...proposing, subject: e.target.value })}
                     >
@@ -496,8 +486,7 @@ function FullExport() {
         Every record you can see, one file per table with stable IDs, plus evidence files. Built in
         the background and logged; download it from Reports when ready.
       </p>
-      <button
-        className={button}
+      <Button         type="primary"
         onClick={() =>
           void run(
             () => api.send('POST', '/api/v1/exports/full', orgId, {}),
@@ -506,7 +495,7 @@ function FullExport() {
         }
       >
         Request full export
-      </button>
+      </Button>
       {msg}
     </Section>
   );

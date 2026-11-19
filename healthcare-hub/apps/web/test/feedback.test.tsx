@@ -23,7 +23,7 @@ const me = (orgId: string | null): MeResponse => ({
     },
   ],
   permissions: ['events.event.view', 'events.event.manage'],
-  activeOrganisationId: orgId,
+  activeOrganisationId: orgId ?? ORG,
   mfa: { required: false, satisfied: true },
 });
 

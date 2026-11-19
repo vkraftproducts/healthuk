@@ -51,7 +51,7 @@ import { audit, body, requireAny } from '../../common/http.js';
 import { HubError, notFound } from '../../common/problem.filter.js';
 import { DB } from '../../db.provider.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 const isoDay = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 const crewNext = (s: string): JobState[] =>

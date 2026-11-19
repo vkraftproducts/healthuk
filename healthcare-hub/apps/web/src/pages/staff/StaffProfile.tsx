@@ -2,14 +2,26 @@ import { RECORD_SLUGS, SENSITIVE_RECORD_KINDS } from '@hub/contracts';
 import { needsSchedule3, staffRolesFor } from '@hub/rules';
 import { DataTable, StatusBadge, type StatusKind } from '@hub/ui';
 import { Link, useParams } from '@tanstack/react-router';
-import { useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Input,
+  Select,
+  Space,
+  Spin,
+  Tabs,
+  Typography,
+} from 'antd';
+import { useState, type ReactNode } from 'react';
 import {
   ActionDialog,
+  Field,
+  Section,
   errText,
   fmtDate,
   fmtDateTime,
-  input,
-  smallButton,
   useCan,
 } from '../../components.js';
 import { EvidenceDialog, StaffDocuments, UploadDialog } from '../evidence/Evidence.js';
@@ -101,99 +113,79 @@ export function StaffProfile() {
   const { me } = useApp();
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('overview');
   const res = useOne<Row>(`/api/v1/staff/${id}`);
-  if (res.isLoading) return <p role="status">Loading…</p>;
+  if (res.isLoading) return <Spin tip="Loading…" />;
   if (res.isError || !res.data)
-    return (
-      <p role="alert" className="rounded border border-red-700 bg-red-50 p-3 text-red-900">
-        This staff record is not available.
-      </p>
-    );
+    return <Alert type="error" showIcon message="This staff record is not available." />;
   const s = res.data;
   const clearanceOnly = !('counts' in s);
   const can = (p: string) => me.permissions.includes(p);
   const sensitive = can('staff.sensitive.view');
 
+  const descItems: { key: string; label: string; children: ReactNode }[] = [
+    {
+      key: 'roles',
+      label: 'Roles',
+      children: s.roles.length ? list(s.roles, ROLE_LABEL) : 'No approved role yet',
+    },
+    { key: 'lifecycle', label: 'Lifecycle', children: LIFECYCLE_LABEL[s.lifecycleState] },
+    {
+      key: 'restr',
+      label: 'Restrictions',
+      children: list(s.activeRestrictions, RESTRICTION_LABEL),
+    },
+  ];
+  if (s.jobTitle) descItems.push({ key: 'job', label: 'Job title', children: s.jobTitle });
+  if (!clearanceOnly) {
+    descItems.push(
+      { key: 'loc', label: 'Location', children: s.locationName ?? 'Not recorded' },
+      { key: 'mgr', label: 'Line manager', children: s.managerName ?? 'Not set' },
+    );
+    if (s.startDate)
+      descItems.push({ key: 'start', label: 'Start date', children: fmtDate(s.startDate) });
+    if (s.contractType)
+      descItems.push({
+        key: 'contract',
+        label: 'Contract',
+        children: CONTRACT_LABEL[s.contractType] ?? 'Other',
+      });
+  }
+
   return (
-    <div className="space-y-4">
-      <nav aria-label="Breadcrumb" className="text-sm">
-        <Link to="/staff" className="font-medium text-hub-teal-dark underline">
-          Staff
-        </Link>{' '}
-        / {s.staffNo}
-      </nav>
-      <header className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-hub-line bg-hub-card p-4">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {s.displayName} <span className="text-slate-600">/ {s.staffNo}</span>
-          </h1>
-          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-sm">
-            <dt className="font-semibold">Roles</dt>
-            <dd>{s.roles.length ? list(s.roles, ROLE_LABEL) : 'No approved role yet'}</dd>
-            <dt className="font-semibold">Lifecycle</dt>
-            <dd>{LIFECYCLE_LABEL[s.lifecycleState]}</dd>
-            <dt className="font-semibold">Restrictions</dt>
-            <dd>{list(s.activeRestrictions, RESTRICTION_LABEL)}</dd>
-            {s.jobTitle && (
-              <>
-                <dt className="font-semibold">Job title</dt>
-                <dd>{s.jobTitle}</dd>
-              </>
-            )}
-            {!clearanceOnly && (
-              <>
-                <dt className="font-semibold">Location</dt>
-                <dd>{s.locationName ?? 'Not recorded'}</dd>
-                <dt className="font-semibold">Line manager</dt>
-                <dd>{s.managerName ?? 'Not set'}</dd>
-                {s.startDate && (
-                  <>
-                    <dt className="font-semibold">Start date</dt>
-                    <dd>{fmtDate(s.startDate)}</dd>
-                  </>
-                )}
-                {s.contractType && (
-                  <>
-                    <dt className="font-semibold">Contract</dt>
-                    <dd>{CONTRACT_LABEL[s.contractType] ?? 'Other'}</dd>
-                  </>
-                )}
-              </>
-            )}
-          </dl>
-        </div>
-        {!clearanceOnly && (
-          <div className="text-sm">
-            <span className="mr-2 font-semibold">Readiness</span>
-            <StatusBadge {...readinessBadge(s)} />
-          </div>
-        )}
-      </header>
+    <Space direction="vertical" size="large" style={{ display: 'flex', width: '100%' }}>
+      <Typography.Text type="secondary">
+        <Link to="/staff">Staff</Link> / {s.staffNo}
+      </Typography.Text>
+      <Card
+        title={
+          <Typography.Title level={2} className="!mb-0 !text-xl !font-semibold">
+            {s.displayName}{' '}
+            <Typography.Text type="secondary" className="!text-base !font-normal">
+              / {s.staffNo}
+            </Typography.Text>
+          </Typography.Title>
+        }
+        extra={
+          !clearanceOnly ? (
+            <Space>
+              <Typography.Text strong>Readiness</Typography.Text>
+              <StatusBadge {...readinessBadge(s)} />
+            </Space>
+          ) : undefined
+        }
+      >
+        <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={descItems} />
+      </Card>
 
       {clearanceOnly ? (
-        <p role="note" className="rounded border border-sky-700 bg-sky-50 p-3 text-sky-950">
-          {DISPATCH_NOTE}
-        </p>
+        <Alert type="info" showIcon role="note" message={DISPATCH_NOTE} />
       ) : (
         <>
-          <div
-            role="tablist"
+          <Tabs
             aria-label="Staff profile sections"
-            className="flex flex-wrap gap-1 rounded-lg border border-hub-line bg-hub-card p-1.5"
-          >
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                role="tab"
-                id={`tab-${t.id}`}
-                aria-selected={tab === t.id}
-                aria-controls="staff-panel"
-                onClick={() => setTab(t.id)}
-                className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab === t.id ? 'bg-hub-teal text-white' : 'text-hub-ink hover:bg-hub-row'}`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+            activeKey={tab}
+            onChange={(k) => setTab(k as (typeof TABS)[number]['id'])}
+            items={TABS.map((t) => ({ key: t.id, label: t.label }))}
+          />
           <div
             role="tabpanel"
             id="staff-panel"
@@ -222,7 +214,7 @@ export function StaffProfile() {
           </div>
         </>
       )}
-    </div>
+    </Space>
   );
 }
 
@@ -283,33 +275,33 @@ function Overview({ s }: { s: Row }) {
             key: 'act',
             header: 'Action',
             cell: (r) => (
-              <span className="flex flex-wrap gap-1">
-                <button
-                  className={smallButton}
+              <Space wrap size="small">
+                <Button
+                  size="small"
                   aria-label={`Documents for ${r.templateTitle}`}
                   onClick={() => setDocsFor(r)}
                 >
                   Documents
-                </button>
+                </Button>
                 {can('compliance.evidence.upload') && s.lifecycleState !== 'LEAVER' && (
-                  <button
-                    className={smallButton}
+                  <Button
+                    size="small"
                     aria-label={`${uploadLabel(r)} for ${r.templateTitle}`}
                     onClick={() => setUploadFor(r)}
                   >
                     {uploadLabel(r)}
-                  </button>
+                  </Button>
                 )}
                 {can('staff.profile.manage') && s.lifecycleState !== 'LEAVER' && (
-                  <button
-                    className={smallButton}
+                  <Button
+                    size="small"
                     aria-label={`Request review of ${r.templateTitle}`}
                     onClick={() => setReviewFor(r)}
                   >
                     Request review
-                  </button>
+                  </Button>
                 )}
-              </span>
+              </Space>
             ),
           },
         ]}
@@ -352,23 +344,23 @@ function ProfileActions({ s }: { s: Row }) {
       {(can('staff.profile.manage') || can('staff.approve_role')) && !closed && (
         <RoleChecks s={s} />
       )}
-      <div className="flex flex-wrap gap-2">
+      <Space wrap>
         {can('staff.lifecycle.transition') && s.allowedTransitions.length > 0 && (
-          <button className={smallButton} onClick={() => setDialog('lifecycle')}>
+          <Button size="small" onClick={() => setDialog('lifecycle')}>
             Change lifecycle
-          </button>
+          </Button>
         )}
         {can('staff.restrict') && !closed && (
-          <button className={smallButton} onClick={() => setDialog('restrict')}>
+          <Button size="small" onClick={() => setDialog('restrict')}>
             Apply restriction or suspend
-          </button>
+          </Button>
         )}
         {can('staff.profile.manage') && !closed && (
-          <button className={smallButton} onClick={() => setDialog('supervision')}>
+          <Button size="small" onClick={() => setDialog('supervision')}>
             Book supervision
-          </button>
+          </Button>
         )}
-      </div>
+      </Space>
       {dialog === 'lifecycle' && <LifecycleDialog s={s} onClose={() => setDialog(null)} />}
       {dialog === 'restrict' && <RestrictDialog s={s} onClose={() => setDialog(null)} />}
       {dialog === 'supervision' && <SupervisionDialog s={s} onClose={() => setDialog(null)} />}
@@ -393,33 +385,23 @@ function SupervisionDialog({ s, onClose }: { s: Row; onClose: () => void }) {
       onCancel={onClose}
       fields={
         <>
-          <label className="flex flex-col text-sm">
-            Proposed date
-            <input
-              type="date"
-              className={input}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-            />
-          </label>
-          <label className="flex flex-col text-sm">
-            Supervisor (optional)
-            <select
-              className={input}
-              value={supervisor}
-              onChange={(e) => setSupervisor(e.target.value)}
-            >
-              <option value="">Anyone suitable</option>
-              {people
+          <Field label="Proposed date">
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </Field>
+          <Field label="Supervisor (optional)">
+            <Select
+              value={supervisor || undefined}
+              onChange={setSupervisor}
+              allowClear
+              placeholder="Anyone suitable"
+              options={people
                 .filter((p) => p.id && p.id !== s.userId)
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.id === me.user.id ? `${p.displayName} (you)` : p.displayName}
-                  </option>
-                ))}
-            </select>
-          </label>
+                .map((p) => ({
+                  value: p.id,
+                  label: p.id === me.user.id ? `${p.displayName} (you)` : p.displayName,
+                }))}
+            />
+          </Field>
         </>
       }
       onConfirm={(reason) =>
@@ -501,31 +483,23 @@ function RoleChecks({ s }: { s: Row }) {
   if (candidates.length === 0) return null;
   const ready = r?.setUp && r.items.length > 0 && r.blockers.length === 0;
   return (
-    <section
-      aria-labelledby="role-checks"
-      className="rounded-lg border border-hub-line bg-hub-card p-3"
-    >
-      <h2 id="role-checks" className="font-semibold">
-        Checks for a role
-      </h2>
+    <Section title="Checks for a role">
       <p className="mb-2 text-sm text-slate-700">
         A person can only be approved for a role when every check the role needs is verified by a
         reviewer (CQC Regulation 19 and Schedule 3).
       </p>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col text-sm">
-          Role
-          <select className={input} value={role} onChange={(e) => setRole(e.target.value)}>
-            {candidates.map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
+      <Space wrap align="end">
+        <Field label="Role">
+          <Select
+            style={{ width: 220 }}
+            value={role}
+            onChange={setRole}
+            options={candidates.map(([k, v]) => ({ value: k, label: v }))}
+          />
+        </Field>
         {can('staff.profile.manage') && r?.setUp && r.items.length === 0 && (
-          <button
-            className={smallButton}
+          <Button
+            size="small"
             onClick={async () => {
               setStarted(null);
               try {
@@ -538,33 +512,31 @@ function RoleChecks({ s }: { s: Row }) {
             }}
           >
             Start checks for {ROLE_LABEL[role]}
-          </button>
+          </Button>
         )}
         {can('staff.approve_role') && r?.setUp && r.items.length > 0 && (
-          <button
-            className={smallButton}
+          <Button
+            size="small"
             disabled={!ready}
             title={ready ? undefined : 'Every check must be verified first'}
             onClick={() => setApprove(true)}
           >
             Approve for {ROLE_LABEL[role]}
-          </button>
+          </Button>
         )}
-      </div>
+      </Space>
       {started && (
-        <p role="status" className="mt-2 text-sm">
-          {started}
-        </p>
+        <Alert style={{ marginTop: 8 }} type="info" showIcon role="status" message={started} />
       )}
       {checks.isLoading && <p className="mt-2 text-sm">Loading checks…</p>}
       {r && !r.setUp && (
-        <p
+        <Alert
+          type="warning"
+          showIcon
           role="alert"
-          className="mt-2 rounded border border-amber-700 bg-amber-50 p-2 text-sm text-amber-900"
-        >
-          {ROLE_LABEL[role]} has no requirements set up, so nothing can be checked and nobody can be
-          approved for it. Publish and map them in Settings, Requirement library.
-        </p>
+          style={{ marginTop: 8 }}
+          message={`${ROLE_LABEL[role]} has no requirements set up, so nothing can be checked and nobody can be approved for it. Publish and map them in Settings, Requirement library.`}
+        />
       )}
       {r?.setUp && r.items.length > 0 && (
         <>
@@ -609,7 +581,7 @@ function RoleChecks({ s }: { s: Row }) {
           </p>
         )}
       </ActionDialog>
-    </section>
+    </Section>
   );
 }
 
@@ -626,16 +598,13 @@ function LifecycleDialog({ s, onClose }: { s: Row; onClose: () => void }) {
       danger={to === 'LEAVER' || to === 'SUSPENDED'}
       onCancel={onClose}
       fields={
-        <label className="flex flex-col text-sm">
-          Move to
-          <select className={input} value={to} onChange={(e) => setTo(e.target.value)}>
-            {options.map((t) => (
-              <option key={t} value={t}>
-                {LIFECYCLE_LABEL[t] ?? t}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Field label="Move to">
+          <Select
+            value={to}
+            onChange={setTo}
+            options={options.map((t) => ({ value: t, label: LIFECYCLE_LABEL[t] ?? t }))}
+          />
+        </Field>
       }
       onConfirm={(reason) =>
         api.send('POST', `/api/v1/staff/${s.id}/transition`, orgId, { to, reason })
@@ -664,25 +633,16 @@ function RestrictDialog({ s, onClose }: { s: Row; onClose: () => void }) {
       onCancel={onClose}
       fields={
         <>
-          <label className="flex flex-col text-sm">
-            Restriction
-            <select className={input} value={type} onChange={(e) => setType(e.target.value)}>
-              {Object.entries(RESTRICTION_LABEL).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col text-sm">
-            Ends on (optional)
-            <input
-              type="date"
-              className={input}
-              value={until}
-              onChange={(e) => setUntil(e.target.value)}
+          <Field label="Restriction">
+            <Select
+              value={type}
+              onChange={setType}
+              options={Object.entries(RESTRICTION_LABEL).map(([k, v]) => ({ value: k, label: v }))}
             />
-          </label>
+          </Field>
+          <Field label="Ends on (optional)">
+            <Input type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
+          </Field>
         </>
       }
       onConfirm={(reason) =>
@@ -704,6 +664,14 @@ function RestrictDialog({ s, onClose }: { s: Row; onClose: () => void }) {
 function History({ s }: { s: Row }) {
   const { api, orgId, me } = useApp();
   const [lifting, setLifting] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [chaseOpen, setChaseOpen] = useState(false);
+  const [chaseKind, setChaseKind] = useState('REFERENCE');
+  const [chaseSubject, setChaseSubject] = useState('');
+  const [chaseRequested, setChaseRequested] = useState('');
+  const [chaseChased, setChaseChased] = useState('');
+  const canManage = me.permissions.includes('staff.profile.manage');
+  const chase = useOne<{ data: Row[] }>(canManage ? `/api/v1/staff/${s.id}/chase-log` : null);
   const lift = (rid: string) => setLifting(rid);
   return (
     <>
@@ -741,6 +709,16 @@ function History({ s }: { s: Row }) {
               r.active ? 'Active' : r.revokedAt ? `Revoked – ${r.revokeReason}` : 'Not in force',
           },
           { key: 'reason', header: 'Reason', cell: (r) => r.reason },
+          {
+            key: 'act',
+            header: 'Action',
+            cell: (r) =>
+              r.active && me.permissions.includes('staff.approve_role') ? (
+                <Button size="small" onClick={() => setRevoking(r.id)}>
+                  Revoke<span className="sr-only"> {ROLE_LABEL[r.role]}</span>
+                </Button>
+              ) : null,
+          },
         ]}
       />
       <DataTable<Row>
@@ -762,12 +740,9 @@ function History({ s }: { s: Row }) {
             header: 'Action',
             cell: (r) =>
               r.active && me.permissions.includes('staff.restrict') ? (
-                <button
-                  className="rounded-md border border-hub-line bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink hover:bg-hub-row"
-                  onClick={() => lift(r.id)}
-                >
+                <Button size="small" onClick={() => lift(r.id)}>
                   Lift<span className="sr-only"> {RESTRICTION_LABEL[r.type]}</span>
-                </button>
+                </Button>
               ) : null,
           },
         ]}
@@ -784,10 +759,140 @@ function History({ s }: { s: Row }) {
       >
         <p>The person can be allocated to this work again from now.</p>
       </ActionDialog>
+      <ActionDialog
+        open={revoking !== null}
+        title="Revoke role approval"
+        confirmLabel="Revoke approval"
+        danger
+        reasonLabel="Reason for revoking"
+        onCancel={() => setRevoking(null)}
+        onConfirm={(reason) =>
+          api.send('POST', `/api/v1/staff/${s.id}/role-approvals/${revoking}/revoke`, orgId, {
+            reason,
+          })
+        }
+      >
+        <p>
+          The person will no longer be treated as approved for this role. Allocation and shift start
+          will fail until they are approved again.
+        </p>
+      </ActionDialog>
+      {canManage && (
+        <>
+          <div className="mt-4 flex items-center justify-between gap-2">
+            <h3 className="text-base font-semibold">Reference and DBS chase log</h3>
+            <Button size="small" onClick={() => setChaseOpen(true)}>
+              Add chase entry
+            </Button>
+          </div>
+          <DataTable<Row>
+            caption="Chase log"
+            rows={chase.data?.data ?? []}
+            rowKey={(r) => r.id}
+            emptyMessage="No chase entries yet."
+            columns={[
+              { key: 'kind', header: 'Type', cell: (r) => wordsChase(r.kind) },
+              { key: 'subject', header: 'Subject', cell: (r) => r.subject },
+              {
+                key: 'requested',
+                header: 'Requested',
+                cell: (r) => (r.requestedOn ? fmtDate(r.requestedOn) : '—'),
+              },
+              {
+                key: 'chased',
+                header: 'Chased',
+                cell: (r) => (r.chasedOn ? fmtDate(r.chasedOn) : '—'),
+              },
+              {
+                key: 'received',
+                header: 'Received',
+                cell: (r) => (r.receivedOn ? fmtDate(r.receivedOn) : '—'),
+              },
+              { key: 'note', header: 'Note', cell: (r) => r.note ?? '—' },
+            ]}
+          />
+          <ActionDialog
+            open={chaseOpen}
+            title="Add chase entry"
+            confirmLabel="Save"
+            reasonLabel="Note (optional)"
+            reasonRequired={false}
+            onCancel={() => {
+              setChaseOpen(false);
+              setChaseKind('REFERENCE');
+              setChaseSubject('');
+              setChaseRequested('');
+              setChaseChased('');
+            }}
+            onConfirm={async (note) => {
+              const subject = chaseSubject.trim();
+              if (!chaseKind || !subject) throw new Error('Type and subject are required');
+              await api.send('POST', `/api/v1/staff/${s.id}/chase-log`, orgId, {
+                kind: chaseKind,
+                subject,
+                ...(chaseRequested ? { requestedOn: chaseRequested } : {}),
+                ...(chaseChased ? { chasedOn: chaseChased } : {}),
+                ...(note?.trim() ? { note: note.trim() } : {}),
+              });
+              setChaseKind('REFERENCE');
+              setChaseSubject('');
+              setChaseRequested('');
+              setChaseChased('');
+            }}
+            fields={
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Field label="Type">
+                  <Select
+                    value={chaseKind}
+                    onChange={setChaseKind}
+                    options={[
+                      { value: 'REFERENCE', label: 'Reference' },
+                      { value: 'DBS', label: 'DBS' },
+                      { value: 'RIGHT_TO_WORK', label: 'Right to work' },
+                      { value: 'OTHER', label: 'Other' },
+                    ]}
+                  />
+                </Field>
+                <Field label="Subject">
+                  <Input
+                    value={chaseSubject}
+                    onChange={(e) => setChaseSubject(e.target.value)}
+                    maxLength={200}
+                    required
+                  />
+                </Field>
+                <Field label="Requested on">
+                  <Input
+                    type="date"
+                    value={chaseRequested}
+                    onChange={(e) => setChaseRequested(e.target.value)}
+                  />
+                </Field>
+                <Field label="Chased on">
+                  <Input
+                    type="date"
+                    value={chaseChased}
+                    onChange={(e) => setChaseChased(e.target.value)}
+                  />
+                </Field>
+              </Space>
+            }
+          >
+            <p>Track when references or DBS checks were requested, chased and received.</p>
+          </ActionDialog>
+        </>
+      )}
       {/* Licence changes and corrections are part of the history (finding 48). */}
       <Records staffId={s.id} slug="licences" canAdd={false} />
     </>
   );
+}
+
+function wordsChase(kind: string): string {
+  if (kind === 'DBS') return 'DBS';
+  if (kind === 'RIGHT_TO_WORK') return 'Right to work';
+  if (kind === 'REFERENCE') return 'Reference';
+  return 'Other';
 }
 
 /** Readable one-line summary: no raw codes, no empty fields (UI_SPEC). */
@@ -860,14 +965,10 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
           {SECTION_TITLE[slug]}
         </h2>
         {canAdd && (
-          <button
-            className="rounded-md border border-hub-line bg-hub-card px-2.5 py-1 text-sm font-medium text-hub-ink hover:bg-hub-row"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
+          <Button size="small" aria-expanded={open} onClick={() => setOpen(!open)}>
             {open ? 'Cancel' : 'Add record'}
             <span className="sr-only"> – {SECTION_TITLE[slug]}</span>
-          </button>
+          </Button>
         )}
       </div>
       {kind === 'DBS' && (
@@ -913,8 +1014,8 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
             header: 'Action',
             cell: (r) =>
               canAdd && r.current ? (
-                <button
-                  className={smallButton}
+                <Button
+                  size="small"
                   aria-label={`Correct ${SECTION_TITLE[slug] ?? slug}, ${fmtDate(r.createdAt)}`}
                   onClick={() => {
                     setOpen(false);
@@ -922,7 +1023,7 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
                   }}
                 >
                   Correct
-                </button>
+                </Button>
               ) : null,
           },
         ]}
@@ -933,9 +1034,9 @@ function Records({ staffId, slug, canAdd }: { staffId: string; slug: string; can
             <p className="text-sm">
               Correcting the record from {fmtDate(correcting.createdAt)}. The old record stays in
               history, marked as superseded.{' '}
-              <button className={smallButton} onClick={() => setCorrecting(null)}>
+              <Button size="small" onClick={() => setCorrecting(null)}>
                 Cancel correction
-              </button>
+              </Button>
             </p>
           )}
           <RecordForm

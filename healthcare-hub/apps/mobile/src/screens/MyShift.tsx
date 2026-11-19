@@ -198,6 +198,11 @@ export function MyShift() {
         </>
       )}
       <Card title="Quick actions">
+        <Button
+          kind="secondary"
+          label="Clock in, open shifts and swaps"
+          onPress={() => nav.push({ name: 'rota' })}
+        />
         <Button kind="secondary" label="Fuel receipt" onPress={() => nav.push({ name: 'fuel' })} />
         <Button
           kind="secondary"

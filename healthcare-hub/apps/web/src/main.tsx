@@ -4,9 +4,13 @@ import { App } from './App.js';
 import { createApiClient } from './api.js';
 import { createAuthClient } from './auth.js';
 import { BRAND } from './brand.js';
+import { applyTheme, readTheme } from './shell/theme.js';
 import './index.css';
+import './v36/v36.css';
+import './v36/hh.css';
 
 document.title = BRAND.name;
+applyTheme(readTheme());
 
 const auth = createAuthClient();
 const root = document.getElementById('root');

@@ -57,6 +57,7 @@ import {
   UploadResponse,
 } from './requirements.js';
 import {
+  ChaseLogDto,
   CorrectionDto,
   DriverEligibilityDto,
   MatrixDto,
@@ -153,6 +154,7 @@ import {
 import { z as zz } from 'zod';
 import { uuid } from './common.js';
 import { peopleRoutes } from './routes-people.js';
+import { v36Routes } from './routes-v36.js';
 
 const list = <T extends zz.ZodType>(t: T) => zz.object({ data: zz.array(t) });
 
@@ -756,6 +758,24 @@ export const routes: Record<string, RouteDef> = {
     path: '/staff/{id}/role-approvals/{approvalId}/revoke',
     summary: 'Revoke a role approval',
     response: RoleApprovalDto,
+  },
+  staffChaseLogList: {
+    method: 'get',
+    path: '/staff/{id}/chase-log',
+    summary: 'Reference / DBS chase log (requested → chased → received)',
+    response: list(ChaseLogDto),
+  },
+  staffChaseLogAdd: {
+    method: 'post',
+    path: '/staff/{id}/chase-log',
+    summary: 'Add a chase-log entry for onboarding (ChaseLogInput)',
+    response: ChaseLogDto,
+  },
+  staffChaseLogPatch: {
+    method: 'patch',
+    path: '/staff/{id}/chase-log/{chaseId}',
+    summary: 'Update chase dates or note on an entry (ChaseLogPatch)',
+    response: ChaseLogDto,
   },
   staffRestrict: {
     method: 'post',
@@ -2198,6 +2218,7 @@ export const routes: Record<string, RouteDef> = {
     response: NotificationPreferencesDto,
   },
   ...peopleRoutes,
+  ...v36Routes,
 };
 
 export function buildOpenApi(version = '0.0.0') {

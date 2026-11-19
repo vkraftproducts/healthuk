@@ -83,7 +83,13 @@ export function toPlanDto(
 type AssetRow = Prisma.EquipmentAssetGetPayload<{ include: { regimes: true } }>;
 export function toEquipmentDto(
   a: AssetRow,
-  instances: { id: string; status: string; reasonText: string }[],
+  instances: {
+    id: string;
+    status: string;
+    reasonText: string;
+    expiryDate?: Date | null;
+    dueDate?: Date | null;
+  }[],
 ): EquipmentDto {
   return {
     id: a.id,
@@ -107,6 +113,7 @@ export function toEquipmentDto(
         requirementInstanceId: r.requirementInstanceId,
         status: i?.status ?? 'GREY',
         reasonText: i?.reasonText ?? 'Not evaluated',
+        nextDate: (i?.expiryDate ?? i?.dueDate)?.toISOString().slice(0, 10) ?? null,
       };
     }),
     version: a.version,
@@ -126,6 +133,7 @@ export function toVdiDto(
     latest.set(a.itemCode, a.newResult);
   return {
     id: v.id,
+    code: (v as { code?: string | null }).code ?? null,
     vehicleId: v.vehicleId,
     templateId: v.templateId,
     checkerUserId: v.checkerUserId,
@@ -138,6 +146,7 @@ export function toVdiDto(
       critical: i.critical,
       result: (latest.get(i.itemCode) ?? i.result) as 'PASS' | 'FAIL' | 'NA',
       reason: i.reason,
+      photoEvidenceItemId: i.photoEvidenceItemId,
       amended: amendedCodes.has(i.itemCode),
     })),
     amendments: v.amendments.map((a) => ({
@@ -169,6 +178,7 @@ export function toDefectDto(
   const repairDeadline = iso(d.repairDeadline);
   return {
     id: d.id,
+    code: (d as { code?: string | null }).code ?? null,
     vehicleId: d.vehicleId,
     assetId: d.assetId,
     subjectLabel: ctx.labels.get((d.vehicleId ?? d.assetId) as string) ?? null,
@@ -182,9 +192,16 @@ export function toDefectDto(
     status: d.status,
     classifiedBy: d.classifiedBy,
     classifiedByName: name(d.classifiedBy),
+    ownerUserId: d.ownerUserId,
+    ownerName: name(d.ownerUserId),
+    reviewBy: iso(d.reviewBy),
     repairDeadline,
     repairDue: repairDueState({ status: d.status, repairDeadline }, ctx.now).state,
     repairNotes: d.repairNotes,
+    repairPlan: d.repairPlan,
+    repairStartedAt: ts(d.repairStartedAt),
+    repairStartedByName: name(d.repairStartedBy),
+    jobSheetRef: d.jobSheetRef,
     repairedAt: ts(d.repairedAt),
     repairedBy: d.repairedBy,
     repairedByName: name(d.repairedBy),
@@ -215,7 +232,9 @@ export async function defectContext(tx: TenantTx, rows: DefectRow[]): Promise<De
       rows.flatMap((d) => [
         d.reportedBy,
         d.classifiedBy,
+        d.ownerUserId,
         d.repairedBy,
+        d.repairStartedBy,
         d.release?.releasedBy ?? null,
       ]),
     ),

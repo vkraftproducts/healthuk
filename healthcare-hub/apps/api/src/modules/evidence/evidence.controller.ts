@@ -35,7 +35,7 @@ import { SCANNER, type Scanner } from '../../storage/scanner.js';
 import { signBlobToken, verifyBlobToken } from '../../storage/tokens.js';
 import { canSeeEvidence, toEvidenceDto, versionInclude, withNames } from './evidence.mapper.js';
 
-const idPipe = new ParseUUIDPipe({ version: '7', exceptionFactory: () => notFound() });
+const idPipe = new ParseUUIDPipe({ exceptionFactory: () => notFound() });
 const UPLOAD_TTL_S = 15 * 60;
 const DOWNLOAD_TTL_S = 60;
 const d = (s: string | undefined): Date | null => (s ? new Date(`${s}T00:00:00.000Z`) : null);
@@ -78,6 +78,12 @@ export class EvidenceController {
         _max: { versionNo: true },
       });
       const versionNo = (last._max.versionNo ?? 0) + 1;
+      const roles = [...hub.roleKeys];
+      const channel = roles.includes('CANDIDATE')
+        ? 'CANDIDATE_PORTAL'
+        : roles.includes('CREW')
+          ? 'STAFF_APP'
+          : 'OFFICE';
       const v = await tx.evidenceVersion.create({
         data: {
           organisationId: orgId,
@@ -87,6 +93,7 @@ export class EvidenceController {
           declaredMime: input.mime,
           declaredSize: BigInt(input.sizeBytes),
           uploadedBy: hub.user.id,
+          channel,
           validFrom: d(input.validFrom),
           validTo: d(input.validTo),
         },
@@ -294,6 +301,24 @@ export class EvidenceController {
     });
   }
 
+  /** v36 "Recent decisions": the last documents verified or rejected, newest first. */
+  @RequirePermission('compliance.evidence.verify')
+  @Get('recent-decisions')
+  async recentDecisions(@Hub() hub: HubRequestContext): Promise<{ data: EvidenceVersionDto[] }> {
+    return this.db.withTenant(tenantOf(hub), async (tx) => {
+      const rows = await tx.evidenceVersion.findMany({
+        where: { verification: { isNot: null } },
+        include: versionInclude,
+        orderBy: { verification: { createdAt: 'desc' } },
+        take: 30,
+      });
+      const visible = rows
+        .filter((r) => canSeeEvidence(hub, r.item.sensitivity, r.uploadedBy))
+        .slice(0, 10);
+      return { data: await withNames(tx, visible.map(toEvidenceDto)) };
+    });
+  }
+
   @RequirePermission('compliance.evidence.verify')
   @Post(':versionId/verify')
   async verify(
@@ -371,6 +396,36 @@ export class EvidenceController {
         }
       }
       for (const id of instanceIds) await recomputeInstance(tx, id, now);
+      if (input.decision === 'REJECTED') {
+        const text = `Evidence rejected – upload again. ${input.reason}`;
+        const open = await tx.alert.findFirst({
+          where: {
+            organisationId: v.organisationId,
+            sourceType: 'EVIDENCE',
+            sourceId: v.id,
+            state: { not: 'RESOLVED' },
+          },
+        });
+        if (open) {
+          await tx.alert.update({
+            where: { id: open.id },
+            data: { reasonText: text, state: 'OPEN', snoozedUntil: null },
+          });
+        } else {
+          await tx.alert.create({
+            data: {
+              organisationId: v.organisationId,
+              sourceType: 'EVIDENCE',
+              sourceId: v.id,
+              severity: 'MEDIUM',
+              reasonCode: 'EVIDENCE_REJECTED',
+              reasonText: text,
+              ownerUserId: v.uploadedBy,
+              raisedAt: now,
+            },
+          });
+        }
+      }
       await audit(this.db, tx, hub, {
         action: 'evidence.verify',
         entity: 'evidence_version',

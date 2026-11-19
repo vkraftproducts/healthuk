@@ -1,5 +1,6 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { MeResponse } from '@hub/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ApiClient } from '../src/api.js';
@@ -78,11 +79,16 @@ function renderAt(
   render(<App api={api} history={createMemoryHistory({ initialEntries: ['/reports'] })} />);
 }
 beforeEach(() => sessionStorage.clear());
+/** v36: reports are cards; choosing one opens it in a dialog. */
+async function openFleet() {
+  await userEvent.click(await screen.findByRole('button', { name: new RegExp(fleet.title) }));
+  return screen.findByLabelText('Vehicles available');
+}
 
 describe('reports page [PRD 4.10]', () => {
   it('shows each figure with what is counted, out of what, the period and what is included', async () => {
     renderAt(['reports.view', 'reports.export']);
-    const card = await screen.findByRole('article', { name: 'Vehicles available' });
+    const card = await openFleet();
     expect(within(card).getByText('66.7%')).toBeInTheDocument();
     expect(within(card).getByText('2 of 3')).toBeInTheDocument();
     expect(within(card).getByText('Vehicles not retired')).toBeInTheDocument();
@@ -90,26 +96,26 @@ describe('reports page [PRD 4.10]', () => {
     expect(screen.getAllByText(/Internal measure — not a CQC rating/).length).toBeGreaterThan(0);
     expect(screen.getByRole('table', { name: 'Vehicles' })).toHaveTextContent('Blocked');
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Monthly management pack' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Monthly management pack/ })).toBeInTheDocument();
   });
 
   it('without export permission there is no export or management pack', async () => {
     renderAt(['reports.view']);
-    await screen.findByRole('article', { name: 'Vehicles available' });
+    await openFleet();
     expect(screen.queryByRole('button', { name: 'Export CSV' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Monthly management pack' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Monthly management pack/ })).toBeNull();
   });
 
   it('explains why export and the management pack are missing [task 16, finding 26]', async () => {
     renderAt(['reports.view']);
-    await screen.findByRole('article', { name: 'Vehicles available' });
+    await openFleet();
     expect(screen.getByText(/need the export permission/)).toBeInTheDocument();
   });
 
   it('runs the first report the server lists, never one the role cannot run [finding 84]', async () => {
     asked.length = 0;
     renderAt(['reports.view']);
-    await screen.findByRole('article', { name: 'Vehicles available' });
+    await openFleet();
     expect(asked.some((p) => p.startsWith('/api/v1/reports/FLEET?'))).toBe(true);
     expect(asked.some((p) => p.startsWith('/api/v1/reports/WORKFORCE_READINESS'))).toBe(false);
   });
